@@ -1,8 +1,20 @@
 # Deploy
 
-O Worker já compila (`npx wrangler deploy --dry-run` → 93 KiB / 23 KiB gzip).
-Falta só criar os recursos na conta e preencher os três `"PREENCHER"` do
-`wrangler.jsonc`.
+**Status: publicado.** https://p12-crm-auto.contato-097.workers.dev
+
+| Recurso | Valor |
+|---|---|
+| Worker | `p12-crm-auto` |
+| D1 | `crm_auto` · `5fcf4193-f931-4b1a-9b67-bb5d758a1c5c` · 13 tabelas |
+| KV | `CACHE` · `dae163f0067a4a648eb993095872c6dd` |
+| Filas | `crm-auto-events` + `crm-auto-events-dlq` |
+| Segredos | 13 cadastrados |
+
+Verificado: `/health` responde `{"ok":true,"db":"ok"}`; `/api/*` devolve 401 sem
+JWT do Access; ingestão com tenant inexistente devolve 404.
+
+O passo a passo abaixo fica como referência para recriar o ambiente do zero ou
+subir um segundo (staging).
 
 Autenticação: o wrangler já está logado por OAuth como `contato@p12digital.com.br`
 na conta `Contato P12` (`0976ee0adac0062c726747d29549308e`).
