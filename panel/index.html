@@ -4,91 +4,418 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>P12 CRM Auto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
-        color-scheme: light dark;
-        --bg: #0f1115;
-        --card: #171a21;
-        --line: #262b36;
-        --fg: #e6e9ef;
-        --dim: #98a2b3;
-        --ok: #3fb950;
-        --warn: #d29922;
+        --paper: #f2f4f6;
+        --panel: #ffffff;
+        --ink: #14181d;
+        --ink-2: #5a646e;
+        --ink-3: #98a2ac;
+        --rule: #dde3e8;
+
+        --pass: #1f7a5c;
+        --halt: #b23a2e;
+        --hold: #a9761b;
+        --idle: #c3cad1;
+
+        --ui: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+        --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
       }
+
       * { box-sizing: border-box; }
+
       body {
         margin: 0;
-        background: var(--bg);
-        color: var(--fg);
-        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--ui);
+        font-size: 15px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
       }
-      main { max-width: 900px; margin: 0 auto; padding: 48px 24px; }
-      h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; }
-      p.sub { color: var(--dim); margin: 0 0 32px; }
-      section {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 20px 22px;
-        margin-bottom: 16px;
+
+      /* ---------- estrutura ---------- */
+      .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px 80px; }
+
+      header {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        padding: 28px 0 20px;
+        border-bottom: 1px solid var(--rule);
+        margin-bottom: 28px;
+        flex-wrap: wrap;
       }
-      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 12px; }
-      ul { margin: 0; padding-left: 18px; }
-      li { margin: 4px 0; }
-      code { background: #0b0d11; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 13px; }
-      .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
-      .ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-      .warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+      header h1 { font-size: 17px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+      header .meta { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-left: auto; }
+
+      button {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--ink-2);
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        border-radius: 3px;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+      button:hover { color: var(--ink); border-color: var(--ink-3); }
+      button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+      /* ---------- trilha: a marca da tela ---------- */
+      .cliente {
+        display: block;
+        width: 100%;
+        text-align: left;
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 18px 20px 16px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        font: inherit;
+        color: inherit;
+      }
+      .cliente:hover { border-color: var(--ink-3); }
+      .cliente:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+      .cliente-topo { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+      .cliente-nome { font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }
+      .cliente-slug { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+      .cliente-sinal { margin-left: auto; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+      .sinal-ok { color: var(--pass); }
+      .sinal-erro { color: var(--halt); }
+      .sinal-silencio { color: var(--ink-3); }
+
+      /* cada traço é um evento; mais recente à direita */
+      .trilha { display: flex; gap: 2px; align-items: flex-end; height: 26px; margin-bottom: 12px; }
+      .tick { width: 5px; border-radius: 1px; background: var(--idle); }
+      .tick-ok { background: var(--pass); height: 16px; }
+      .tick-ignorado { background: var(--hold); height: 11px; }
+      .tick-erro { background: var(--halt); height: 26px; }
+      .tick-recebido { background: var(--idle); height: 8px; }
+      .trilha-vazia { font-family: var(--mono); font-size: 12px; color: var(--ink-3); align-self: center; }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .tick { animation: surgir .18s ease-out backwards; }
+        @keyframes surgir { from { transform: scaleY(.2); opacity: 0; } }
+      }
+
+      .cliente-stats { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+      .cliente-stats b { font-weight: 500; color: var(--ink); }
+      .cliente-erro { color: var(--halt); }
+
+      /* ---------- detalhe ---------- */
+      .voltar { margin-bottom: 20px; }
+
+      section { margin-bottom: 32px; }
+      section > h2 {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--ink-3);
+        margin: 0 0 12px;
+      }
+
+      .checagem {
+        display: flex;
+        gap: 12px;
+        padding: 9px 14px;
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        border-top: none;
+        font-size: 14px;
+      }
+      .checagem:first-of-type { border-top: 1px solid var(--rule); border-radius: 4px 4px 0 0; }
+      .checagem:last-of-type { border-radius: 0 0 4px 4px; }
+      .checagem-marca { font-family: var(--mono); font-size: 11px; width: 52px; flex: none; padding-top: 2px; text-transform: uppercase; letter-spacing: .06em; }
+      .marca-ok { color: var(--pass); }
+      .marca-erro { color: var(--halt); }
+      .marca-aviso { color: var(--hold); }
+      .marca-na { color: var(--ink-3); }
+      .checagem-titulo { font-weight: 500; flex: none; width: 200px; }
+      .checagem-detalhe { font-family: var(--mono); font-size: 12px; color: var(--ink-2); word-break: break-word; }
+
+      table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; }
+      th {
+        font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .08em; color: var(--ink-3); text-align: left;
+        padding: 9px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap;
+      }
+      td { padding: 9px 12px; border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 12px; vertical-align: top; }
+      tr:last-child td { border-bottom: none; }
+      tr.clicavel { cursor: pointer; }
+      tr.clicavel:hover td { background: var(--paper); }
+      .st-ok { color: var(--pass); }
+      .st-erro { color: var(--halt); }
+      .st-ignorado { color: var(--hold); }
+      .st-recebido { color: var(--ink-3); }
+      .motivo { color: var(--ink-2); }
+
+      pre {
+        font-family: var(--mono); font-size: 12px; line-height: 1.55;
+        background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
+        padding: 14px; overflow-x: auto; margin: 0; max-height: 460px;
+      }
+
+      .aviso {
+        font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+        background: var(--panel); border: 1px solid var(--rule); border-left: 2px solid var(--hold);
+        border-radius: 3px; padding: 10px 14px; margin-bottom: 16px;
+      }
+
+      .vazio {
+        background: var(--panel); border: 1px dashed var(--rule); border-radius: 4px;
+        padding: 40px 24px; text-align: center; color: var(--ink-2);
+      }
+      .vazio p { margin: 0 0 6px; }
+      .vazio .mono { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+
+      .linha-acoes { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+      .carregando { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+
+      @media (max-width: 700px) {
+        .checagem { flex-wrap: wrap; }
+        .checagem-titulo { width: auto; }
+        .esconder-mobile { display: none; }
+      }
     </style>
   </head>
+
   <body>
-    <main>
-      <h1>P12 CRM Auto</h1>
-      <p class="sub">
-        Motor multi-tenant de rastreio, funil e conversão.
-        <span id="status" class="pill">verificando…</span>
-      </p>
-
-      <section>
-        <h2>Estado</h2>
-        <ul>
-          <li><span class="pill ok">pronto</span> Rotas de ingestão, verificação HMAC e fila</li>
-          <li><span class="pill ok">pronto</span> Motor de domínio — 118 testes</li>
-          <li><span class="pill warn">falta</span> Pipelines (Fase 3) — eventos são registrados e marcados como ignorados</li>
-          <li><span class="pill warn">falta</span> Telas do painel (Fase 3)</li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>Endpoints de ingestão</h2>
-        <ul>
-          <li><code>POST /ingest/:slug/click</code> — GTM, autenticado por <code>ingest_key</code></li>
-          <li><code>POST /ingest/:slug/chatwoot</code> — webhook assinado (HMAC SHA-256)</li>
-          <li><code>POST /ingest/:slug/kanban</code> — regras de automação do CRM</li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>API do painel</h2>
-        <p style="margin:0;color:var(--dim)">
-          Atrás do Cloudflare Access. <code>/api/me</code> · <code>/api/tenants</code> · <code>/api/events</code>
-        </p>
-      </section>
-    </main>
+    <div class="wrap">
+      <header>
+        <h1>P12 CRM Auto</h1>
+        <button id="btn-atualizar">Atualizar</button>
+        <span class="meta" id="rodape"></span>
+      </header>
+      <main id="tela"><p class="carregando">Carregando…</p></main>
+    </div>
 
     <script>
-      fetch('/health')
-        .then((r) => r.json())
-        .then((d) => {
-          const el = document.getElementById('status');
-          el.textContent = d.ok ? 'banco ok · ' + d.env : 'banco: ' + d.db;
-          el.className = 'pill ' + (d.ok ? 'ok' : 'warn');
-        })
-        .catch(() => {
-          const el = document.getElementById('status');
-          el.textContent = 'health check falhou';
-          el.className = 'pill warn';
-        });
+      const tela = document.getElementById('tela');
+      const rodape = document.getElementById('rodape');
+
+      const esc = (s) =>
+        String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+      async function api(caminho) {
+        const r = await fetch('/api' + caminho);
+        if (r.status === 401) throw new Error('sem-acesso');
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
+        return r.json();
+      }
+
+      function haQuanto(iso) {
+        if (!iso) return 'nunca';
+        const seg = (Date.now() - new Date(iso.replace(' ', 'T') + 'Z').getTime()) / 1000;
+        if (seg < 90) return 'há instantes';
+        if (seg < 5400) return 'há ' + Math.round(seg / 60) + ' min';
+        if (seg < 172800) return 'há ' + Math.round(seg / 3600) + ' h';
+        return 'há ' + Math.round(seg / 86400) + ' dias';
+      }
+
+      const hora = (iso) =>
+        !iso ? '' : new Date(iso.replace(' ', 'T') + 'Z').toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' });
+
+      // ---------- lista de clientes ----------
+      async function verOverview() {
+        tela.innerHTML = '<p class="carregando">Carregando clientes…</p>';
+        const clientes = await api('/overview');
+
+        if (!clientes.length) {
+          tela.innerHTML = `
+            <div class="vazio">
+              <p>Nenhum cliente cadastrado ainda.</p>
+              <p class="mono">Cadastre o primeiro para começar a receber webhooks.</p>
+            </div>`;
+          rodape.textContent = 'nenhum cliente';
+          return;
+        }
+
+        // busca a trilha de cada cliente em paralelo
+        const trilhas = await Promise.all(
+          clientes.map((c) => api('/tenants/' + c.tenant_id + '/events?limit=40').catch(() => [])),
+        );
+
+        tela.innerHTML = clientes
+          .map((c, i) => {
+            // eventos vêm do mais novo para o mais velho; a trilha lê ao contrário
+            const ticks = trilhas[i]
+              .slice()
+              .reverse()
+              .map(
+                (e, j) =>
+                  `<span class="tick tick-${esc(e.status)}" style="animation-delay:${j * 8}ms" title="${esc(
+                    e.event_type,
+                  )} · ${esc(e.status)}${e.motivo ? ' · ' + esc(e.motivo) : ''}"></span>`,
+              )
+              .join('');
+
+            const rotulo = { ok: 'operando', erro: 'com erro', silencio: 'sem eventos' }[c.sinal];
+
+            return `
+            <button class="cliente" data-id="${c.tenant_id}">
+              <div class="cliente-topo">
+                <span class="cliente-nome">${esc(c.nome)}</span>
+                <span class="cliente-slug">${esc(c.slug)}</span>
+                <span class="cliente-sinal sinal-${c.sinal}">${rotulo}</span>
+              </div>
+              <div class="trilha">${ticks || '<span class="trilha-vazia">sem eventos registrados</span>'}</div>
+              <div class="cliente-stats">
+                <b>${c.recebidos_24h}</b> em 24h · <b>${c.erros_24h}</b> ${
+                  c.erros_24h === 1 ? 'erro' : 'erros'
+                } · <b>${c.leads}</b> leads · <b>${c.conversoes_enviadas}</b> conversões
+                · último evento ${haQuanto(c.ultimo_evento_em)}
+                ${c.ultimo_erro_motivo ? `<br><span class="cliente-erro">último erro: ${esc(c.ultimo_erro_motivo)}</span>` : ''}
+              </div>
+            </button>`;
+          })
+          .join('');
+
+        tela.querySelectorAll('.cliente').forEach((el) =>
+          el.addEventListener('click', () => verCliente(el.dataset.id)),
+        );
+        rodape.textContent = clientes.length + ' clientes · ' + new Date().toLocaleTimeString('pt-BR');
+      }
+
+      // ---------- detalhe de um cliente ----------
+      async function verCliente(id) {
+        tela.innerHTML = '<p class="carregando">Carregando…</p>';
+        const [cliente] = (await api('/overview')).filter((c) => String(c.tenant_id) === String(id));
+        const eventos = await api('/tenants/' + id + '/events?limit=60');
+
+        tela.innerHTML = `
+          <div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>
+          <h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.02em">
+            ${esc(cliente ? cliente.nome : 'Cliente ' + id)}
+          </h2>
+          <p class="cliente-slug" style="margin:0 0 28px">${esc(cliente ? cliente.slug : '')}</p>
+
+          <section>
+            <h2>Integrações</h2>
+            <div class="linha-acoes">
+              <button id="btn-checar">Checar agora</button>
+              <span class="carregando" id="checagem-estado">consulta Chatwoot, Google Ads, etiquetas e WhatsApp ao vivo</span>
+            </div>
+            <div id="checagens"></div>
+          </section>
+
+          <section>
+            <h2>Últimos webhooks recebidos</h2>
+            ${
+              eventos.length
+                ? `<table>
+                    <thead><tr>
+                      <th>Quando</th><th>Origem</th><th>Evento</th><th>Status</th>
+                      <th class="esconder-mobile">Motivo</th><th>Assin.</th>
+                    </tr></thead>
+                    <tbody>${eventos
+                      .map(
+                        (e) => `
+                      <tr class="clicavel" data-ev="${e.id}">
+                        <td title="${esc(hora(e.received_at))}">${haQuanto(e.received_at)}</td>
+                        <td>${esc(e.source)}</td>
+                        <td>${esc(e.event_type)}</td>
+                        <td class="st-${esc(e.status)}">${esc(e.status)}</td>
+                        <td class="motivo esconder-mobile">${esc(e.motivo || '')}</td>
+                        <td>${e.signature_ok === null ? '—' : e.signature_ok ? 'ok' : 'falhou'}</td>
+                      </tr>`,
+                      )
+                      .join('')}</tbody>
+                  </table>
+                  <p class="carregando" style="margin-top:10px">Clique numa linha para ver o corpo do webhook.</p>`
+                : `<div class="vazio">
+                     <p>Nenhum webhook recebido deste cliente.</p>
+                     <p class="mono">Confira em Integrações se o webhook está registrado apontando para este Worker.</p>
+                   </div>`
+            }
+          </section>
+
+          <section id="secao-payload" hidden>
+            <h2>Corpo do webhook</h2>
+            <div class="aviso" id="payload-aviso"></div>
+            <div class="linha-acoes"><button id="btn-revelar">Revelar dados originais</button></div>
+            <pre id="payload"></pre>
+          </section>`;
+
+        document.getElementById('btn-voltar').addEventListener('click', verOverview);
+        document.getElementById('btn-checar').addEventListener('click', () => checar(id));
+        tela.querySelectorAll('tr.clicavel').forEach((tr) =>
+          tr.addEventListener('click', () => verPayload(id, tr.dataset.ev, false)),
+        );
+        rodape.textContent = eventos.length + ' eventos · ' + new Date().toLocaleTimeString('pt-BR');
+      }
+
+      async function checar(id) {
+        const estado = document.getElementById('checagem-estado');
+        const alvo = document.getElementById('checagens');
+        estado.textContent = 'consultando…';
+        try {
+          const r = await api('/tenants/' + id + '/health');
+          alvo.innerHTML = r.checagens
+            .map(
+              (c) => `
+              <div class="checagem">
+                <span class="checagem-marca marca-${c.estado}">${c.estado === 'na' ? '—' : c.estado}</span>
+                <span class="checagem-titulo">${esc(c.titulo)}</span>
+                <span class="checagem-detalhe">${esc(c.detalhe)}</span>
+              </div>`,
+            )
+            .join('');
+          estado.textContent = `${r.resumo.erro} com erro · ${r.resumo.aviso} com aviso · ${r.resumo.ok} ok`;
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
+      }
+
+      async function verPayload(tenantId, eventId, revelar) {
+        const secao = document.getElementById('secao-payload');
+        const pre = document.getElementById('payload');
+        const aviso = document.getElementById('payload-aviso');
+        const botao = document.getElementById('btn-revelar');
+
+        secao.hidden = false;
+        pre.textContent = 'carregando…';
+        secao.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        const r = await api(
+          '/tenants/' + tenantId + '/events/' + eventId + '/payload' + (revelar ? '?revelar=1' : ''),
+        );
+
+        pre.textContent = r.payload || '(vazio)';
+        if (r.expirado) {
+          aviso.textContent = r.motivo;
+          botao.hidden = true;
+        } else {
+          aviso.textContent = r.mascarado
+            ? 'Telefone, e-mail e texto das mensagens estão mascarados.'
+            : 'Mostrando os dados originais do lead.';
+          botao.hidden = false;
+          botao.textContent = r.mascarado ? 'Revelar dados originais' : 'Voltar a mascarar';
+          botao.onclick = () => verPayload(tenantId, eventId, !!r.mascarado);
+        }
+      }
+
+      document.getElementById('btn-atualizar').addEventListener('click', verOverview);
+
+      verOverview().catch((e) => {
+        tela.innerHTML =
+          e.message === 'sem-acesso'
+            ? `<div class="vazio">
+                 <p>Este painel exige login pelo Cloudflare Access.</p>
+                 <p class="mono">Crie uma aplicação do Access para este domínio e cadastre o <code>aud</code> dela em CF_ACCESS_AUD.</p>
+               </div>`
+            : `<div class="vazio"><p>Não foi possível carregar.</p><p class="mono">${esc(e.message)}</p></div>`;
+      });
     </script>
   </body>
 </html>

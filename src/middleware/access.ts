@@ -82,8 +82,11 @@ async function verificarJwt(token: string, env: Env): Promise<AccessIdentity | n
 
   // `aud` amarra o token A ESTE aplicativo do Access. Sem conferir, um JWT
   // valido de qualquer outro app da mesma equipe abriria o painel.
+  // Aceita lista separada por virgula: cada hostname do painel e' um app do
+  // Access com seu proprio aud (crm. e dash. tem auds diferentes).
+  const aceitos = env.CF_ACCESS_AUD.split(',').map((a) => a.trim()).filter(Boolean);
   const aud = Array.isArray(corpo.aud) ? corpo.aud : [corpo.aud];
-  if (!aud.includes(env.CF_ACCESS_AUD)) return null;
+  if (!aud.some((a) => aceitos.includes(a))) return null;
 
   if (corpo.exp * 1000 < Date.now()) return null;
 
@@ -94,6 +97,16 @@ export const requireAccess: MiddlewareHandler<{
   Bindings: Env;
   Variables: { identity: AccessIdentity };
 }> = async (c, next) => {
+  // Escotilha para deixar o painel aberto. Ligar isto expoe, sem autenticacao
+  // nenhuma: dados pessoais dos leads de TODOS os clientes, os `ingest_key` e
+  // os segredos HMAC dos webhooks — ou seja, permite forjar eventos nas contas
+  // dos clientes. So use em rede confiavel e sabendo disso.
+  if (c.env.PANEL_PUBLIC === 'true') {
+    c.set('identity', { email: 'painel-aberto', sub: 'painel-aberto' });
+    await next();
+    return;
+  }
+
   const token =
     c.req.header('Cf-Access-Jwt-Assertion') ?? c.req.header('cf-access-jwt-assertion');
 

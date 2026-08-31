@@ -24,9 +24,14 @@ export interface Env {
   EVOLUTION_ALERT_INSTANCE: string;
   EVOLUTION_ALERT_GROUP_ID: string;
 
-  // Cloudflare Access — auth do painel
+  // Cloudflare Access — auth do painel.
+  // CF_ACCESS_AUD aceita lista separada por virgula: um app do Access por
+  // hostname, cada um com seu proprio aud.
   CF_ACCESS_TEAM_DOMAIN: string;
   CF_ACCESS_AUD: string;
+
+  /** "true" desliga a verificacao do Access e deixa o painel ABERTO. */
+  PANEL_PUBLIC?: string;
 }
 
 /** Mensagem enfileirada pelas rotas de ingestao e consumida pelos pipelines. */

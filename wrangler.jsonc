@@ -50,6 +50,13 @@
     ]
   },
 
+  // Limpeza diaria: apaga o CORPO dos eventos com mais de 30 dias, preservando
+  // a linha e o status. O payload cru e' necessario para diagnostico, mas nao
+  // precisa virar deposito permanente de dado pessoal dos leads.
+  "triggers": {
+    "crons": ["17 4 * * *"]
+  },
+
   "assets": {
     "directory": "./panel",
     "binding": "ASSETS",
