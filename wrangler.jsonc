@@ -1,0 +1,60 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "p12-crm-auto",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-30",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": { "enabled": true },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "crm_auto",
+      // preencher com o id real apos `wrangler d1 create crm_auto`
+      "database_id": "PREENCHER",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "kv_namespaces": [
+    {
+      // cache de access_token do Google (TTL ~55min) e de listas de etapas/etiquetas
+      "binding": "CACHE",
+      "id": "PREENCHER"
+    }
+  ],
+
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "crm-auto-events" }],
+    "consumers": [
+      {
+        "queue": "crm-auto-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        // substitui o `Wait 25s` do n8n: o card do board Organico pode ainda nao
+        // existir na primeira tentativa. Backoff exponencial ate 5 tentativas.
+        "max_retries": 5,
+        "retry_delay": 20,
+        "dead_letter_queue": "crm-auto-events-dlq"
+      }
+    ]
+  },
+
+  "assets": {
+    "directory": "./panel",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "vars": {
+    "ENVIRONMENT": "development"
+  }
+
+  // Segredos via `wrangler secret put` (nunca aqui):
+  //   CHATWOOT_BASE_URL, CHATWOOT_API_TOKEN
+  //   GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, GOOGLE_ADS_REFRESH_TOKEN,
+  //   GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_MCC_ID
+  //   EVOLUTION_SERVER_URL, EVOLUTION_API_KEY, EVOLUTION_ALERT_INSTANCE, EVOLUTION_ALERT_GROUP_ID
+  //   CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD
+}

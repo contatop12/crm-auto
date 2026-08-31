@@ -1,0 +1,27 @@
+{
+  "name": "p12-crm-auto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Motor multi-tenant de rastreio, funil e conversao que substitui os workflows n8n da P12",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply crm_auto --local",
+    "db:migrate:remote": "wrangler d1 migrations apply crm_auto --remote",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.36",
+    "@cloudflare/workers-types": "^4.20241224.0",
+    "typescript": "^5.7.2",
+    "vitest": "~2.1.8",
+    "wrangler": "^3.99.0"
+  }
+}

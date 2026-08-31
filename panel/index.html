@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>P12 CRM Auto</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f1115;
+        --card: #171a21;
+        --line: #262b36;
+        --fg: #e6e9ef;
+        --dim: #98a2b3;
+        --ok: #3fb950;
+        --warn: #d29922;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+      }
+      main { max-width: 900px; margin: 0 auto; padding: 48px 24px; }
+      h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; }
+      p.sub { color: var(--dim); margin: 0 0 32px; }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 20px 22px;
+        margin-bottom: 16px;
+      }
+      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 12px; }
+      ul { margin: 0; padding-left: 18px; }
+      li { margin: 4px 0; }
+      code { background: #0b0d11; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+      .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+      .ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+      .warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>P12 CRM Auto</h1>
+      <p class="sub">
+        Motor multi-tenant de rastreio, funil e conversão.
+        <span id="status" class="pill">verificando…</span>
+      </p>
+
+      <section>
+        <h2>Estado</h2>
+        <ul>
+          <li><span class="pill ok">pronto</span> Rotas de ingestão, verificação HMAC e fila</li>
+          <li><span class="pill ok">pronto</span> Motor de domínio — 118 testes</li>
+          <li><span class="pill warn">falta</span> Pipelines (Fase 3) — eventos são registrados e marcados como ignorados</li>
+          <li><span class="pill warn">falta</span> Telas do painel (Fase 3)</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Endpoints de ingestão</h2>
+        <ul>
+          <li><code>POST /ingest/:slug/click</code> — GTM, autenticado por <code>ingest_key</code></li>
+          <li><code>POST /ingest/:slug/chatwoot</code> — webhook assinado (HMAC SHA-256)</li>
+          <li><code>POST /ingest/:slug/kanban</code> — regras de automação do CRM</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>API do painel</h2>
+        <p style="margin:0;color:var(--dim)">
+          Atrás do Cloudflare Access. <code>/api/me</code> · <code>/api/tenants</code> · <code>/api/events</code>
+        </p>
+      </section>
+    </main>
+
+    <script>
+      fetch('/health')
+        .then((r) => r.json())
+        .then((d) => {
+          const el = document.getElementById('status');
+          el.textContent = d.ok ? 'banco ok · ' + d.env : 'banco: ' + d.db;
+          el.className = 'pill ' + (d.ok ? 'ok' : 'warn');
+        })
+        .catch(() => {
+          const el = document.getElementById('status');
+          el.textContent = 'health check falhou';
+          el.className = 'pill warn';
+        });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+# Segredos — NUNCA commitar
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# Dependências
+node_modules/
+panel/node_modules/
+
+# Build
+dist/
+panel/.vite/
+.wrangler/
+*.tsbuildinfo
+
+# Testes
+coverage/
+
+# Editor / SO
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
