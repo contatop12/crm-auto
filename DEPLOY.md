@@ -7,11 +7,22 @@ Falta só criar os recursos na conta e preencher os três `"PREENCHER"` do
 Autenticação: o wrangler já está logado por OAuth como `contato@p12digital.com.br`
 na conta `Contato P12` (`0976ee0adac0062c726747d29549308e`).
 
-> **O `CLOUDFLARE_API_TOKEN` do `.env` está inválido** — `/user/tokens/verify`
-> devolve 401. Não exporte essa variável no shell: se ela estiver setada, o
-> wrangler a prefere ao OAuth e o deploy falha. Gere um token novo em
-> *My Profile → API Tokens* (template "Edit Cloudflare Workers") ou apague a
-> linha do `.env` e siga no OAuth.
+> ### O `CLOUDFLARE_API_TOKEN` do `.env` estava inválido
+>
+> `/user/tokens/verify` devolve 401. **O wrangler lê o `.env` do próprio
+> projeto** e prefere esse token ao login OAuth — limpar a variável no shell não
+> resolve. Cada chamada virava uma falha de autenticação, até a conta entrar em
+> bloqueio temporário (`too many authentication failures`, código 10502).
+>
+> A linha já está comentada no `.env` (backup em `.env.bak-antes-do-comentario`).
+> Para voltar a usar token: gere um novo em *My Profile → API Tokens*
+> (template "Edit Cloudflare Workers") e descomente. Sem token, o OAuth assume.
+>
+> ### Use wrangler 4
+>
+> O wrangler 3.114 mascara erros da API: um **rate limit** (código 10429) na
+> criação de fila aparece como `"The specified queue settings are invalid"`,
+> o que manda você caçar o problema no lugar errado. A v4 mostra o erro real.
 
 ---
 
@@ -26,15 +37,19 @@ npx wrangler queues create crm-auto-events-dlq
 
 Cada comando devolve um id. Copie para o `wrangler.jsonc`:
 
-| Comando | Onde colar |
-|---|---|
-| `d1 create` | `d1_databases[0].database_id` |
-| `kv namespace create` | `kv_namespaces[0].id` |
-| filas | nada a colar — são referenciadas por nome |
+| Comando | Onde colar | Valor atual |
+|---|---|---|
+| `d1 create` | `d1_databases[0].database_id` | `5fcf4193-f931-4b1a-9b67-bb5d758a1c5c` ✅ criado |
+| `kv namespace create` | `kv_namespaces[0].id` | `dae163f0067a4a648eb993095872c6dd` ✅ criado |
+| filas | nada a colar — referenciadas por nome | ⏳ pendente (rate limit) |
 
-> Filas exigem plano **Workers Paid**. Sem ele, `queues create` falha. Nesse
-> caso, remova o bloco `queues` do `wrangler.jsonc` e chame `consumir()` direto
-> da rota de ingestão com `ctx.waitUntil()` — funciona, mas perde retry e DLQ.
+Não dispare os `create` em sequência rápida: a API de filas limita por taxa e
+o bloqueio dura minutos.
+
+> Queues já está habilitado nesta conta (existe `publisher-article-jobs`), então
+> não é questão de plano. Se ainda assim falhar, remova o bloco `queues` do
+> `wrangler.jsonc` e chame `consumir()` direto da rota de ingestão com
+> `ctx.waitUntil()` — funciona, mas perde retry e DLQ.
 
 ## 2. Aplicar as migrations
 

@@ -12,7 +12,7 @@
       "binding": "DB",
       "database_name": "crm_auto",
       // preencher com o id real apos `wrangler d1 create crm_auto`
-      "database_id": "PREENCHER",
+      "database_id": "5fcf4193-f931-4b1a-9b67-bb5d758a1c5c",
       "migrations_dir": "migrations"
     }
   ],
@@ -21,7 +21,7 @@
     {
       // cache de access_token do Google (TTL ~55min) e de listas de etapas/etiquetas
       "binding": "CACHE",
-      "id": "PREENCHER"
+      "id": "dae163f0067a4a648eb993095872c6dd"
     }
   ],
 
