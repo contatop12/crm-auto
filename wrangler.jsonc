@@ -1,11 +1,20 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "p12-crm-auto",
+  // Precisa bater com o nome do projeto no Workers Builds. Divergir faz a CI
+  // subir um SEGUNDO Worker, e ai o deploy quebra em "queue already has a
+  // consumer" — uma fila so aceita um consumidor.
+  "name": "crm-auto",
   "main": "src/index.ts",
   "compatibility_date": "2024-12-30",
   "compatibility_flags": ["nodejs_compat"],
 
   "observability": { "enabled": true },
+
+  // Explicito de proposito: as rotas de ingestao precisam de URL publica (o GTM
+  // e o Chatwoot fazem POST nelas). Preview URLs ficam desligadas — seriam mais
+  // superficie publica sem ganho.
+  "workers_dev": true,
+  "preview_urls": false,
 
   "d1_databases": [
     {

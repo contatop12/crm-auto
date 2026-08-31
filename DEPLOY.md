@@ -1,10 +1,10 @@
 # Deploy
 
-**Status: publicado.** https://p12-crm-auto.contato-097.workers.dev
+**Status: publicado.** https://crm-auto.contato-097.workers.dev
 
 | Recurso | Valor |
 |---|---|
-| Worker | `p12-crm-auto` |
+| Worker | `crm-auto` — deployado pelo Workers Builds a cada push em `main` |
 | D1 | `crm_auto` · `5fcf4193-f931-4b1a-9b67-bb5d758a1c5c` · 13 tabelas |
 | KV | `CACHE` · `dae163f0067a4a648eb993095872c6dd` |
 | Filas | `crm-auto-events` + `crm-auto-events-dlq` |
@@ -127,6 +127,26 @@ gerado bate com o `CF_ACCESS_AUD` cadastrado como segredo. Se não bater, o
 middleware recusa todo mundo com 401 — é o comportamento correto.
 
 ---
+
+## O nome do Worker precisa bater com o do Workers Builds
+
+`wrangler.jsonc` usa `"name": "crm-auto"`, igual ao nome do projeto no Workers
+Builds. Se divergirem, a CI avisa (`Failed to match Worker name`), sobrescreve
+com o nome dela e sobe um **segundo** Worker. Os dois viram produtores da mesma
+fila, e o `deploy` quebra em:
+
+```
+Queue 'crm-auto-events' already has a consumer. [code: 11004]
+```
+
+porque uma fila só aceita um consumidor. Para limpar, na ordem:
+
+```bash
+npx wrangler queues consumer worker remove crm-auto-events <worker-errado>
+npx wrangler delete --name <worker-errado>
+```
+
+(O `delete` recusa enquanto o Worker for consumidor de alguma fila.)
 
 ## Ainda NÃO fazer
 
