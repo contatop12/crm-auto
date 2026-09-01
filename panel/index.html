@@ -310,6 +310,15 @@
           </section>
 
           <section>
+            <h2>Webhooks no Chatwoot</h2>
+            <div class="linha-acoes">
+              <button id="btn-webhook">Registrar webhook do painel</button>
+              <span class="carregando" id="webhook-estado"></span>
+            </div>
+            <div id="webhooks"></div>
+          </section>
+
+          <section>
             <h2>Últimos webhooks recebidos</h2>
             ${
               eventos.length
@@ -349,10 +358,97 @@
 
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
+        carregarWebhooks(id, cliente ? cliente.slug : '');
         tela.querySelectorAll('tr.clicavel').forEach((tr) =>
           tr.addEventListener('click', () => verPayload(id, tr.dataset.ev, false)),
         );
         rodape.textContent = eventos.length + ' eventos · ' + new Date().toLocaleTimeString('pt-BR');
+      }
+
+      // O Chatwoot posta sem seguir redirect. Se o Access ainda cobre /ingest,
+      // registrar o webhook so faria ele bater numa pagina de login e perder o
+      // evento — por isso a sondagem antes.
+      async function ingestAlcancavel(slug) {
+        try {
+          const r = await fetch('/ingest/' + slug + '/chatwoot', { method: 'POST', body: '{}' });
+          if (r.redirected || /cloudflareaccess\.com/.test(r.url)) return false;
+          return true; // 401 (sem assinatura) já prova que a rota chegou no Worker
+        } catch {
+          return false;
+        }
+      }
+
+      async function carregarWebhooks(id, slug) {
+        const alvo = document.getElementById('webhooks');
+        const estado = document.getElementById('webhook-estado');
+        const botao = document.getElementById('btn-webhook');
+        alvo.innerHTML = '<p class="carregando">carregando…</p>';
+
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/webhooks');
+        } catch (e) {
+          alvo.innerHTML = '';
+          estado.textContent = 'falhou: ' + e.message;
+          return;
+        }
+
+        const nosso = r.webhooks.find((w) => w.do_painel);
+
+        alvo.innerHTML = r.webhooks.length
+          ? `<table><thead><tr><th>Destino</th><th>Nome</th><th>Inscrições</th><th></th></tr></thead><tbody>${r.webhooks
+              .map(
+                (w) => `<tr>
+                  <td>${esc(w.destino)}</td>
+                  <td class="motivo">${esc(w.nome)}</td>
+                  <td class="motivo">${esc(w.subscriptions.join(', '))}</td>
+                  <td class="${w.do_painel ? 'st-ok' : 'st-recebido'}">${w.do_painel ? 'painel' : 'n8n'}</td>
+                </tr>`,
+              )
+              .join('')}</tbody></table>`
+          : '<div class="vazio"><p>Nenhum webhook registrado nesta conta.</p></div>';
+
+        if (nosso) {
+          botao.textContent = 'Remover webhook do painel';
+          estado.textContent = 'o painel recebe eventos desta conta';
+          botao.onclick = () => mudarWebhook(id, slug, 'DELETE');
+        } else {
+          botao.textContent = 'Registrar webhook do painel';
+          estado.textContent = 'adiciona sem mexer nos do n8n';
+          botao.onclick = () => mudarWebhook(id, slug, 'POST');
+        }
+      }
+
+      async function mudarWebhook(id, slug, metodo) {
+        const estado = document.getElementById('webhook-estado');
+        const botao = document.getElementById('btn-webhook');
+        botao.disabled = true;
+
+        if (metodo === 'POST') {
+          estado.textContent = 'conferindo se a rota de ingestão está pública…';
+          if (!(await ingestAlcancavel(slug))) {
+            estado.textContent =
+              'a rota /ingest está atrás do Access — o Chatwoot receberia a tela de login. Crie um app do Access com política Bypass para o path ingest.';
+            botao.disabled = false;
+            return;
+          }
+        }
+
+        estado.textContent = metodo === 'POST' ? 'registrando…' : 'removendo…';
+        try {
+          const r = await fetch('/api/tenants/' + id + '/webhook', { method: metodo });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+          await carregarWebhooks(id, slug);
+          if (metodo === 'POST') {
+            document.getElementById('webhook-estado').textContent =
+              'registrado · assinatura ' + j.assinatura;
+          }
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        } finally {
+          botao.disabled = false;
+        }
       }
 
       async function checar(id) {

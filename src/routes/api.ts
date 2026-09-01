@@ -10,6 +10,7 @@ import {
 } from '../db/observability';
 import { maskPayload } from '../domain/mask';
 import { checarTenant, type TenantParaChecagem } from '../health/checks';
+import { ChatwootClient } from '../clients/chatwoot';
 
 /**
  * API do painel. Tudo aqui passa pelo `requireAccess` — o Access na frente do
@@ -148,4 +149,100 @@ api.get('/tenants/:id/events/:eventId/payload', async (c) => {
     received_at: linha.received_at,
     payload: revelar ? linha.payload : maskPayload(linha.payload),
   });
+});
+
+/**
+ * Webhooks do Chatwoot desta conta.
+ *
+ * Mostra TODOS — os do n8n e o do painel. Os do n8n nao sao tocados: rodar os
+ * dois em paralelo e' justamente o que permite o painel coletar sem tirar os
+ * leads do fluxo que hoje funciona.
+ */
+api.get('/tenants/:id/webhooks', async (c) => {
+  const t = await tenantParaChecagem(c.env.DB, Number(c.req.param('id')));
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+  if (!t.cwAccountId) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  const nosso = `/ingest/${t.slug}/chatwoot`;
+  const whs = await ChatwootClient.fromEnv(c.env).webhooks(t.cwAccountId);
+
+  return c.json({
+    url_do_painel: new URL(c.req.url).origin + nosso,
+    webhooks: whs.map((w) => ({
+      id: w.id,
+      nome: w.name || '',
+      url: w.url,
+      destino: (() => { try { return new URL(w.url).host; } catch { return w.url; } })(),
+      subscriptions: w.subscriptions,
+      do_painel: w.url.includes(nosso),
+    })),
+  });
+});
+
+/** As tres inscricoes que o motor consome. */
+const INSCRICOES = ['conversation_created', 'message_incoming', 'message_outgoing'];
+
+/**
+ * Registra o webhook do painel, ADICIONANDO aos que ja existem.
+ * Guarda o `secret` devolvido pelo Chatwoot — e' com ele que a rota de
+ * ingestao confere a assinatura HMAC de cada evento.
+ */
+api.post('/tenants/:id/webhook', async (c) => {
+  const t = await tenantParaChecagem(c.env.DB, Number(c.req.param('id')));
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+  if (!t.cwAccountId) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  const cw = ChatwootClient.fromEnv(c.env);
+  const caminho = `/ingest/${t.slug}/chatwoot`;
+  const url = new URL(c.req.url).origin + caminho;
+
+  const jaExiste = (await cw.webhooks(t.cwAccountId)).find((w) => w.url === url);
+  if (jaExiste) {
+    return c.json({ error: 'o webhook do painel ja esta registrado', webhook_id: jaExiste.id }, 409);
+  }
+
+  const w = await cw.criarWebhook(t.cwAccountId, url, INSCRICOES);
+
+  // Sem o secret guardado, a rota de ingestao nao consegue validar a assinatura
+  // e recusaria todo evento com 401.
+  if (w.secret) {
+    await c.env.DB.prepare('UPDATE tenant_config SET cw_webhook_secret = ? WHERE tenant_id = ?')
+      .bind(w.secret, t.id)
+      .run();
+  }
+
+  console.log(
+    JSON.stringify({ acao: 'registrar_webhook', por: c.get('identity').email, tenant: t.slug, webhook_id: w.id }),
+  );
+
+  return c.json({
+    ok: true,
+    webhook_id: w.id,
+    url,
+    subscriptions: w.subscriptions,
+    assinatura: w.secret ? 'guardada' : 'o Chatwoot nao devolveu secret; a ingestao aceitara sem assinatura',
+  });
+});
+
+/** Remove o webhook do painel. Os do n8n ficam. */
+api.delete('/tenants/:id/webhook', async (c) => {
+  const t = await tenantParaChecagem(c.env.DB, Number(c.req.param('id')));
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+  if (!t.cwAccountId) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  const cw = ChatwootClient.fromEnv(c.env);
+  const caminho = `/ingest/${t.slug}/chatwoot`;
+  const nosso = (await cw.webhooks(t.cwAccountId)).find((w) => w.url.includes(caminho));
+  if (!nosso) return c.json({ error: 'o webhook do painel nao esta registrado' }, 404);
+
+  await cw.apagarWebhook(t.cwAccountId, nosso.id);
+  await c.env.DB.prepare('UPDATE tenant_config SET cw_webhook_secret = NULL WHERE tenant_id = ?')
+    .bind(t.id)
+    .run();
+
+  console.log(
+    JSON.stringify({ acao: 'remover_webhook', por: c.get('identity').email, tenant: t.slug, webhook_id: nosso.id }),
+  );
+
+  return c.json({ ok: true, removido: nosso.id });
 });

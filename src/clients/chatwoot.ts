@@ -114,6 +114,27 @@ export class ChatwootClient {
     return (r.payload ?? []).map((l) => l.title);
   }
 
+  /**
+   * Registra um webhook novo. NAO mexe nos que ja existem — os do n8n
+   * continuam recebendo, o que e' o que permite rodar os dois em paralelo.
+   * O `secret` e' gerado pelo Chatwoot e volta na resposta.
+   */
+  async criarWebhook(acc: number, url: string, subscriptions: string[]): Promise<CwWebhook> {
+    const r = await this.req<{ payload?: { webhook?: CwWebhook } } & Partial<CwWebhook>>(
+      'POST',
+      `/api/v1/accounts/${acc}/webhooks`,
+      { url, subscriptions },
+    );
+    // a resposta ora vem embrulhada em payload.webhook, ora solta
+    const w = r.payload?.webhook ?? (r as CwWebhook);
+    if (!w?.id) throw new Error('Chatwoot aceitou o POST mas nao devolveu o webhook');
+    return w;
+  }
+
+  async apagarWebhook(acc: number, id: number): Promise<void> {
+    await this.req('DELETE', `/api/v1/accounts/${acc}/webhooks/${id}`);
+  }
+
   /** Uma pagina de tasks. `meta.has_more` diz se falta mais. */
   async tasks(
     acc: number,
