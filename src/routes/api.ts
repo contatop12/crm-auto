@@ -266,3 +266,15 @@ api.delete('/tenants/:id/webhook', async (c) => {
 
   return c.json({ ok: true, removido: nosso.id });
 });
+
+/** Avisos de lead novo mandados ao grupo do cliente. */
+api.get('/tenants/:id/avisos', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT chave, protocolo, canal, lead_nome, telefone, status, erro, enviado_em, created_at
+     FROM group_notifications WHERE tenant_id = ?
+     ORDER BY created_at DESC LIMIT ?`,
+  )
+    .bind(Number(c.req.param('id')), Math.min(Number(c.req.query('limit') ?? 30), 200))
+    .all();
+  return c.json(results);
+});

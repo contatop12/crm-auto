@@ -319,6 +319,11 @@
           </section>
 
           <section>
+            <h2>Avisos de lead novo no grupo</h2>
+            <div id="avisos"></div>
+          </section>
+
+          <section>
             <h2>Últimos webhooks recebidos</h2>
             ${
               eventos.length
@@ -359,6 +364,7 @@
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
         carregarWebhooks(id, cliente ? cliente.slug : '');
+        carregarAvisos(id);
         tela.querySelectorAll('tr.clicavel').forEach((tr) =>
           tr.addEventListener('click', () => verPayload(id, tr.dataset.ev, false)),
         );
@@ -376,6 +382,36 @@
         } catch {
           return false;
         }
+      }
+
+      async function carregarAvisos(id) {
+        const alvo = document.getElementById('avisos');
+        let linhas;
+        try {
+          linhas = await api('/tenants/' + id + '/avisos');
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+
+        alvo.innerHTML = linhas.length
+          ? `<table><thead><tr><th>Quando</th><th>Lead</th><th>Canal</th><th>Telefone</th><th>Status</th></tr></thead><tbody>${linhas
+              .map(
+                (l) => `<tr>
+                  <td title="${esc(hora(l.created_at))}">${haQuanto(l.created_at)}</td>
+                  <td>${esc(l.lead_nome || '')}</td>
+                  <td class="motivo">${esc(l.canal || '')}</td>
+                  <td class="motivo">${esc(l.telefone || '')}</td>
+                  <td class="st-${l.status === 'enviado' ? 'ok' : l.status === 'erro' ? 'erro' : 'recebido'}">${esc(
+                    l.status,
+                  )}${l.erro ? ' · ' + esc(l.erro) : ''}</td>
+                </tr>`,
+              )
+              .join('')}</tbody></table>`
+          : `<div class="vazio">
+               <p>Nenhum aviso enviado ainda.</p>
+               <p class="mono">Dispara quando um card entra no board de Ads. Leads do Orgânico não avisam.</p>
+             </div>`;
       }
 
       async function carregarWebhooks(id, slug) {

@@ -1,0 +1,168 @@
+import type { Env } from '../env';
+import { parseKanbanTask } from '../domain/kanbanTask';
+import { montarCanal } from '../domain/canal';
+import { detectOrigin, detectPlatform } from '../domain/platform';
+import { normFone } from '../domain/phone';
+import { PulseboardClient } from '../clients/pulseboard';
+
+/**
+ * Avisa o grupo do cliente quando um lead entra no funil de Ads.
+ *
+ * Gatilho: webhook da task do Kanban. So conta o board de Ads — o Organico
+ * guarda quem ja estava em conversa e quem nao veio de anuncio, entao avisar
+ * dali encheria o grupo de ruido.
+ *
+ * A duplicata e' barrada por `group_notifications`: o webhook dispara em
+ * QUALQUER alteracao da task, e um card que sai e volta avisaria de novo.
+ */
+
+export interface Resultado {
+  status: 'ok' | 'ignorado' | 'erro';
+  motivo: string;
+}
+
+interface ConfigTenant {
+  cw_board_funil_id: number | null;
+  pulseboard_codi_id: string | null;
+}
+
+interface LinhaLead {
+  nome: string | null;
+  phone_e164: string | null;
+  page_url: string | null;
+  origem: string | null;
+  evento: string | null;
+  quiz_version: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  gclid: string | null;
+  gbraid: string | null;
+  wbraid: string | null;
+  fbc: string | null;
+}
+
+export async function avisarLeadNoGrupo(
+  env: Env,
+  tenantId: number,
+  payload: string,
+): Promise<Resultado> {
+  const cfg = await env.DB.prepare(
+    'SELECT cw_board_funil_id, pulseboard_codi_id FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(tenantId)
+    .first<ConfigTenant>();
+
+  if (!cfg) return { status: 'ignorado', motivo: 'cliente sem configuracao' };
+
+  let cru: unknown;
+  try {
+    cru = JSON.parse(payload);
+  } catch {
+    return { status: 'ignorado', motivo: 'payload do Kanban nao e json' };
+  }
+
+  const t = parseKanbanTask(cru);
+  if (!t.taskId) return { status: 'ignorado', motivo: 'payload sem task' };
+
+  if (!cfg.cw_board_funil_id) {
+    return { status: 'ignorado', motivo: 'board de Ads nao configurado para este cliente' };
+  }
+  if (t.boardId !== cfg.cw_board_funil_id) {
+    return {
+      status: 'ignorado',
+      motivo: `card no board ${t.boardId}, nao no de Ads (${cfg.cw_board_funil_id})`,
+    };
+  }
+
+  // Trava de duplicata: a UNIQUE decide, sem leitura antes da escrita.
+  const reserva = await env.DB.prepare(
+    `INSERT OR IGNORE INTO group_notifications (tenant_id, chave, task_id, protocolo)
+     VALUES (?, ?, ?, ?)`,
+  )
+    .bind(tenantId, t.chaveDedupe, t.taskId, t.protocolo || null)
+    .run();
+
+  if ((reserva.meta.changes ?? 0) === 0) {
+    // Ja existe linha. Se a tentativa anterior falhou, esta e' a retentativa da
+    // fila e deve seguir: parar aqui deixaria o grupo sem aviso para sempre.
+    // 'pendente' significa que outra invocacao esta cuidando agora.
+    const antes = await env.DB.prepare(
+      'SELECT status FROM group_notifications WHERE tenant_id = ? AND chave = ?',
+    )
+      .bind(tenantId, t.chaveDedupe)
+      .first<{ status: string }>();
+
+    if (antes?.status !== 'erro') {
+      return { status: 'ignorado', motivo: `grupo ja avisado sobre ${t.chaveDedupe}` };
+    }
+  }
+
+  // Dados do clique para montar o canal. Lead que nunca passou pela ingestao
+  // ainda e' avisado — so com menos precisao no rotulo.
+  const lead = t.protocolo
+    ? await env.DB.prepare(
+        `SELECT nome, phone_e164, page_url, origem, evento, quiz_version,
+                utm_source, utm_medium, utm_campaign, gclid, gbraid, wbraid, fbc
+         FROM leads WHERE tenant_id = ? AND protocol = ?`,
+      )
+        .bind(tenantId, t.protocolo)
+        .first<LinhaLead>()
+    : null;
+
+  const sinais = {
+    utmSource: lead?.utm_source,
+    utmMedium: lead?.utm_medium,
+    utmCampaign: lead?.utm_campaign,
+    gclid: lead?.gclid,
+    gbraid: lead?.gbraid,
+    wbraid: lead?.wbraid,
+    fbc: lead?.fbc,
+    origemClick: lead?.origem,
+    eventClick: lead?.evento,
+    quizVersion: lead?.quiz_version ?? t.quizVersion,
+  };
+
+  const canal = montarCanal({
+    origem: detectOrigin(sinais),
+    plataforma: detectPlatform(sinais),
+    quizVersion: sinais.quizVersion,
+  });
+
+  const nome = lead?.nome || t.nome || 'Lead';
+  // o Pulseboard espera so digitos, com DDI e sem '+'
+  const telefone = (normFone(lead?.phone_e164 ?? t.telefone) || '').replace('+', '');
+  const url = String(lead?.page_url ?? '').split('?')[0] ?? '';
+
+  const marcar = (status: string, erro?: string) =>
+    env.DB.prepare(
+      `UPDATE group_notifications
+       SET status = ?, erro = ?, canal = ?, lead_nome = ?, telefone = ?, enviado_em = datetime('now')
+       WHERE tenant_id = ? AND chave = ?`,
+    )
+      .bind(status, erro ?? null, canal, nome, telefone, tenantId, t.chaveDedupe)
+      .run();
+
+  if (!cfg.pulseboard_codi_id) {
+    await marcar('erro', 'cliente sem codi_id do Pulseboard');
+    return { status: 'erro', motivo: 'cliente sem codi_id do Pulseboard' };
+  }
+
+  try {
+    await new PulseboardClient().avisarLeadNovo({
+      codiId: cfg.pulseboard_codi_id,
+      canal,
+      nome,
+      telefone,
+      url,
+    });
+  } catch (e) {
+    const msg = (e as Error).message;
+    await marcar('erro', msg);
+    // devolve 'erro' para a fila retentar: grupo sem aviso e' perda de lead
+    return { status: 'erro', motivo: `Pulseboard falhou: ${msg}` };
+  }
+
+  await marcar('enviado');
+  return { status: 'ok', motivo: `grupo avisado: ${nome} · ${canal}` };
+}

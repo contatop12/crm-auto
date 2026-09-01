@@ -1,5 +1,6 @@
 import type { Env, QueueMessage } from '../env';
 import { eventoPorId, marcarEvento } from '../db/queries';
+import { avisarLeadNoGrupo } from '../pipelines/kanbanTask';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -8,14 +9,14 @@ import { eventoPorId, marcarEvento } from '../db/queries';
  * existe, a mensagem e' devolvida a fila com `retry()` e o backoff cuida do
  * resto, em vez de dormir um tempo fixo torcendo para dar certo.
  *
- * ESTADO: os cinco pipelines ainda nao estao implementados (Fase 3 do plano).
- * Ate la o consumidor registra o evento como `ignorado` com o motivo explicito,
- * para que a tela de Eventos mostre exatamente o que chegou e o que falta.
+ * ESTADO: o aviso de lead novo no grupo do cliente ja funciona. Os demais
+ * pipelines (Fase 3) ainda registram o evento como `ignorado` com o motivo
+ * explicito, para a tela de Eventos mostrar o que chegou e o que falta.
  */
 
 type Resultado = { status: 'ok' | 'ignorado' | 'erro'; motivo: string };
 
-async function processar(msg: QueueMessage, _env: Env): Promise<Resultado> {
+async function processar(msg: QueueMessage, env: Env, payload: string): Promise<Resultado> {
   switch (msg.source) {
     case 'click':
       return { status: 'ignorado', motivo: 'pipeline click ainda nao implementado (Fase 3)' };
@@ -43,7 +44,9 @@ async function processar(msg: QueueMessage, _env: Env): Promise<Resultado> {
       }
 
     case 'kanban':
-      return { status: 'ignorado', motivo: 'pipeline stageChanged ainda nao implementado (Fase 3)' };
+      // Avisa o grupo do cliente. A conversao para o Google Ads a partir da
+      // mudanca de etapa ainda nao esta implementada (Fase 3).
+      return avisarLeadNoGrupo(env, msg.tenantId, payload);
 
     default:
       return { status: 'ignorado', motivo: `origem desconhecida: ${msg.source}` };
@@ -60,9 +63,14 @@ export async function consumir(batch: MessageBatch<QueueMessage>, env: Env): Pro
         continue;
       }
 
-      const r = await processar(m.body, env);
+      const r = await processar(m.body, env, evento.payload);
       await marcarEvento(env.DB, m.body.eventId, r.status, r.motivo);
-      m.ack();
+
+      // 'erro' e' falha possivelmente transitoria (Pulseboard fora do ar, por
+      // exemplo): devolve a fila para o backoff tentar de novo. 'ok' e
+      // 'ignorado' sao definitivos.
+      if (r.status === 'erro') m.retry();
+      else m.ack();
     } catch (e) {
       // Erro transitorio (Chatwoot fora do ar, card ainda nao criado): devolve a
       // fila. Depois de `max_retries` a mensagem cai na DLQ e fica visivel.
