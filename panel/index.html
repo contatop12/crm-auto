@@ -834,7 +834,7 @@
             r.metas.map(function (m, i) {
               return '<tr><td><input type="checkbox" data-i="' + i + '" class="m-on" ' + (m.jaExiste ? '' : 'checked') + ' /></td>' +
                 '<td><input class="m-nome" data-i="' + i + '" value="' + esc(m.nome) + '" /></td>' +
-                '<td class="motivo">' + esc(m.stageNome) + '</td>' +
+                '<td>' + seletorEtapa(m, i) + '</td>' +
                 '<td><select class="m-cat" data-i="' + i + '">' + opcoes(['CONTACT', 'QUALIFIED_LEAD', 'PURCHASE'], m.categoria) + '</select></td>' +
                 '<td><input class="m-valor" data-i="' + i + '" value="' + (m.valor === null ? '' : m.valor) + '" placeholder="real" /></td>' +
                 '<td><select class="m-cont" data-i="' + i + '">' + opcoes(['ONE_PER_CLICK', 'MANY_PER_CLICK'], m.contagem) + '</select></td>' +
@@ -842,7 +842,8 @@
                 '<td class="' + (m.jaExiste ? 'st-ok' : 'st-recebido') + '">' + (m.jaExiste ? 'já existe' : 'nova') + '</td></tr>';
             }).join('') +
             '</tbody></table>' +
-            '<p class="carregando" style="margin-top:10px">Valor vazio = a conversão carrega o valor real da negociação. ' +
+            '<p class="carregando" style="margin-top:10px">As quatro metas têm o mesmo nome em todos os clientes; o que muda é a etapa que dispara cada uma. ' +
+            'Valor vazio = a conversão carrega o valor real da negociação. ' +
             'Meta que já existe é apenas ligada à etapa, não é criada de novo.</p>' +
             '<div class="linha-acoes" style="margin-top:12px">' +
             '<button id="btn-validar">Validar no Google</button>' +
@@ -853,6 +854,17 @@
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         }
+      }
+
+      // A etapa que dispara cada meta muda de cliente para cliente, entao a
+      // sugestão vem como escolha, não como texto fixo.
+      function seletorEtapa(m, i) {
+        if (m.evento === 'conversa') return '<span class="motivo">primeira mensagem</span>';
+        const opts = (m.etapasPossiveis || [])
+          .map(function (e) {
+            return '<option value="' + e.id + '"' + (e.id === m.stageId ? ' selected' : '') + '>' + esc(e.nome) + '</option>';
+          }).join('');
+        return '<select class="m-stage" data-i="' + i + '"><option value="">(nenhuma)</option>' + opts + '</select>';
       }
 
       function metasEditadas() {
@@ -867,6 +879,9 @@
               valor: valor === '' ? null : Number(valor),
               contagem: ler('m-cont', i).value,
               janelaClique: Number(ler('m-jc', i).value) || 30,
+              stageId: m.evento === 'conversa'
+                ? null
+                : (Number(ler('m-stage', i).value) || null),
             });
           })
           .filter(Boolean);
