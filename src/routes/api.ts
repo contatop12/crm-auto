@@ -19,9 +19,21 @@ export const api = new Hono<{ Bindings: Env; Variables: { identity: AccessIdenti
 
 api.use('*', requireAccess);
 
-api.get('/me', (c) =>
-  c.json({ ...c.get('identity'), painel_aberto: c.env.PANEL_PUBLIC === 'true' }),
-);
+api.get('/me', (c) => {
+  const id = c.get('identity');
+  return c.json({
+    ...id,
+    // `modo` deixa visivel COMO a sessao foi validada. 'claims' significa que a
+    // assinatura nao pode ser conferida (chave rotacionada ou KV sem as chaves)
+    // e a autenticidade esta vindo so da barreira do Access na borda.
+    aviso:
+      id.modo === 'aberto'
+        ? 'painel aberto: PANEL_PUBLIC esta ligado, nao ha autenticacao'
+        : id.modo === 'claims'
+          ? 'assinatura nao conferida: resemeie jwks:access no KV'
+          : null,
+  });
+});
 
 /** Cadastro cru dos clientes. */
 api.get('/tenants', async (c) => c.json(await listarTenants(c.env.DB)));
