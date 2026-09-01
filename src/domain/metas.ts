@@ -24,6 +24,8 @@ export interface MetaCatalogo {
   janelaClique: number;
   /** Outros nomes ja usados nas contas, para reconhecer o que existe. */
   apelidos: string[];
+  /** Nem todo cliente usa. Nao vem marcada quando ainda nao existe na conta. */
+  opcional?: boolean;
 }
 
 export const CATALOGO: MetaCatalogo[] = [
@@ -31,11 +33,23 @@ export const CATALOGO: MetaCatalogo[] = [
     evento: 'conversa',
     nome: 'CRM - Conversa Iniciada',
     categoria: 'CONTACT',
-    valor: 0,
+    valor: 10,
+    // e' a unica primaria; as demais ficam secundarias ate atingir 100 conversoes
     primary: true,
     janelaClique: 30,
     // as contas foram criadas em momentos diferentes e o nome variou
     apelidos: ['CRM - Conversa Iniciada - WhatsApp', 'CRM - Conversão WhatsApp', 'CRM - Conversao WhatsApp'],
+  },
+  {
+    evento: 'proposta_enviada',
+    nome: 'CRM - Proposta Enviada',
+    categoria: 'QUALIFIED_LEAD',
+    valor: 50,
+    primary: false,
+    janelaClique: 30,
+    apelidos: [],
+    // so a Persianas usa esta etapa como conversao propria
+    opcional: true,
   },
   {
     evento: 'qualificado_1',
@@ -60,7 +74,7 @@ export const CATALOGO: MetaCatalogo[] = [
     nome: 'CRM - Compra (valor real)',
     categoria: 'PURCHASE',
     valor: null,
-    primary: true,
+    primary: false,
     janelaClique: 90,
     apelidos: ['CRM - Compra'],
   },
@@ -87,6 +101,8 @@ export interface MetaProposta {
   etapasPossiveis: EtapaOpcao[];
   jaExiste: boolean;
   idExistente: string | null;
+  /** Vem marcada na tela? Meta opcional inexistente comeca desmarcada. */
+  marcada: boolean;
 }
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -106,17 +122,27 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
 
   const opcoes: EtapaOpcao[] = uteis.map((s) => ({ id: s.id, nome: s.nome }));
 
+  const achar = (m: MetaCatalogo) =>
+    porNome.get(norm(m.nome)) ??
+    m.apelidos.map((a) => porNome.get(norm(a))).find(Boolean) ??
+    null;
+
+  // Se o cliente usa a meta opcional de Proposta Enviada, ela consome a primeira
+  // etapa intermediaria e os Qualificados andam uma casa. E' a diferenca entre a
+  // Persianas (usa: Qualificado 1 = Agendamento de Visita) e a Locadora
+  // (nao usa: Qualificado 1 = Proposta Enviada).
+  const usaProposta = !!achar(CATALOGO.find((m) => m.evento === 'proposta_enviada')!);
+  const base = usaProposta ? 1 : 0;
+
   return CATALOGO.map((m) => {
     const sugerida =
       m.evento === 'conversa' ? null
-      : m.evento === 'qualificado_1' ? (intermediarias[0] ?? null)
-      : m.evento === 'qualificado_2' ? (intermediarias[1] ?? null)
+      : m.evento === 'proposta_enviada' ? (intermediarias[0] ?? null)
+      : m.evento === 'qualificado_1' ? (intermediarias[base] ?? null)
+      : m.evento === 'qualificado_2' ? (intermediarias[base + 1] ?? null)
       : ganha;
 
-    const achada =
-      porNome.get(norm(m.nome)) ??
-      m.apelidos.map((a) => porNome.get(norm(a))).find(Boolean) ??
-      null;
+    const achada = achar(m);
 
     return {
       evento: m.evento,
@@ -132,6 +158,9 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
       etapasPossiveis: opcoes,
       jaExiste: !!achada,
       idExistente: achada ? String(achada.id) : null,
+      // marcar por padrao uma meta opcional criaria no Google Ads algo que o
+      // cliente nao usa
+      marcada: m.opcional ? !!achada : true,
     };
   });
 }

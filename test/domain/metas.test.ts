@@ -25,24 +25,57 @@ const locadora: Stage[] = [
 ];
 
 describe('CATALOGO', () => {
-  test('sao as quatro metas padrao, com o mesmo nome em todo cliente', () => {
+  test('os nomes sao os mesmos em todo cliente', () => {
     expect(CATALOGO.map((m) => m.nome)).toEqual([
       'CRM - Conversa Iniciada',
+      'CRM - Proposta Enviada',
       'CRM - Lead Qualificado 1',
       'CRM - Lead Qualificado 2',
       'CRM - Compra (valor real)',
     ]);
   });
+
+  test('os valores seguem a planilha de conversoes', () => {
+    const valor = (e: string) => CATALOGO.find((m) => m.evento === e)!.valor;
+    expect(valor('conversa')).toBe(10);
+    expect(valor('proposta_enviada')).toBe(50);
+    expect(valor('qualificado_1')).toBe(100);
+    expect(valor('qualificado_2')).toBe(150);
+    expect(valor('compra')).toBeNull();
+  });
+
+  test('so a Conversa Iniciada e primaria', () => {
+    // as demais ficam como secundarias ate atingir 100 conversoes
+    expect(CATALOGO.filter((m) => m.primary).map((m) => m.evento)).toEqual(['conversa']);
+  });
+
+  test('Proposta Enviada e opcional: so a Persianas usa', () => {
+    expect(CATALOGO.find((m) => m.evento === 'proposta_enviada')!.opcional).toBe(true);
+    expect(CATALOGO.filter((m) => !m.opcional).length).toBe(4);
+  });
 });
 
 describe('proporMetas', () => {
-  test('propoe sempre as quatro do catalogo, seja qual for o funil', () => {
-    expect(proporMetas(persianas, []).map((m) => m.evento)).toEqual([
-      'conversa', 'qualificado_1', 'qualificado_2', 'compra',
-    ]);
-    expect(proporMetas(locadora, []).map((m) => m.evento)).toEqual([
-      'conversa', 'qualificado_1', 'qualificado_2', 'compra',
-    ]);
+  test('propoe o catalogo inteiro, seja qual for o funil', () => {
+    const eventos = ['conversa', 'proposta_enviada', 'qualificado_1', 'qualificado_2', 'compra'];
+    expect(proporMetas(persianas, []).map((m) => m.evento)).toEqual(eventos);
+    expect(proporMetas(locadora, []).map((m) => m.evento)).toEqual(eventos);
+  });
+
+  test('a meta opcional nao vem marcada quando ainda nao existe na conta', () => {
+    // marcar por padrao criaria no Google Ads uma meta que o cliente nao usa
+    const p = proporMetas(locadora, []).find((m) => m.evento === 'proposta_enviada')!;
+    expect(p.marcada).toBe(false);
+    expect(proporMetas(locadora, []).find((m) => m.evento === 'qualificado_1')!.marcada).toBe(true);
+  });
+
+  test('a meta opcional vem marcada quando ja existe na conta', () => {
+    const existentes = [
+      { id: '7728830342', name: 'CRM - Proposta Enviada', category: 'QUALIFIED_LEAD', type: 'UPLOAD_CLICKS', status: 'ENABLED', primaryForGoal: false },
+    ];
+    const p = proporMetas(persianas, existentes).find((m) => m.evento === 'proposta_enviada')!;
+    expect(p.marcada).toBe(true);
+    expect(p.idExistente).toBe('7728830342');
   });
 
   test('o nome nao muda com o nome da etapa', () => {
@@ -57,15 +90,26 @@ describe('proporMetas', () => {
     expect(c.categoria).toBe('CONTACT');
   });
 
-  test('qualificado_1 sugere a primeira etapa util do funil', () => {
-    // pula entrada e a etapa de resposta automatica
-    expect(proporMetas(persianas, []).find((m) => m.evento === 'qualificado_1')!.stageId).toBe(3);
-    expect(proporMetas(locadora, []).find((m) => m.evento === 'qualificado_1')!.stageId).toBe(13);
+  test('proposta_enviada sugere a primeira etapa util', () => {
+    expect(proporMetas(persianas, []).find((m) => m.evento === 'proposta_enviada')!.stageId).toBe(3);
   });
 
-  test('qualificado_2 sugere a segunda', () => {
-    expect(proporMetas(persianas, []).find((m) => m.evento === 'qualificado_2')!.stageId).toBe(4);
-    expect(proporMetas(locadora, []).find((m) => m.evento === 'qualificado_2')!.stageId).toBe(14);
+  test('sem a meta opcional, os Qualificados andam uma casa para tras', () => {
+    // Locadora nao usa Proposta Enviada como conversao propria:
+    // Qualificado 1 = Proposta Enviada, Qualificado 2 = Negociacao
+    const l = proporMetas(locadora, []);
+    expect(l.find((m) => m.evento === 'qualificado_1')!.stageId).toBe(13);
+    expect(l.find((m) => m.evento === 'qualificado_2')!.stageId).toBe(14);
+  });
+
+  test('com a meta opcional, os Qualificados andam uma casa para frente', () => {
+    // Persianas usa: Proposta Enviada tem meta propria, entao
+    // Qualificado 1 = Agendamento de Visita e Qualificado 2 = Negociacao
+    const p = proporMetas(persianas, [
+      { id: '7728830342', name: 'CRM - Proposta Enviada', category: 'QUALIFIED_LEAD', type: 'UPLOAD_CLICKS', status: 'ENABLED', primaryForGoal: false },
+    ]);
+    expect(p.find((m) => m.evento === 'qualificado_1')!.stageId).toBe(4);
+    expect(p.find((m) => m.evento === 'qualificado_2')!.stageId).toBe(5);
   });
 
   test('compra sugere a etapa de ganho, com valor real', () => {
