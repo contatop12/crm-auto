@@ -142,6 +142,35 @@ middleware recusa todo mundo com 401 — é o comportamento correto.
 
 ---
 
+## Configuracao do Access (feita)
+
+Tres aplicativos, nesta forma:
+
+| App | Destino | Politica |
+|---|---|---|
+| `crm-auto - Painel` | `crm.sitespdoze.com.br` | Allow · email_domain p12digital.com.br |
+| `crm-auto - Webhooks (bypass)` | `crm.sitespdoze.com.br/ingest` e `/health` | **Bypass** · Everyone |
+
+O caminho mais especifico vence, entao `/ingest` fica publico e o resto exige
+login. `workers_dev` esta desligado: o dominio proprio e' a unica porta, e a
+URL workers.dev seria uma segunda porta fora dessas regras.
+
+**Nao use politica de Worker.** Existia um app `crm-auto - Cloudflare Workers`
+com destino `{"type":"worker"}`: esse tipo cobre o Worker inteiro, em qualquer
+hostname e qualquer caminho, e NAO aceita excecao de path. Enquanto ele existiu,
+todo webhook recebia a tela de login. Foi removido.
+
+Ao trocar de app, o `aud` muda e o `CF_ACCESS_AUD` precisa acompanhar, senao o
+painel devolve 401 mesmo com login valido. Use `wrangler secret put`, nunca
+`secret bulk`.
+
+### O token da Cloudflare no .env e' account-owned
+
+Comeca com `cfat_` e tem 53 caracteres. Ele **nao** valida em
+`/user/tokens/verify` (devolve 401 e parece invalido); o endpoint certo e'
+`/accounts/{id}/tokens/verify`. O wrangler tambem nao o aceita sozinho — por
+isso os deploys usam o login OAuth (`CLOUDFLARE_API_TOKEN="" npx wrangler ...`).
+
 ## Access nao pode cobrir /ingest
 
 Uma politica de **Worker / todo o trafego** cobre tambem as rotas de ingestao, e

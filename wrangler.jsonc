@@ -10,10 +10,10 @@
 
   "observability": { "enabled": true },
 
-  // Explicito de proposito: as rotas de ingestao precisam de URL publica (o GTM
-  // e o Chatwoot fazem POST nelas). Preview URLs ficam desligadas — seriam mais
-  // superficie publica sem ganho.
-  "workers_dev": true,
+  // O dominio proprio (crm.sitespdoze.com.br) e' a unica porta de entrada. La o
+  // Access cobre o painel e libera /ingest por um app de bypass. Manter tambem
+  // a URL workers.dev seria uma segunda porta, fora dessas regras.
+  "workers_dev": false,
   "preview_urls": false,
 
   "d1_databases": [
