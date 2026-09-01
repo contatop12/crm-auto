@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { exigir } from '../domain/config';
 
 /**
  * Cliente da Evolution API (WhatsApp).
@@ -21,7 +22,10 @@ export class EvolutionClient {
   ) {}
 
   static fromEnv(env: Env): EvolutionClient {
-    return new EvolutionClient(env.EVOLUTION_SERVER_URL.replace(/\/$/, ''), env.EVOLUTION_API_KEY);
+    return new EvolutionClient(
+      exigir(env, 'EVOLUTION_SERVER_URL').replace(/\/$/, ''),
+      exigir(env, 'EVOLUTION_API_KEY'),
+    );
   }
 
   private async req<T>(caminho: string): Promise<T> {

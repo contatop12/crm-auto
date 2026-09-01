@@ -102,6 +102,20 @@ Mapeamento dos nomes do `.env` para os do Worker:
 | `EVOLUTION_INSTANCE` | `EVOLUTION_ALERT_INSTANCE` |
 | `EVOLUTION_GROUP_ID` | `EVOLUTION_ALERT_GROUP_ID` |
 
+> ### `wrangler secret bulk` SUBSTITUI o conjunto inteiro
+>
+> Ele nao faz merge. Rodar `secret bulk` com um arquivo de um campo so apaga
+> todos os outros segredos. Foi o que derrubou Chatwoot, Google Ads e Evolution
+> de uma vez, com o erro opaco `Cannot read properties of undefined (reading
+> 'replace')`.
+>
+> Para mudar UM segredo: `npx wrangler secret put NOME`.
+> Para usar `bulk`: o arquivo precisa conter o conjunto COMPLETO.
+>
+> Confira depois com `npx wrangler secret list` — sao 13.
+> O `src/domain/config.ts` agora troca aquele erro opaco por
+> "segredo X nao cadastrado", dizendo qual falta e como resolver.
+
 ## 4. Publicar
 
 ```bash
@@ -127,6 +141,34 @@ gerado bate com o `CF_ACCESS_AUD` cadastrado como segredo. Se não bater, o
 middleware recusa todo mundo com 401 — é o comportamento correto.
 
 ---
+
+## Access nao pode cobrir /ingest
+
+Uma politica de **Worker / todo o trafego** cobre tambem as rotas de ingestao, e
+`sendBeacon` do GTM e webhook do Chatwoot nao seguem redirect nem fazem login:
+recebem a pagina do Access e o evento se perde.
+
+Crie uma aplicacao de **hostname** com politica **Bypass / Everyone** para
+`crm.sitespdoze.com.br` path `ingest` (e `health`, se quiser monitorar de fora).
+Politica de hostname vence politica de Worker.
+
+As rotas de ingestao se autenticam sozinhas: `ingest_key` no clique e assinatura
+HMAC no webhook do Chatwoot.
+
+## As chaves do Access vem do KV, nao de fetch
+
+O Worker nao consegue buscar `https://<team>/cdn-cgi/access/certs`: a Cloudflare
+intercepta `/cdn-cgi/*` e recusa a sub-requisicao com 403. Semeie de fora:
+
+```bash
+curl -s https://p12dash.cloudflareaccess.com/cdn-cgi/access/certs   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);require("fs").writeFileSync("jwks.tmp.json",JSON.stringify(j.keys.map(k=>({kid:k.kid,kty:k.kty,n:k.n,e:k.e,alg:k.alg}))))})'
+npx wrangler kv key put "jwks:access" --path ./jwks.tmp.json --binding CACHE --remote
+rm jwks.tmp.json
+```
+
+Quando a Cloudflare rotacionar as chaves, `/api/me` passa a devolver
+`modo: "claims"` com aviso — resemeie. O painel nao tranca ninguem para fora
+nesse meio-tempo, porque o Access na borda ja barrou quem nao tem sessao.
 
 ## O nome do Worker precisa bater com o do Workers Builds
 

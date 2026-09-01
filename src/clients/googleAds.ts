@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { exigir } from '../domain/config';
 
 /**
  * Cliente da Google Ads API.
@@ -41,9 +42,9 @@ export class GoogleAdsClient {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: this.env.GOOGLE_ADS_CLIENT_ID,
-        client_secret: this.env.GOOGLE_ADS_CLIENT_SECRET,
-        refresh_token: this.env.GOOGLE_ADS_REFRESH_TOKEN,
+        client_id: exigir(this.env, 'GOOGLE_ADS_CLIENT_ID'),
+        client_secret: exigir(this.env, 'GOOGLE_ADS_CLIENT_SECRET'),
+        refresh_token: exigir(this.env, 'GOOGLE_ADS_REFRESH_TOKEN'),
         grant_type: 'refresh_token',
       }),
     });
@@ -64,8 +65,8 @@ export class GoogleAdsClient {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
-        'developer-token': this.env.GOOGLE_ADS_DEVELOPER_TOKEN,
-        'login-customer-id': this.env.GOOGLE_ADS_MCC_ID,
+        'developer-token': exigir(this.env, 'GOOGLE_ADS_DEVELOPER_TOKEN'),
+        'login-customer-id': exigir(this.env, 'GOOGLE_ADS_MCC_ID'),
         'content-type': 'application/json',
       },
       body: JSON.stringify({ query }),

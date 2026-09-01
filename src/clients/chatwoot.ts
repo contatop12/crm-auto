@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { exigir } from '../domain/config';
 
 /**
  * Cliente do Chatwoot (fork fazer.ai).
@@ -57,7 +58,10 @@ export class ChatwootClient {
   ) {}
 
   static fromEnv(env: Env): ChatwootClient {
-    return new ChatwootClient(env.CHATWOOT_BASE_URL.replace(/\/$/, ''), env.CHATWOOT_API_TOKEN);
+    return new ChatwootClient(
+      exigir(env, 'CHATWOOT_BASE_URL').replace(/\/$/, ''),
+      exigir(env, 'CHATWOOT_API_TOKEN'),
+    );
   }
 
   private async req<T>(metodo: string, caminho: string, corpo?: unknown): Promise<T> {
