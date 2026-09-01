@@ -182,6 +182,9 @@ api.get('/tenants/:id/webhooks', async (c) => {
 /** As tres inscricoes que o motor consome. */
 const INSCRICOES = ['conversation_created', 'message_incoming', 'message_outgoing'];
 
+/** Nome do webhook na tela do Chatwoot. Segue o padrao dos do n8n. */
+const NOME_WEBHOOK = '[CRM PAINEL] Chatwoot Trigger - GERAL';
+
 /**
  * Registra o webhook do painel, ADICIONANDO aos que ja existem.
  * Guarda o `secret` devolvido pelo Chatwoot — e' com ele que a rota de
@@ -196,12 +199,29 @@ api.post('/tenants/:id/webhook', async (c) => {
   const caminho = `/ingest/${t.slug}/chatwoot`;
   const url = new URL(c.req.url).origin + caminho;
 
+  // Se ja existe um apontando para ca — criado a mao, por exemplo — adota em vez
+  // de recusar: sem o secret guardado a ingestao aceitaria os eventos SEM
+  // conferir a assinatura, que e' pior do que nao ter webhook.
   const jaExiste = (await cw.webhooks(t.cwAccountId)).find((w) => w.url === url);
   if (jaExiste) {
-    return c.json({ error: 'o webhook do painel ja esta registrado', webhook_id: jaExiste.id }, 409);
+    if (jaExiste.secret) {
+      await c.env.DB.prepare('UPDATE tenant_config SET cw_webhook_secret = ? WHERE tenant_id = ?')
+        .bind(jaExiste.secret, t.id)
+        .run();
+    }
+    const faltam = INSCRICOES.filter((i) => !jaExiste.subscriptions.includes(i));
+    return c.json({
+      ok: true,
+      adotado: true,
+      webhook_id: jaExiste.id,
+      url,
+      subscriptions: jaExiste.subscriptions,
+      assinatura: jaExiste.secret ? 'guardada' : 'este webhook nao tem secret; a ingestao aceitara sem assinatura',
+      aviso: faltam.length ? `faltam inscricoes: ${faltam.join(', ')}` : null,
+    });
   }
 
-  const w = await cw.criarWebhook(t.cwAccountId, url, INSCRICOES);
+  const w = await cw.criarWebhook(t.cwAccountId, url, INSCRICOES, NOME_WEBHOOK);
 
   // Sem o secret guardado, a rota de ingestao nao consegue validar a assinatura
   // e recusaria todo evento com 401.

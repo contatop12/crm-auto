@@ -442,7 +442,9 @@
           await carregarWebhooks(id, slug);
           if (metodo === 'POST') {
             document.getElementById('webhook-estado').textContent =
-              'registrado · assinatura ' + j.assinatura;
+              (j.adotado ? 'adotado o que já existia' : 'registrado') +
+              ' · assinatura ' + j.assinatura +
+              (j.aviso ? ' · ' + j.aviso : '');
           }
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;

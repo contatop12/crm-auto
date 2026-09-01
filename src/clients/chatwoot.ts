@@ -119,11 +119,19 @@ export class ChatwootClient {
    * continuam recebendo, o que e' o que permite rodar os dois em paralelo.
    * O `secret` e' gerado pelo Chatwoot e volta na resposta.
    */
-  async criarWebhook(acc: number, url: string, subscriptions: string[]): Promise<CwWebhook> {
+  async criarWebhook(
+    acc: number,
+    url: string,
+    subscriptions: string[],
+    nome: string,
+  ): Promise<CwWebhook> {
+    // O corpo precisa vir embrulhado em `webhook` para o `name` ser aceito.
+    // A forma achatada ({url, subscriptions}) tambem e' aceita, mas descarta o
+    // nome e o webhook aparece sem rotulo na tela do Chatwoot.
     const r = await this.req<{ payload?: { webhook?: CwWebhook } } & Partial<CwWebhook>>(
       'POST',
       `/api/v1/accounts/${acc}/webhooks`,
-      { url, subscriptions },
+      { webhook: { name: nome, url, subscriptions } },
     );
     // a resposta ora vem embrulhada em payload.webhook, ora solta
     const w = r.payload?.webhook ?? (r as CwWebhook);
