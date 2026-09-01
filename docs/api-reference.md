@@ -49,6 +49,36 @@ POST /api/v1/accounts/{acc}/conversations/{c}/custom_attributes  { custom_attrib
 POST /api/v1/accounts/{acc}/webhooks   { url, subscriptions[], secret? }
 ```
 
+### DIVERGE — a API não transfere card entre boards
+
+`transfer_to_board` existe como **ação de automação**, não como rota. Todas as
+formas de pedir a transferência pela API de tasks foram testadas contra a conta
+2 e recusadas:
+
+```
+PUT  /kanban/tasks/{t}  { task: { board_id, board_step_id } }  -> 422
+PUT  /kanban/tasks/{t}  { board_id, board_step_id }            -> 422
+PUT  /kanban/tasks/{t}  { task: { board_step_id } }            -> 422
+POST /kanban/tasks/{t}/move { board_step_id }                  -> 422
+POST /kanban/tasks/{t}/move { board_id, board_step_id }        -> 422
+POST /kanban/tasks/{t}/transfer | /transfer_to_board           -> 404
+```
+
+`{"errors":["Board step deve pertencer ao mesmo funil"]}` — a validação compara
+o step novo com o board **atual**, então nenhuma ordem de campos resolve.
+`PUT { task: { board_id: 8 } }` sozinho devolve **200 e não persiste**: é no-op
+silencioso, o pior dos casos para quem confia no código de status.
+
+`/move` serve só para trocar de etapa **dentro** do mesmo board — que é o que o
+n8n faz. A promoção Orgânico → Ads sempre foi feita pela regra nativa.
+
+**Consequência para o projeto:** o plano previa "a ferramenta move o card direto
+via API, aposentando a regra nativa". Isso não é possível. O caminho é inverter
+os papéis: a decisão de promover passa a ser nossa, e uma regra nativa mínima
+fica só como atuador, disparada por um atributo que a ferramenta grava.
+
+### Escrita — o resto
+
 **Os três últimos SUBSTITUEM o valor inteiro.** O merge é responsabilidade do
 cliente: `GET` antes, mescla, `POST` depois. Perder esse passo apaga o
 `protocolo` gravado no card.
