@@ -187,28 +187,74 @@ async function checarEtiquetas(env: Env, t: TenantParaChecagem): Promise<Checage
   }
 
   const noWhats = vocab.results.filter((v) => v.label_whatsapp);
-  if (t.evoInstancia && noWhats.length) {
-    const existentes = new Set((await EvolutionClient.fromEnv(env).labels(t.evoInstancia)).map((l) => l.toLowerCase()));
-    const faltam = noWhats.filter((v) => !existentes.has(String(v.label_whatsapp).toLowerCase()));
-    out.push(
-      faltam.length
-        ? erro('etq_wa', 'etiquetas', 'Etiquetas no WhatsApp', `faltam: ${faltam.map((f) => f.label_whatsapp).join(', ')}`)
-        : ok('etq_wa', 'etiquetas', 'Etiquetas no WhatsApp', `${noWhats.length} existem`),
-    );
+  if (noWhats.length) {
+    // uma linha por instancia: a etiqueta pode existir num numero e faltar no outro
+    for (const i of await instanciasDoTenant(env, t)) {
+      const rotulo = i.inbox ? `Etiquetas no WhatsApp · inbox ${i.inbox}` : 'Etiquetas no WhatsApp';
+      try {
+        const existentes = new Set(
+          (await EvolutionClient.fromEnv(env).labels(i.instancia)).map((l) => l.toLowerCase()),
+        );
+        const faltam = noWhats.filter((v) => !existentes.has(String(v.label_whatsapp).toLowerCase()));
+        out.push(
+          faltam.length
+            ? erro(`etq_wa_${i.instancia}`, 'etiquetas', rotulo, `faltam: ${faltam.map((f) => f.label_whatsapp).join(', ')}`)
+            : ok(`etq_wa_${i.instancia}`, 'etiquetas', rotulo, `${noWhats.length} existem`),
+        );
+      } catch (e) {
+        out.push(erro(`etq_wa_${i.instancia}`, 'etiquetas', rotulo, (e as Error).message));
+      }
+    }
   }
 
   return out;
 }
 
-async function checarEvolution(env: Env, t: TenantParaChecagem): Promise<Checagem[]> {
-  if (!t.evoInstancia) return [na('evo', 'evolution', 'Instancia do WhatsApp', 'nao configurada')];
+/**
+ * Instancias do WhatsApp do cliente.
+ *
+ * A instancia e' por INBOX, nao por cliente: a Locadora roda tres numeros, cada
+ * um com sua inbox e sua instancia. Checar um campo unico deixaria duas delas
+ * fora do radar.
+ */
+async function instanciasDoTenant(
+  env: Env,
+  t: TenantParaChecagem,
+): Promise<Array<{ instancia: string; inbox: number | null }>> {
+  const { results } = await env.DB.prepare(
+    'SELECT cw_inbox_id, evo_instancia FROM inbox_instances WHERE tenant_id = ? AND ativa = 1',
+  )
+    .bind(t.id)
+    .all<{ cw_inbox_id: number; evo_instancia: string }>();
 
-  const estado = await EvolutionClient.fromEnv(env).estado(t.evoInstancia);
-  return [
-    estado === 'open'
-      ? ok('evo', 'evolution', 'Instancia do WhatsApp', `"${t.evoInstancia}" conectada`)
-      : erro('evo', 'evolution', 'Instancia do WhatsApp', `"${t.evoInstancia}" esta ${estado}`),
-  ];
+  if (results.length) {
+    return results.map((r) => ({ instancia: r.evo_instancia, inbox: r.cw_inbox_id }));
+  }
+  // cliente de um numero so pode ter apenas o padrao no cadastro
+  return t.evoInstancia ? [{ instancia: t.evoInstancia, inbox: null }] : [];
+}
+
+async function checarEvolution(env: Env, t: TenantParaChecagem): Promise<Checagem[]> {
+  const instancias = await instanciasDoTenant(env, t);
+  if (!instancias.length) {
+    return [na('evo', 'evolution', 'Instância do WhatsApp', 'nenhuma instância mapeada')];
+  }
+
+  const cli = EvolutionClient.fromEnv(env);
+
+  return Promise.all(
+    instancias.map(async (i) => {
+      const rotulo = i.inbox ? `WhatsApp · inbox ${i.inbox}` : 'Instância do WhatsApp';
+      try {
+        const estado = await cli.estado(i.instancia);
+        return estado === 'open'
+          ? ok(`evo_${i.instancia}`, 'evolution', rotulo, `"${i.instancia}" conectada`)
+          : erro(`evo_${i.instancia}`, 'evolution', rotulo, `"${i.instancia}" está ${estado}`);
+      } catch (e) {
+        return erro(`evo_${i.instancia}`, 'evolution', rotulo, (e as Error).message);
+      }
+    }),
+  );
 }
 
 /** Roda todos os grupos em paralelo. */

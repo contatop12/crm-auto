@@ -511,3 +511,14 @@ admin.get('/tenants/:id/fluxo', async (c) => {
     })),
   });
 });
+
+/** Numeros de WhatsApp do cliente: uma inbox do Chatwoot por instancia do Evolution. */
+admin.get('/tenants/:id/instancias', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT cw_inbox_id, cw_inbox_nome, evo_instancia, ativa
+     FROM inbox_instances WHERE tenant_id = ? ORDER BY cw_inbox_id`,
+  )
+    .bind(Number(c.req.param('id')))
+    .all();
+  return c.json(results);
+});

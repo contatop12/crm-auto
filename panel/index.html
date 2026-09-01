@@ -340,6 +340,11 @@
           </section>
 
           <section>
+            <h2>Números de WhatsApp</h2>
+            <div id="instancias"></div>
+          </section>
+
+          <section>
             <h2>Etapas do funil</h2>
             <div class="linha-acoes">
               <button id="btn-sync">Sincronizar do board</button>
@@ -414,6 +419,7 @@
         document.getElementById('btn-sync').addEventListener('click', () => sincronizarEtapas(id));
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
         carregarFluxo(id);
+        carregarInstancias(id);
         carregarEtapas(id);
         carregarWebhooks(id, cliente ? cliente.slug : '');
         carregarAvisos(id);
@@ -755,6 +761,25 @@
               '<br><span style="color:var(--ink-3)">' + esc(e.comoFunciona) + '</span></span>' +
               '</div>';
           }).join('');
+      }
+
+      async function carregarInstancias(id) {
+        const alvo = document.getElementById('instancias');
+        let linhas;
+        try {
+          linhas = await api('/tenants/' + id + '/instancias');
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+        alvo.innerHTML = linhas.length
+          ? '<table><thead><tr><th>Inbox</th><th>Nome no Chatwoot</th><th>Instância no Evolution</th></tr></thead><tbody>' +
+            linhas.map(function (l) {
+              return '<tr><td>' + l.cw_inbox_id + '</td><td class="motivo">' + esc(l.cw_inbox_nome || '') + '</td>' +
+                '<td>' + esc(l.evo_instancia) + '</td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="vazio"><p>Nenhum número mapeado.</p>' +
+            '<p class="mono">Sem isso as etiquetas não são aplicadas no WhatsApp.</p></div>';
       }
 
       async function carregarEtapas(id) {
