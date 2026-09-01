@@ -160,6 +160,38 @@
       .st-recebido { color: var(--ink-3); }
       .motivo { color: var(--ink-2); }
 
+      /* segunda linha da célula: o dado técnico embaixo do dado legível */
+      .sub {
+        display: block;
+        font-size: 11px;
+        color: var(--ink-3);
+        font-family: var(--mono);
+        margin-top: 2px;
+      }
+      .tag {
+        display: inline-block;
+        padding: 0 5px;
+        border: 1px solid var(--rule);
+        border-radius: 3px;
+        font-size: 11px;
+        line-height: 16px;
+        color: var(--ink-2);
+        white-space: nowrap;
+      }
+      .tag-novo { border-color: var(--pass); color: var(--pass); }
+      .tag-anuncio { border-color: var(--hold); color: var(--hold); }
+      .nada { color: var(--ink-3); }
+
+      dl.resumo {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 2px 14px;
+        margin: 0 0 12px;
+        font-size: 12px;
+      }
+      dl.resumo dt { color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
+      dl.resumo dd { margin: 0; font-family: var(--mono); }
+
       pre {
         font-family: var(--mono); font-size: 12px; line-height: 1.55;
         background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
@@ -436,24 +468,13 @@
               eventos.length
                 ? `<table>
                     <thead><tr>
-                      <th>Quando</th><th>Origem</th><th>Evento</th><th>Status</th>
+                      <th>Quando</th><th>O que chegou</th><th>Lead</th><th>Conversa</th>
+                      <th class="esconder-mobile">Card</th><th>Status</th>
                       <th class="esconder-mobile">Motivo</th><th>Assin.</th>
                     </tr></thead>
-                    <tbody>${eventos
-                      .map(
-                        (e) => `
-                      <tr class="clicavel" data-ev="${e.id}">
-                        <td title="${esc(hora(e.received_at))}">${haQuanto(e.received_at)}</td>
-                        <td>${esc(e.source)}</td>
-                        <td>${esc(e.event_type)}</td>
-                        <td class="st-${esc(e.status)}">${esc(e.status)}</td>
-                        <td class="motivo esconder-mobile">${esc(e.motivo || '')}</td>
-                        <td>${e.signature_ok === null ? '—' : e.signature_ok ? 'ok' : 'falhou'}</td>
-                      </tr>`,
-                      )
-                      .join('')}</tbody>
+                    <tbody>${eventos.map(linhaEvento).join('')}</tbody>
                   </table>
-                  <p class="carregando" style="margin-top:10px">Clique numa linha para ver o corpo do webhook.</p>`
+                  <p class="carregando" style="margin-top:10px">Clique numa linha para ver o corpo do webhook. Telefone mascarado; o nome vem só com a inicial do sobrenome.</p>`
                 : `<div class="vazio">
                      <p>Nenhum webhook recebido deste cliente.</p>
                      <p class="mono">Confira em Integrações se o webhook está registrado apontando para este Worker.</p>
@@ -463,6 +484,7 @@
 
           <section id="secao-payload" hidden>
             <h2>Corpo do webhook</h2>
+            <div id="payload-quem"></div>
             <div class="aviso" id="payload-aviso"></div>
             <div class="linha-acoes"><button id="btn-revelar">Revelar dados originais</button></div>
             <pre id="payload"></pre>
@@ -652,6 +674,81 @@
         }
       }
 
+      /**
+       * Uma linha de evento que diz de quem é.
+       *
+       * "message_incoming / ignorado" é verdade e não serve: não dá para saber
+       * se é lead novo ou conversa velha, de que board veio, nem se aquele lead
+       * já foi tratado. Tudo isso já vinha no payload — faltava mostrar.
+       */
+      function linhaEvento(e) {
+        const r = e.resumo || {};
+        const nada = '<span class="nada">—</span>';
+
+        const lead = r.quem
+          ? esc(r.quem) + (r.telefone ? '<span class="sub">' + esc(r.telefone) + '</span>' : '')
+          : (r.telefone ? '<span class="mono">' + esc(r.telefone) + '</span>' : nada);
+
+        const tags = [];
+        if (r.momento === 'lead novo') tags.push('<span class="tag tag-novo">lead novo</span>');
+        else if (r.momento) tags.push('<span class="tag">em andamento</span>');
+        if (r.origem === 'anuncio') tags.push('<span class="tag tag-anuncio">anúncio</span>');
+        else if (r.origem === 'organico') tags.push('<span class="tag">orgânico</span>');
+
+        const detalhe = [];
+        if (r.conversaId) detalhe.push('conversa ' + r.conversaId);
+        if (r.idadeConversa !== null && r.idadeConversa !== undefined) detalhe.push('aberta há ' + duracao(r.idadeConversa));
+        if (r.conversaEnviada) detalhe.push('conversão já enviada');
+
+        const conversa = (tags.join(' ') || nada) +
+          (detalhe.length ? '<span class="sub">' + esc(detalhe.join(' · ')) + '</span>' : '');
+
+        const card = r.board
+          ? esc(r.board) + (r.etapa ? '<span class="sub">' + esc(r.etapa) + '</span>' : '')
+          : nada;
+
+        return `
+          <tr class="clicavel" data-ev="${e.id}">
+            <td title="${esc(hora(e.received_at))}">${haQuanto(e.received_at)}</td>
+            <td>${esc(e.pipeline || e.event_type)}<span class="sub">${esc(e.source)} · ${esc(e.event_type)}${r.autor ? ' · ' + esc(r.autor) : ''}</span></td>
+            <td>${lead}</td>
+            <td>${conversa}</td>
+            <td class="esconder-mobile">${card}</td>
+            <td class="st-${esc(e.status)}">${esc(e.status)}</td>
+            <td class="motivo esconder-mobile">${esc(e.motivo || '')}</td>
+            <td>${e.signature_ok === null ? '—' : e.signature_ok ? 'ok' : 'falhou'}</td>
+          </tr>`;
+      }
+
+      /** De quem e' este webhook, acima do json — para nao ter que garimpar. */
+      function cabecalhoResumo(r) {
+        if (!r) return '';
+        const campos = [
+          ['Lead', r.quem],
+          ['Telefone', r.telefone],
+          ['Conversa', r.conversaId],
+          ['Inbox', r.inbox],
+          ['Card', r.board && r.etapa ? r.board + ' › ' + r.etapa : r.board],
+          ['Protocolo', r.protocolo],
+          ['Origem', r.origem],
+          ['Momento', r.momento],
+          ['Aberta há', r.idadeConversa === null || r.idadeConversa === undefined ? null : duracao(r.idadeConversa)],
+          ['Etiquetas', (r.etiquetas || []).join(', ')],
+        ].filter(function (c) { return c[1] !== null && c[1] !== undefined && c[1] !== ''; });
+
+        if (!campos.length) return '';
+        return '<dl class="resumo">' + campos
+          .map(function (c) { return '<dt>' + esc(c[0]) + '</dt><dd>' + esc(String(c[1])) + '</dd>'; })
+          .join('') + '</dl>';
+      }
+
+      function duracao(seg) {
+        if (seg < 60) return seg + 's';
+        if (seg < 3600) return Math.round(seg / 60) + ' min';
+        if (seg < 86400) return Math.round(seg / 3600) + ' h';
+        return Math.round(seg / 86400) + ' d';
+      }
+
       async function verPayload(tenantId, eventId, revelar) {
         const secao = document.getElementById('secao-payload');
         const pre = document.getElementById('payload');
@@ -674,6 +771,7 @@
         );
 
         pre.textContent = r.payload || '(vazio)';
+        document.getElementById('payload-quem').innerHTML = cabecalhoResumo(r.resumo);
         if (r.expirado) {
           aviso.textContent = r.motivo;
           botao.hidden = true;

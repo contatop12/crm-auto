@@ -8,7 +8,8 @@ import {
   payloadDoEvento,
   type ResumoTenant,
 } from '../db/observability';
-import { maskPayload } from '../domain/mask';
+import { maskPayload, maskPhone } from '../domain/mask';
+import { resumirEvento, encurtarNome } from '../domain/resumoEvento';
 import { checarTenant, type TenantParaChecagem } from '../health/checks';
 import { ChatwootClient } from '../clients/chatwoot';
 
@@ -99,12 +100,27 @@ api.get('/tenants/:id/health', async (c) => {
 /** Ultimos webhooks recebidos deste cliente. Sem payload — so a lista. */
 api.get('/tenants/:id/events', async (c) => {
   const tenantId = Number(c.req.param('id'));
+
+  // Os boards dizem se o lead veio de anuncio ou do organico; sem eles o
+  // resumo ainda sai, so' sem essa coluna.
+  const boards = await c.env.DB.prepare(
+    `SELECT cw_board_organico_id AS organico, cw_board_funil_id AS funil
+     FROM tenant_config WHERE tenant_id = ?`,
+  )
+    .bind(tenantId)
+    .first<{ organico: number | null; funil: number | null }>();
+
   return c.json(
-    await eventosDoTenant(c.env.DB, tenantId, {
-      status: c.req.query('status'),
-      source: c.req.query('source'),
-      limite: Number(c.req.query('limit') ?? 50),
-    }),
+    await eventosDoTenant(
+      c.env.DB,
+      tenantId,
+      {
+        status: c.req.query('status'),
+        source: c.req.query('source'),
+        limite: Number(c.req.query('limit') ?? 50),
+      },
+      boards ?? { organico: null, funil: null },
+    ),
   );
 });
 
@@ -147,6 +163,8 @@ api.get('/tenants/:id/events/:eventId/payload', async (c) => {
     mascarado: !revelar,
     expirado: false,
     received_at: linha.received_at,
+    // o mesmo resumo da lista, para nao ter que garimpar o json atras de quem e'
+    resumo: resumirEvento(linha.payload),
     payload: revelar ? linha.payload : maskPayload(linha.payload),
   });
 });
@@ -275,6 +293,15 @@ api.get('/tenants/:id/avisos', async (c) => {
      ORDER BY created_at DESC LIMIT ?`,
   )
     .bind(Number(c.req.param('id')), Math.min(Number(c.req.query('limit') ?? 30), 200))
-    .all();
-  return c.json(results);
+    .all<{ lead_nome: string | null; telefone: string | null }>();
+
+  // Mesma regra do payload e da lista de eventos: o nome do lead e o telefone
+  // sao dados do cliente, e o painel junta todos eles numa tela so'.
+  return c.json(
+    results.map((l) => ({
+      ...l,
+      lead_nome: encurtarNome(l.lead_nome),
+      telefone: maskPhone(l.telefone),
+    })),
+  );
 });

@@ -1,4 +1,5 @@
 /** Consultas que alimentam a visão de funcionamento por cliente. */
+import { resumirEvento, nomeDoPipeline, type ResumoEvento, type BoardsDoTenant } from '../domain/resumoEvento';
 
 export interface ResumoTenant {
   tenant_id: number;
@@ -63,6 +64,10 @@ export interface LinhaEvento {
   received_at: string;
   processed_at: string | null;
   tem_payload: number;
+  /** O que o pipeline faz, em termos de negocio. */
+  pipeline: string;
+  /** Quem e' o evento, lido do payload e ja mascarado. */
+  resumo: ResumoEvento;
 }
 
 /** Ultimos eventos do cliente. O payload NAO vem aqui — so no detalhe. */
@@ -70,6 +75,7 @@ export async function eventosDoTenant(
   db: D1Database,
   tenantId: number,
   filtros: { status?: string; source?: string; limite?: number } = {},
+  boards: BoardsDoTenant = { organico: null, funil: null },
 ): Promise<LinhaEvento[]> {
   const cond: string[] = ['tenant_id = ?'];
   const bind: unknown[] = [tenantId];
@@ -79,17 +85,23 @@ export async function eventosDoTenant(
 
   bind.push(Math.min(filtros.limite ?? 50, 200));
 
+  // O payload sai do banco so' para virar resumo — nunca chega ao navegador.
   const { results } = await db
     .prepare(
       `SELECT id, source, event_type, status, motivo, signature_ok, tentativas,
-              received_at, processed_at,
+              received_at, processed_at, payload,
               CASE WHEN payload IS NULL OR payload = '' THEN 0 ELSE 1 END AS tem_payload
        FROM events WHERE ${cond.join(' AND ')}
        ORDER BY received_at DESC LIMIT ?`,
     )
     .bind(...bind)
-    .all<LinhaEvento>();
-  return results;
+    .all<LinhaEvento & { payload: string | null }>();
+
+  return results.map(({ payload, ...linha }) => ({
+    ...linha,
+    pipeline: nomeDoPipeline(linha.source, linha.event_type),
+    resumo: resumirEvento(payload, boards),
+  }));
 }
 
 export async function payloadDoEvento(
