@@ -72,25 +72,53 @@ describe('resumirEvento', () => {
     expect(r.momento).toBe('lead novo');
   });
 
-  test('o board manda na origem, nao o protocolo', () => {
+  test('a etiqueta manda na origem', () => {
+    // 13 de 13 conversas com `google-ads` no board da Vita tinham clique real
     expect(resumirEvento(incoming(), BOARDS).origem).toBe('anuncio');
+    expect(resumirEvento(incoming(), { organico: null, funil: null }).origem).toBe('anuncio');
+  });
 
-    // card no board de entrada: e' organico mesmo tendo protocolo herdado
+  test('protocolo ORG- e organico, por mais que exista', () => {
+    // e' o erro exato da regra "Lead do Google" do Chatwoot: ela so' pergunta se
+    // o protocolo existe, e o fluxo carimba ORG-<id> no organico
     const org = incoming({
+      labels: ['mensagem'],
+      custom_attributes: { protocolo: 'ORG-19' },
+    });
+    const r = resumirEvento(org, BOARDS);
+    expect(r.protocolo).toBe('ORG-19');
+    expect(r.origem).toBe('organico');
+  });
+
+  test('nem o board de Ads faz de um ORG- um lead de anuncio', () => {
+    // os 12 organicos da Vita estao DENTRO do board de Ads: confiar no board
+    // seria repetir o erro da regra
+    const noBoardDeAds = incoming({
+      labels: ['mensagem'],
+      custom_attributes: { protocolo: 'ORG-36' },
+      kanban_task: { board_id: 7, board: { id: 7, name: 'Pipeline de Vendas' } },
+    });
+    expect(resumirEvento(noBoardDeAds, BOARDS).origem).toBe('organico');
+  });
+
+  test('card no board de entrada e organico', () => {
+    const org = incoming({
+      labels: [],
+      custom_attributes: {},
       kanban_task: { board_id: 6, board: { id: 6, name: 'Orgânico' } },
     });
     expect(resumirEvento(org, BOARDS).origem).toBe('organico');
   });
 
-  test('sem board cadastrado, o protocolo decide', () => {
-    const semBoards = { organico: null, funil: null };
-    expect(resumirEvento(incoming(), semBoards).origem).toBe('anuncio');
-  });
-
-  test('sem protocolo e sem board a origem fica em branco, nao "organico"', () => {
-    // o protocolo chega depois do primeiro webhook: a ausencia nao prova nada
-    const sem = incoming({ custom_attributes: {}, kanban_task: {} });
-    expect(resumirEvento(sem, { organico: null, funil: null }).origem).toBeNull();
+  test('sem etiqueta e sem prefixo a origem fica em branco, nao "anuncio"', () => {
+    // a etiqueta chega depois do primeiro webhook: a ausencia nao prova nada.
+    // Sao os 6 casos da Vita com protocolo VITA- e nenhuma etiqueta.
+    const sem = incoming({
+      labels: [],
+      custom_attributes: { protocolo: 'VITA-MSG1NDUDLRI2' },
+      kanban_task: { board_id: 7, board: { id: 7, name: 'Pipeline de Vendas' } },
+    });
+    expect(resumirEvento(sem, BOARDS).origem).toBeNull();
   });
 
   test('marca a conversa que ja teve conversao enviada', () => {
@@ -120,7 +148,6 @@ describe('resumirEvento', () => {
     const r = resumirEvento(daRegra, BOARDS);
     expect(r.conversaId).toBe(900);
     expect(r.etapa).toBe('Negociação');
-    expect(r.origem).toBe('anuncio');
   });
 
   test('payload ilegivel devolve resumo vazio em vez de derrubar a lista', () => {

@@ -81,6 +81,7 @@ export function resumirEvento(
   const protocolo =
     str(attrs.protocolo) ?? str(obj(task.custom_attributes)?.protocolo);
 
+  const etiquetas = lista(conv.labels);
   const criada = num(conv.created_at);
   const quando = num(primeiraMensagem(conv)?.created_at) ?? num(conv.last_activity_at);
   const idade = criada !== null && quando !== null ? Math.max(quando - criada, 0) : null;
@@ -94,35 +95,58 @@ export function resumirEvento(
     board: str(obj(task.board)?.name),
     etapa: str(obj(task.board_step)?.name),
     protocolo,
-    origem: classificarOrigem(boardId, protocolo, boards),
+    origem: classificarOrigem(etiquetas, protocolo, boardId, boards),
     momento:
       idade === null ? null
       : idade <= JANELA_LEAD_NOVO ? 'lead novo'
       : 'conversa em andamento',
     idadeConversa: idade,
     conversaEnviada: attrs.conversa_enviada === true,
-    etiquetas: lista(conv.labels),
+    etiquetas,
   };
 }
 
 /**
+ * Protocolo sintetico que o fluxo carimba no lead organico so' para ter chave
+ * de planilha. NAO e' protocolo de clique em anuncio.
+ */
+const PREFIXO_ORGANICO = /^ORG-/i;
+
+/** A etiqueta que o fluxo aplica quando o clique casou com um anuncio. */
+const ETIQUETA_ANUNCIO = /^(google|meta|facebook)[-_]?ads$/i;
+
+/**
  * De onde o lead veio.
  *
- * O board manda, quando o cliente tem os dois cadastrados: e' o dado do
- * Chatwoot, nao inferencia nossa. Sem board configurado sobra o protocolo, que
- * so' existe quando houve clique em anuncio — mas ele chega depois do primeiro
- * webhook, entao a ausencia nao prova organico e fica `null`.
+ * A ETIQUETA manda — nao o protocolo, nem o board.
+ *
+ * Auditoria dos 28 cards do Pipeline de Vendas da Vita: as 13 conversas com a
+ * etiqueta `google-ads` tem protocolo de clique; as 12 com protocolo `ORG-<id>`
+ * nao tem etiqueta nenhuma e sao organicas. Correlacao perfeita com a etiqueta,
+ * zero com "tem protocolo".
+ *
+ * Por isso o board tambem nao serve de criterio: os 12 organicos estao dentro do
+ * board de Ads, postos la' por uma regra do Chatwoot que so' pergunta se o
+ * protocolo existe. Confiar no board seria repetir o mesmo erro.
+ *
+ * Sem etiqueta e sem prefixo, fica `null`: a etiqueta chega depois do primeiro
+ * webhook, entao a ausencia dela nao prova organico.
  */
 function classificarOrigem(
-  boardId: number | null,
+  etiquetas: string[],
   protocolo: string | null,
+  boardId: number | null,
   boards: BoardsDoTenant,
 ): Origem {
-  if (boardId !== null) {
-    if (boards.funil !== null && boardId === boards.funil) return 'anuncio';
-    if (boards.organico !== null && boardId === boards.organico) return 'organico';
+  if (etiquetas.some((l) => ETIQUETA_ANUNCIO.test(l.trim()))) return 'anuncio';
+  if (protocolo && PREFIXO_ORGANICO.test(protocolo)) return 'organico';
+
+  // o board so' entra quando o card esta no de entrada: card no board do funil
+  // nao prova anuncio, mas card no de entrada ainda nao foi promovido por nada
+  if (boardId !== null && boards.organico !== null && boardId === boards.organico) {
+    return 'organico';
   }
-  return protocolo ? 'anuncio' : null;
+  return null;
 }
 
 /** `message_type` diz se escreveu o lead ou o vendedor. */
