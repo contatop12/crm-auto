@@ -354,6 +354,18 @@
           </section>
 
           <section>
+            <h2>Frases que movem os cards</h2>
+            <div class="linha-acoes">
+              <input id="g-frase" placeholder="segue a proposta" style="max-width:280px" />
+              <select id="g-etapa" style="max-width:220px"></select>
+              <input id="g-emoji" placeholder="emoji (opcional)" style="max-width:150px" />
+              <button id="btn-gatilho" class="principal">Adicionar</button>
+              <span class="carregando" id="gatilho-estado"></span>
+            </div>
+            <div id="gatilhos"></div>
+          </section>
+
+          <section>
             <h2>Metas de conversão no Google Ads</h2>
             <div class="linha-acoes">
               <button id="btn-metas">Gerar metas</button>
@@ -418,9 +430,11 @@
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
         document.getElementById('btn-sync').addEventListener('click', () => sincronizarEtapas(id));
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
+        document.getElementById('btn-gatilho').addEventListener('click', () => adicionarGatilho(id));
         carregarFluxo(id);
         carregarInstancias(id);
         carregarEtapas(id);
+        carregarGatilhos(id);
         carregarWebhooks(id, cliente ? cliente.slug : '');
         carregarAvisos(id);
         tela.querySelectorAll('tr.clicavel').forEach((tr) =>
@@ -780,6 +794,68 @@
             }).join('') + '</tbody></table>'
           : '<div class="vazio"><p>Nenhum número mapeado.</p>' +
             '<p class="mono">Sem isso as etiquetas não são aplicadas no WhatsApp.</p></div>';
+      }
+
+      // Os gatilhos sao a parte que mais muda: a equipe troca o texto do
+      // atendimento e o funil para de andar sem ninguem perceber.
+      async function carregarGatilhos(id) {
+        const alvo = document.getElementById('gatilhos');
+        const sel = document.getElementById('g-etapa');
+
+        const [gatilhos, etapas] = await Promise.all([
+          api('/tenants/' + id + '/gatilhos').catch(function () { return []; }),
+          api('/tenants/' + id + '/stages').catch(function () { return []; }),
+        ]);
+
+        sel.innerHTML = etapas.length
+          ? etapas.map(function (e) {
+              return '<option value="' + e.id + '">' + esc(e.nome) + '</option>';
+            }).join('')
+          : '<option value="">sincronize as etapas antes</option>';
+
+        alvo.innerHTML = gatilhos.length
+          ? '<table><thead><tr><th>Frase</th><th>Emoji</th><th>Move para</th><th></th></tr></thead><tbody>' +
+            gatilhos.map(function (g) {
+              return '<tr><td>' + esc(g.frase) + '</td>' +
+                '<td>' + esc(g.emoji_obrigatorio || '') + '</td>' +
+                '<td class="motivo">' + esc(g.stage_nome) + '</td>' +
+                '<td><button class="g-del" data-g="' + g.id + '">remover</button></td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="vazio"><p>Nenhuma frase cadastrada.</p>' +
+            '<p class="mono">Sem frase, o card só avança pela resposta automática.</p></div>';
+
+        alvo.querySelectorAll('.g-del').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            try {
+              await enviar('/tenants/' + id + '/gatilhos/' + b.dataset.g, 'DELETE');
+              await carregarGatilhos(id);
+            } catch (e) {
+              document.getElementById('gatilho-estado').textContent = 'falhou: ' + e.message;
+            }
+          });
+        });
+
+        document.getElementById('gatilho-estado').textContent =
+          gatilhos.length ? gatilhos.length + ' frases' : '';
+      }
+
+      async function adicionarGatilho(id) {
+        const frase = document.getElementById('g-frase');
+        const etapa = document.getElementById('g-etapa');
+        const emoji = document.getElementById('g-emoji');
+        const estado = document.getElementById('gatilho-estado');
+        try {
+          await enviar('/tenants/' + id + '/gatilhos', 'POST', {
+            frase: frase.value,
+            stage_id: Number(etapa.value),
+            emoji: emoji.value,
+          });
+          frase.value = '';
+          emoji.value = '';
+          await carregarGatilhos(id);
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
       }
 
       async function carregarEtapas(id) {

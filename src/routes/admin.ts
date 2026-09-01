@@ -325,22 +325,23 @@ admin.post('/tenants/:id/metas', async (c) => {
 });
 
 /**
- * Estado de cada etapa do fluxo deste cliente.
+ * As cinco etapas que interessam monitorar, na ordem em que o lead passa.
  *
- * Responde "onde o lead para", que e diferente de "as credenciais funcionam".
- * Uma conta pode estar conectada e o lead nao andar, porque falta o webhook,
- * a meta de conversao ou o codi_id do grupo.
+ * Sao etapas de NEGOCIO, nao de codigo: "o lead chegou", "o grupo foi avisado".
+ * A tela de Integracoes ja responde se as credenciais funcionam; aqui a
+ * pergunta e' outra — onde o lead para.
  */
 admin.get('/tenants/:id/fluxo', async (c) => {
   const id = Number(c.req.param('id'));
 
   const cfg = await c.env.DB.prepare(
-    `SELECT c.cw_account_id, c.cw_board_funil_id, c.ga_customer_id, c.evo_instancia,
-            c.pulseboard_codi_id, c.validate_only, c.ingest_key,
+    `SELECT c.cw_account_id, c.cw_board_funil_id, c.ga_customer_id,
+            c.pulseboard_codi_id, c.sheets_doc_id, c.validate_only,
             CASE WHEN c.cw_webhook_secret IS NULL THEN 0 ELSE 1 END AS tem_segredo,
             (SELECT COUNT(*) FROM funnel_stages f WHERE f.tenant_id = c.tenant_id) AS etapas,
             (SELECT COUNT(*) FROM funnel_stages f WHERE f.tenant_id = c.tenant_id
-               AND f.conversion_action_id IS NOT NULL) AS etapas_com_meta
+               AND f.conversion_action_id IS NOT NULL) AS etapas_com_meta,
+            (SELECT COUNT(*) FROM stage_triggers g WHERE g.tenant_id = c.tenant_id) AS gatilhos
      FROM tenant_config c WHERE c.tenant_id = ?`,
   )
     .bind(id)
@@ -348,144 +349,146 @@ admin.get('/tenants/:id/fluxo', async (c) => {
 
   if (!cfg) return c.json({ error: 'cliente nao encontrado' }, 404);
 
-  /** Conta eventos e erros de um recorte, para alimentar `avaliarEtapa`. */
-  async function medir(where: string, ...bind: unknown[]) {
+  interface Medida {
+    t24: number;
+    t7: number;
+    ultimo: string | null;
+    ultimoErro: string | null;
+    motivo: string | null;
+  }
+
+  const medidas = (r: Medida | null) => ({
+    total24h: Number(r?.t24 ?? 0),
+    total7d: Number(r?.t7 ?? 0),
+    ultimoEm: r?.ultimo ?? null,
+    ultimoErroEm: r?.ultimoErro ?? null,
+    ultimoErroMotivo: r?.motivo ?? null,
+  });
+
+  /** Atividade e erro de um recorte da tabela de eventos. */
+  async function porEvento(where: string) {
     const r = await c.env.DB.prepare(
       `SELECT
          SUM(CASE WHEN received_at >= datetime('now','-1 day') THEN 1 ELSE 0 END) AS t24,
          SUM(CASE WHEN received_at >= datetime('now','-7 day') THEN 1 ELSE 0 END) AS t7,
          MAX(CASE WHEN status != 'erro' THEN received_at END) AS ultimo,
-         MAX(CASE WHEN status = 'erro' THEN received_at END) AS ultimoErro
+         MAX(CASE WHEN status = 'erro' THEN received_at END) AS ultimoErro,
+         (SELECT motivo FROM events e2 WHERE e2.tenant_id = ? AND ${where}
+            AND e2.status = 'erro' ORDER BY e2.received_at DESC LIMIT 1) AS motivo
        FROM events WHERE tenant_id = ? AND ${where}`,
     )
-      .bind(id, ...bind)
-      .first<{ t24: number; t7: number; ultimo: string | null; ultimoErro: string | null }>();
-
-    const motivo = r?.ultimoErro
-      ? (
-          await c.env.DB.prepare(
-            `SELECT motivo FROM events WHERE tenant_id = ? AND ${where}
-               AND status = 'erro' ORDER BY received_at DESC LIMIT 1`,
-          )
-            .bind(id, ...bind)
-            .first<{ motivo: string | null }>()
-        )?.motivo ?? null
-      : null;
-
-    return {
-      total24h: Number(r?.t24 ?? 0),
-      total7d: Number(r?.t7 ?? 0),
-      ultimoEm: r?.ultimo ?? null,
-      ultimoErroEm: r?.ultimoErro ?? null,
-      ultimoErroMotivo: motivo,
-    };
+      .bind(id, id)
+      .first<Medida>();
+    return medidas(r);
   }
 
-  const avisos = await c.env.DB.prepare(
+  /** Atividade e erro de uma tabela com colunas status/erro/created_at. */
+  async function porTabela(tabela: 'group_notifications' | 'conversions') {
+    const r = await c.env.DB.prepare(
+      `SELECT
+         SUM(CASE WHEN created_at >= datetime('now','-1 day') THEN 1 ELSE 0 END) AS t24,
+         SUM(CASE WHEN created_at >= datetime('now','-7 day') THEN 1 ELSE 0 END) AS t7,
+         MAX(CASE WHEN status = 'enviado' THEN created_at END) AS ultimo,
+         MAX(CASE WHEN status = 'erro' THEN created_at END) AS ultimoErro,
+         (SELECT erro FROM ${tabela} x WHERE x.tenant_id = ? AND x.status = 'erro'
+            ORDER BY x.created_at DESC LIMIT 1) AS motivo
+       FROM ${tabela} WHERE tenant_id = ?`,
+    )
+      .bind(id, id)
+      .first<Medida>();
+    return medidas(r);
+  }
+
+  // leads e movimentacoes nao tem coluna status
+  const leads = await c.env.DB.prepare(
     `SELECT
        SUM(CASE WHEN created_at >= datetime('now','-1 day') THEN 1 ELSE 0 END) AS t24,
        SUM(CASE WHEN created_at >= datetime('now','-7 day') THEN 1 ELSE 0 END) AS t7,
-       MAX(CASE WHEN status = 'enviado' THEN created_at END) AS ultimo,
-       MAX(CASE WHEN status = 'erro' THEN created_at END) AS ultimoErro,
-       (SELECT erro FROM group_notifications WHERE tenant_id = ? AND status = 'erro'
-          ORDER BY created_at DESC LIMIT 1) AS motivo
-     FROM group_notifications WHERE tenant_id = ?`,
+       MAX(created_at) AS ultimo
+     FROM leads WHERE tenant_id = ?`,
   )
-    .bind(id, id)
-    .first<{ t24: number; t7: number; ultimo: string | null; ultimoErro: string | null; motivo: string | null }>();
+    .bind(id)
+    .first<{ t24: number; t7: number; ultimo: string | null }>();
 
-  const conv = await c.env.DB.prepare(
+  const moves = await c.env.DB.prepare(
     `SELECT
        SUM(CASE WHEN created_at >= datetime('now','-1 day') THEN 1 ELSE 0 END) AS t24,
        SUM(CASE WHEN created_at >= datetime('now','-7 day') THEN 1 ELSE 0 END) AS t7,
-       MAX(CASE WHEN status = 'enviado' THEN created_at END) AS ultimo,
-       MAX(CASE WHEN status = 'erro' THEN created_at END) AS ultimoErro,
-       (SELECT erro FROM conversions WHERE tenant_id = ? AND status = 'erro'
-          ORDER BY created_at DESC LIMIT 1) AS motivo
-     FROM conversions WHERE tenant_id = ?`,
+       MAX(CASE WHEN moveu = 1 THEN created_at END) AS ultimo,
+       SUM(CASE WHEN moveu = 0 THEN 1 ELSE 0 END) AS nao_moveu
+     FROM card_moves WHERE tenant_id = ?`,
   )
-    .bind(id, id)
-    .first<{ t24: number; t7: number; ultimo: string | null; ultimoErro: string | null; motivo: string | null }>();
+    .bind(id)
+    .first<{ t24: number; t7: number; ultimo: string | null; nao_moveu: number }>();
 
-  const semWebhook = cfg.cw_account_id
-    ? null
-    : 'cliente sem conta do Chatwoot configurada';
+  const semWebhook = !cfg.cw_account_id
+    ? 'cliente sem conta do Chatwoot'
+    : Number(cfg.tem_segredo) === 0
+      ? 'webhook do painel ainda não registrado no Chatwoot'
+      : null;
 
   const etapas = [
     {
-      id: 'clique',
-      titulo: '1. Clique ou formulário no site',
-      comoFunciona: 'o GTM manda o protocolo para /ingest/<cliente>/click',
-      sinais: { ...(await medir("source = 'click'")), implementado: false, pendencia: null },
-    },
-    {
-      id: 'conversa_criada',
-      titulo: '2. Conversa criada no Chatwoot',
-      comoFunciona: 'casa o telefone com o clique e carimba o protocolo',
+      id: 'chegada',
+      titulo: 'Chegada do lead no CRM',
+      comoFunciona: 'conversa criada e primeira mensagem do lead no Chatwoot',
       sinais: {
-        ...(await medir("source = 'chatwoot' AND event_type = 'conversation_created'")),
+        ...(await porEvento(
+          "source = 'chatwoot' AND event_type IN ('conversation_created','message_incoming')",
+        )),
         implementado: false,
         pendencia: semWebhook,
       },
     },
     {
-      id: 'mensagem_lead',
-      titulo: '3. Mensagem do lead',
-      comoFunciona: 'dispara a conversão Conversa Iniciada e aplica etiquetas',
+      id: 'dados',
+      titulo: 'Dados do lead registrados',
+      comoFunciona: 'protocolo, telefone, e-mail e campanha gravados e espelhados na planilha',
       sinais: {
-        ...(await medir("source = 'chatwoot' AND event_type = 'message_incoming'")),
+        total24h: Number(leads?.t24 ?? 0),
+        total7d: Number(leads?.t7 ?? 0),
+        ultimoEm: leads?.ultimo ?? null,
+        ultimoErroEm: null,
+        ultimoErroMotivo: null,
         implementado: false,
-        pendencia: semWebhook,
+        pendencia: null,
       },
     },
     {
-      id: 'mensagem_vendedor',
-      titulo: '4. Mensagem do vendedor',
-      comoFunciona: 'move o card pelo funil e lê o valor da proposta',
+      id: 'grupo',
+      titulo: 'Aviso do lead no grupo',
+      comoFunciona: 'nome, telefone e canal enviados ao grupo pelo Pulseboard',
       sinais: {
-        ...(await medir("source = 'chatwoot' AND event_type = 'message_outgoing'")),
-        implementado: false,
-        pendencia: semWebhook,
-      },
-    },
-    {
-      id: 'kanban',
-      titulo: '5. Card entra no funil de Ads',
-      comoFunciona: 'a regra do Chatwoot chama /ingest/<cliente>/kanban',
-      sinais: {
-        ...(await medir("source = 'kanban'")),
+        ...(await porTabela('group_notifications')),
         implementado: true,
-        pendencia: cfg.cw_board_funil_id
-          ? null
-          : 'board do funil de Ads não configurado',
+        pendencia: cfg.pulseboard_codi_id ? null : 'falta o codi_id do Pulseboard no cadastro',
       },
     },
     {
-      id: 'aviso_grupo',
-      titulo: '6. Aviso de lead novo no grupo',
-      comoFunciona: 'manda nome, telefone e canal para o Pulseboard',
+      id: 'gatilhos',
+      titulo: 'Gatilhos movendo os cards',
+      comoFunciona: 'a frase do vendedor move o card para a etapa seguinte',
       sinais: {
-        total24h: Number(avisos?.t24 ?? 0),
-        total7d: Number(avisos?.t7 ?? 0),
-        ultimoEm: avisos?.ultimo ?? null,
-        ultimoErroEm: avisos?.ultimoErro ?? null,
-        ultimoErroMotivo: avisos?.motivo ?? null,
-        implementado: true,
-        pendencia: cfg.pulseboard_codi_id
-          ? null
-          : 'falta o codi_id do Pulseboard no cadastro do cliente',
+        total24h: Number(moves?.t24 ?? 0),
+        total7d: Number(moves?.t7 ?? 0),
+        ultimoEm: moves?.ultimo ?? null,
+        ultimoErroEm: null,
+        ultimoErroMotivo: null,
+        implementado: false,
+        pendencia:
+          Number(cfg.etapas) === 0
+            ? 'etapas do funil ainda não sincronizadas'
+            : Number(cfg.gatilhos) === 0
+              ? 'nenhuma frase-gatilho cadastrada'
+              : null,
       },
     },
     {
       id: 'conversao',
-      titulo: '7. Conversão no Google Ads',
-      comoFunciona: 'sobe o evento pela Data Manager API, deduplicado',
+      titulo: 'Conversão enviada ao Google Ads',
+      comoFunciona: 'qualquer etapa marcada como conversão sobe pela Data Manager API',
       sinais: {
-        total24h: Number(conv?.t24 ?? 0),
-        total7d: Number(conv?.t7 ?? 0),
-        ultimoEm: conv?.ultimo ?? null,
-        ultimoErroEm: conv?.ultimoErro ?? null,
-        ultimoErroMotivo: conv?.motivo ?? null,
+        ...(await porTabela('conversions')),
         implementado: false,
         pendencia: !cfg.ga_customer_id
           ? 'cliente sem conta do Google Ads'
@@ -510,6 +513,69 @@ admin.get('/tenants/:id/fluxo', async (c) => {
       ultimoEm: e.sinais.ultimoEm,
     })),
   });
+});
+
+// ---------------------------------------------------------------------------
+// Frases-gatilho por cliente
+// ---------------------------------------------------------------------------
+
+admin.get('/tenants/:id/gatilhos', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT g.id, g.frase, g.emoji_obrigatorio, g.stage_id,
+            f.nome AS stage_nome, f.posicao
+     FROM stage_triggers g
+     JOIN funnel_stages f ON f.id = g.stage_id
+     WHERE g.tenant_id = ?
+     ORDER BY f.posicao DESC, g.frase`,
+  )
+    .bind(Number(c.req.param('id')))
+    .all();
+  return c.json(results);
+});
+
+admin.post('/tenants/:id/gatilhos', async (c) => {
+  const id = Number(c.req.param('id'));
+  const b = await c.req.json<{ frase?: string; stage_id?: number; emoji?: string }>();
+
+  const frase = String(b.frase ?? '').trim();
+  const stageId = Number(b.stage_id);
+  if (!frase) return c.json({ error: 'a frase é obrigatória' }, 400);
+  if (!stageId) return c.json({ error: 'escolha a etapa de destino' }, 400);
+
+  // A etapa precisa ser deste cliente: sem conferir, daria para apontar o
+  // gatilho de um cliente para a etapa de outro.
+  const etapa = await c.env.DB.prepare(
+    'SELECT id FROM funnel_stages WHERE id = ? AND tenant_id = ?',
+  )
+    .bind(stageId, id)
+    .first();
+  if (!etapa) return c.json({ error: 'etapa não pertence a este cliente' }, 400);
+
+  await c.env.DB.prepare(
+    'INSERT INTO stage_triggers (tenant_id, stage_id, frase, emoji_obrigatorio) VALUES (?, ?, ?, ?)',
+  )
+    .bind(id, stageId, frase, String(b.emoji ?? '').trim() || null)
+    .run();
+
+  return c.json({ ok: true }, 201);
+});
+
+admin.delete('/tenants/:id/gatilhos/:gid', async (c) => {
+  const r = await c.env.DB.prepare('DELETE FROM stage_triggers WHERE id = ? AND tenant_id = ?')
+    .bind(Number(c.req.param('gid')), Number(c.req.param('id')))
+    .run();
+  return r.meta.changes ? c.json({ ok: true }) : c.json({ error: 'gatilho nao encontrado' }, 404);
+});
+
+/** Ultimas movimentacoes de card, para ver o gatilho funcionando — ou nao. */
+admin.get('/tenants/:id/movimentacoes', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT gatilho, trecho, etapa_de, etapa_para, moveu, motivo, created_at
+     FROM card_moves WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 40`,
+  )
+    .bind(Number(c.req.param('id')))
+    .all();
+  return c.json(results);
 });
 
 /** Numeros de WhatsApp do cliente: uma inbox do Chatwoot por instancia do Evolution. */
