@@ -392,6 +392,7 @@
             <h2>Metas de conversão no Google Ads</h2>
             <div class="linha-acoes">
               <button id="btn-metas">Gerar metas</button>
+              <button id="btn-meta-nova">Adicionar meta</button>
               <span class="carregando" id="metas-estado">propõe a partir das etapas e mostra antes de publicar</span>
             </div>
             <div id="metas"></div>
@@ -472,6 +473,7 @@
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
         document.getElementById('btn-sync').addEventListener('click', () => sincronizarEtapas(id));
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
+        document.getElementById('btn-meta-nova').addEventListener('click', () => adicionarMeta(id));
         document.getElementById('btn-gatilho').addEventListener('click', () => adicionarGatilho(id));
 
         tela.querySelectorAll('tr.clicavel').forEach((tr) =>
@@ -966,44 +968,116 @@
 
       // ---------- metas de conversão ----------
       let metasPropostas = [];
+      let contaMetas = null;
 
       async function preverMetas(id) {
-        const alvo = document.getElementById('metas');
         const estado = document.getElementById('metas-estado');
         estado.textContent = 'consultando a conta do Google Ads…';
-        alvo.innerHTML = '';
+        document.getElementById('metas').innerHTML = '';
         try {
           const r = await api('/tenants/' + id + '/metas/preview');
           metasPropostas = r.metas;
-          const novas = r.metas.filter(function (m) { return !m.jaExiste; }).length;
-          estado.textContent = 'conta ' + r.conta + ' · ' + novas + ' a criar · ' + (r.metas.length - novas) + ' já existem';
-
-          alvo.innerHTML =
-            '<table><thead><tr><th>Criar</th><th>Nome</th><th>Etapa</th><th>Categoria</th>' +
-            '<th>Valor</th><th>Contagem</th><th>Clique</th><th>Situação</th></tr></thead><tbody>' +
-            r.metas.map(function (m, i) {
-              return '<tr><td><input type="checkbox" data-i="' + i + '" class="m-on" ' + (m.jaExiste ? '' : 'checked') + ' /></td>' +
-                '<td><input class="m-nome" data-i="' + i + '" value="' + esc(m.nome) + '" /></td>' +
-                '<td>' + seletorEtapa(m, i) + '</td>' +
-                '<td><select class="m-cat" data-i="' + i + '">' + opcoes(['CONTACT', 'QUALIFIED_LEAD', 'PURCHASE'], m.categoria) + '</select></td>' +
-                '<td><input class="m-valor" data-i="' + i + '" value="' + (m.valor === null ? '' : m.valor) + '" placeholder="real" /></td>' +
-                '<td><select class="m-cont" data-i="' + i + '">' + opcoes(['ONE_PER_CLICK', 'MANY_PER_CLICK'], m.contagem) + '</select></td>' +
-                '<td><input class="m-jc" data-i="' + i + '" value="' + m.janelaClique + '" style="width:52px" /></td>' +
-                '<td class="' + (m.jaExiste ? 'st-ok' : 'st-recebido') + '">' + (m.jaExiste ? 'já existe' : 'nova') + '</td></tr>';
-            }).join('') +
-            '</tbody></table>' +
-            '<p class="carregando" style="margin-top:10px">As quatro metas têm o mesmo nome em todos os clientes; o que muda é a etapa que dispara cada uma. ' +
-            'Valor vazio = a conversão carrega o valor real da negociação. ' +
-            'Meta que já existe é apenas ligada à etapa, não é criada de novo.</p>' +
-            '<div class="linha-acoes" style="margin-top:12px">' +
-            '<button id="btn-validar">Validar no Google</button>' +
-            '<button id="btn-publicar" class="principal">Publicar na conta</button></div>';
-
-          document.getElementById('btn-validar').addEventListener('click', function () { publicarMetas(id, true); });
-          document.getElementById('btn-publicar').addEventListener('click', function () { publicarMetas(id, false); });
+          contaMetas = r.conta;
+          renderMetas(id);
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         }
+      }
+
+      function renderMetas(id) {
+        const estado = document.getElementById('metas-estado');
+        const novas = metasPropostas.filter(function (m) { return !m.jaExiste; }).length;
+        estado.textContent =
+          (contaMetas ? 'conta ' + contaMetas + ' · ' : '') +
+          novas + ' a criar · ' + (metasPropostas.length - novas) + ' já existem';
+
+        document.getElementById('metas').innerHTML =
+          '<table><thead><tr><th>Criar</th><th>Nome</th><th>Etapa</th><th>Categoria</th>' +
+          '<th>Valor</th><th>Contagem</th><th>Clique</th><th>Situação</th></tr></thead><tbody>' +
+          metasPropostas.map(function (m, i) {
+            return '<tr><td><input type="checkbox" data-i="' + i + '" class="m-on" ' + (m.marcada ? 'checked' : '') + ' /></td>' +
+              '<td><input class="m-nome" data-i="' + i + '" value="' + esc(m.nome) + '" /></td>' +
+              '<td>' + seletorEtapa(m, i) + '</td>' +
+              '<td><select class="m-cat" data-i="' + i + '">' + opcoes(['CONTACT', 'QUALIFIED_LEAD', 'PURCHASE'], m.categoria) + '</select></td>' +
+              '<td><input class="m-valor" data-i="' + i + '" value="' + (m.valor === null ? '' : m.valor) + '" placeholder="real" /></td>' +
+              '<td><select class="m-cont" data-i="' + i + '">' + opcoes(['ONE_PER_CLICK', 'MANY_PER_CLICK'], m.contagem) + '</select></td>' +
+              '<td><input class="m-jc" data-i="' + i + '" value="' + m.janelaClique + '" style="width:52px" /></td>' +
+              (m.fora
+                ? '<td><button class="m-fora" data-i="' + i + '">remover</button></td>'
+                : '<td class="' + (m.jaExiste ? 'st-ok' : 'st-recebido') + '">' + (m.jaExiste ? 'já existe' : 'nova') + '</td>') +
+              '</tr>';
+          }).join('') +
+          '</tbody></table>' +
+          '<p class="carregando" style="margin-top:10px">As metas do catálogo têm o mesmo nome em todos os clientes; o que muda é a etapa que dispara cada uma. ' +
+          'Valor vazio = a conversão carrega o valor real da negociação. ' +
+          'Meta que já existe é apenas ligada à etapa, não é criada de novo. ' +
+          'Meta adicionada à mão vale só para este cliente.</p>' +
+          '<div class="linha-acoes" style="margin-top:12px">' +
+          '<button id="btn-validar">Validar no Google</button>' +
+          '<button id="btn-publicar" class="principal">Publicar na conta</button></div>';
+
+        document.getElementById('btn-validar').addEventListener('click', function () { publicarMetas(id, true); });
+        document.getElementById('btn-publicar').addEventListener('click', function () { publicarMetas(id, false); });
+        document.querySelectorAll('.m-fora').forEach(function (b) {
+          b.addEventListener('click', function () { removerMeta(id, Number(b.dataset.i)); });
+        });
+      }
+
+      // Uma meta fora do catálogo: o cliente que precisa de uma conversão que os
+      // outros não têm. Mesmo caminho de publicação das demais — o que muda é que
+      // o evento vem do nome, já que não há entrada no catálogo para consultar.
+      function adicionarMeta(id) {
+        if (!metasPropostas.length) {
+          document.getElementById('metas-estado').textContent = 'gere as metas antes de adicionar uma';
+          return;
+        }
+        guardarEdicoes();
+        metasPropostas = metasPropostas.concat([{
+          evento: '',
+          nome: 'CRM - ',
+          categoria: 'QUALIFIED_LEAD',
+          valor: null,
+          primary: false,
+          contagem: 'ONE_PER_CLICK',
+          janelaClique: 30,
+          janelaView: 1,
+          stageId: null,
+          stageNome: '',
+          etapasPossiveis: metasPropostas[0].etapasPossiveis || [],
+          jaExiste: false,
+          idExistente: null,
+          marcada: true,
+          fora: true,
+        }]);
+        renderMetas(id);
+        const campo = document.querySelector('.m-nome[data-i="' + (metasPropostas.length - 1) + '"]');
+        if (campo) { campo.focus(); campo.setSelectionRange(campo.value.length, campo.value.length); }
+      }
+
+      function removerMeta(id, i) {
+        guardarEdicoes();
+        metasPropostas = metasPropostas.filter(function (_, j) { return j !== i; });
+        renderMetas(id);
+      }
+
+      /** Redesenhar a tabela apaga os inputs; salva o que foi digitado antes. */
+      function guardarEdicoes() {
+        metasPropostas = metasEditadas(true);
+      }
+
+      /**
+       * Nome livre vira evento estável. É a chave de deduplicação da conversão,
+       * então não pode mudar depois — e por isso só é derivado uma vez, quando a
+       * meta ainda não tem evento.
+       */
+      function eventoDoNome(nome) {
+        return String(nome || '')
+          .replace(/^CRM\s*-\s*/i, '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '');
       }
 
       // A etapa que dispara cada meta muda de cliente para cliente, entao a
@@ -1017,14 +1091,21 @@
         return '<select class="m-stage" data-i="' + i + '"><option value="">(nenhuma)</option>' + opts + '</select>';
       }
 
-      function metasEditadas() {
+      /** `tudo` mantém as desmarcadas — usado ao redesenhar, não ao publicar. */
+      function metasEditadas(tudo) {
         function ler(cls, i) { return document.querySelector('.' + cls + '[data-i="' + i + '"]'); }
         return metasPropostas
           .map(function (m, i) {
-            if (!ler('m-on', i).checked) return null;
+            const marcada = ler('m-on', i).checked;
+            if (!marcada && !tudo) return null;
             const valor = ler('m-valor', i).value.trim();
+            const nome = ler('m-nome', i).value.trim();
             return Object.assign({}, m, {
-              nome: ler('m-nome', i).value.trim(),
+              nome: nome,
+              marcada: marcada,
+              // uma meta do catálogo mantém o evento; a adicionada à mão o ganha
+              // do nome, e só na primeira vez
+              evento: m.evento || eventoDoNome(nome),
               categoria: ler('m-cat', i).value,
               valor: valor === '' ? null : Number(valor),
               contagem: ler('m-cont', i).value,
@@ -1041,6 +1122,11 @@
         const estado = document.getElementById('metas-estado');
         const metas = metasEditadas();
         if (!metas.length) { estado.textContent = 'nenhuma meta marcada'; return; }
+        const semNome = metas.find(function (m) { return !m.evento; });
+        if (semNome) { estado.textContent = 'meta sem nome utilizável: "' + semNome.nome + '"'; return; }
+        const eventos = metas.map(function (m) { return m.evento; });
+        const repetido = eventos.find(function (e, i) { return eventos.indexOf(e) !== i; });
+        if (repetido) { estado.textContent = 'duas metas com o mesmo nome (' + repetido + ')'; return; }
         estado.textContent = validar ? 'validando no Google…' : 'publicando…';
         try {
           const r = await enviar('/tenants/' + id + '/metas', 'POST', { metas: metas, validar: validar });

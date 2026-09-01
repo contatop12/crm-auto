@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { proporMetas, CATALOGO } from '../../src/domain/metas';
+import { proporMetas, metasForaDoCatalogo, CATALOGO } from '../../src/domain/metas';
+import type { EtapaLigada } from '../../src/domain/metas';
 import type { Stage } from '../../src/domain/types';
 
 // funil da Persianas (board 13)
@@ -165,5 +166,61 @@ describe('proporMetas', () => {
 
   test('meta que nao existe vem marcada como nova', () => {
     expect(proporMetas(persianas, []).every((m) => m.jaExiste === false)).toBe(true);
+  });
+});
+
+describe('metasForaDoCatalogo', () => {
+  const ligada = (over: Partial<EtapaLigada> = {}): EtapaLigada => ({
+    stageId: 6,
+    evento: 'visita_tecnica',
+    nome: 'CRM - Visita Técnica',
+    categoria: 'QUALIFIED_LEAD',
+    valor: 80,
+    primary: false,
+    contagem: 'ONE_PER_CLICK',
+    janelaClique: 30,
+    janelaView: 1,
+    actionId: '8811223344',
+    ...over,
+  });
+
+  test('devolve so o que nao esta no catalogo', () => {
+    const fora = metasForaDoCatalogo(
+      persianas,
+      [ligada(), ligada({ stageId: 5, evento: 'qualificado_2', nome: 'CRM - Lead Qualificado 2' })],
+      [],
+    );
+    expect(fora.map((m) => m.evento)).toEqual(['visita_tecnica']);
+  });
+
+  test('a meta de fora sobrevive a proxima previa', () => {
+    // sem isto ela sumiria da tela, ainda ligada a etapa mas invisivel
+    const m = metasForaDoCatalogo(persianas, [ligada()], [])[0]!;
+    expect(m.fora).toBe(true);
+    expect(m.marcada).toBe(true);
+    expect(m.stageId).toBe(6);
+    expect(m.stageNome).toBe('Produção');
+    expect(m.valor).toBe(80);
+  });
+
+  test('as opcoes de etapa sao as mesmas do catalogo', () => {
+    const m = metasForaDoCatalogo(persianas, [ligada()], [])[0]!;
+    expect(m.etapasPossiveis.map((e) => e.id)).toEqual(
+      proporMetas(persianas, []).find((x) => x.evento === 'qualificado_2')!.etapasPossiveis.map((e) => e.id),
+    );
+  });
+
+  test('so conta como existente se a acao ainda esta na conta', () => {
+    const naConta = [
+      { id: '8811223344', name: 'CRM - Visita Técnica', category: 'QUALIFIED_LEAD', type: 'UPLOAD_CLICKS', status: 'ENABLED', primaryForGoal: false },
+    ];
+    expect(metasForaDoCatalogo(persianas, [ligada()], naConta)[0]!.jaExiste).toBe(true);
+    // apagada no Google Ads: precisa ser recriada, nao so religada
+    expect(metasForaDoCatalogo(persianas, [ligada()], [])[0]!.jaExiste).toBe(false);
+    expect(metasForaDoCatalogo(persianas, [ligada({ actionId: null })], naConta)[0]!.jaExiste).toBe(false);
+  });
+
+  test('etapa sem evento nao vira meta', () => {
+    expect(metasForaDoCatalogo(persianas, [ligada({ evento: '' })], []).length).toBe(0);
   });
 });

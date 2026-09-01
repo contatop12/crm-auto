@@ -4,7 +4,7 @@ import { requireAccess, type AccessIdentity } from '../middleware/access';
 import { ChatwootClient } from '../clients/chatwoot';
 import { GoogleAdsClient, criarConversionActions } from '../clients/googleAds';
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
-import { proporMetas, type MetaProposta } from '../domain/metas';
+import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import { avaliarEtapa } from '../domain/fluxo';
 
 /**
@@ -230,24 +230,53 @@ admin.get('/tenants/:id/metas/preview', async (c) => {
     .bind(id)
     .all<{ id: number; posicao: number; nome: string; isFinal: number; autoOnReply: number }>();
 
+  // O que ja esta ligado: e' dai que saem as metas fora do catalogo, criadas a
+  // mao para este cliente.
+  const { results: ligadas } = await c.env.DB.prepare(
+    `SELECT id AS stageId, conversion_event AS evento, ca_nome AS nome,
+            ca_categoria AS categoria, conversion_value AS valor, ca_primary AS primary_,
+            ca_contagem AS contagem, ca_janela_clique AS janelaClique,
+            ca_janela_view AS janelaView, conversion_action_id AS actionId
+     FROM funnel_stages
+     WHERE tenant_id = ? AND conversion_event IS NOT NULL AND ca_nome IS NOT NULL`,
+  )
+    .bind(id)
+    .all<Record<string, string | number | null>>();
+
   if (!stages.length) {
     return c.json({ error: 'sincronize as etapas do funil antes de gerar as metas' }, 400);
   }
 
   const existentes = await GoogleAdsClient.fromEnv(c.env).conversionActions(t.gaCustomerId);
+  const funil = stages.map((s) => ({
+    id: s.id,
+    posicao: s.posicao,
+    nome: s.nome,
+    isFinal: !!s.isFinal,
+    autoOnReply: !!s.autoOnReply,
+  }));
 
   return c.json({
     conta: t.gaCustomerId,
-    metas: proporMetas(
-      stages.map((s) => ({
-        id: s.id,
-        posicao: s.posicao,
-        nome: s.nome,
-        isFinal: !!s.isFinal,
-        autoOnReply: !!s.autoOnReply,
-      })),
-      existentes,
-    ),
+    metas: [
+      ...proporMetas(funil, existentes),
+      ...metasForaDoCatalogo(
+        funil,
+        ligadas.map((l) => ({
+          stageId: Number(l.stageId),
+          evento: String(l.evento ?? ''),
+          nome: String(l.nome ?? ''),
+          categoria: (l.categoria ?? 'QUALIFIED_LEAD') as 'CONTACT' | 'QUALIFIED_LEAD' | 'PURCHASE',
+          valor: l.valor === null ? null : Number(l.valor),
+          primary: !!l.primary_,
+          contagem: (l.contagem ?? 'ONE_PER_CLICK') as 'ONE_PER_CLICK' | 'MANY_PER_CLICK',
+          janelaClique: Number(l.janelaClique ?? 30),
+          janelaView: Number(l.janelaView ?? 1),
+          actionId: l.actionId === null ? null : String(l.actionId),
+        })),
+        existentes,
+      ),
+    ],
   });
 });
 
@@ -264,6 +293,14 @@ admin.post('/tenants/:id/metas', async (c) => {
   const body = await c.req.json<{ metas: MetaProposta[]; validar?: boolean }>();
   const metas = (body.metas ?? []).filter((m) => m && m.nome);
   if (!metas.length) return c.json({ error: 'nenhuma meta selecionada' }, 400);
+
+  // O evento e' a chave de deduplicacao da conversao: sem ele, ou repetido, a
+  // mesma venda seria mandada duas vezes ao Google.
+  const semEvento = metas.find((m) => !m.evento);
+  if (semEvento) return c.json({ error: `meta "${semEvento.nome}" sem evento` }, 400);
+  const eventos = metas.map((m) => m.evento);
+  const repetido = eventos.find((e, i) => eventos.indexOf(e) !== i);
+  if (repetido) return c.json({ error: `duas metas com o evento "${repetido}"` }, 400);
 
   const cli = GoogleAdsClient.fromEnv(c.env);
   const novas = metas.filter((m) => !m.jaExiste);

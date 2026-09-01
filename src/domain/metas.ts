@@ -103,20 +103,42 @@ export interface MetaProposta {
   idExistente: string | null;
   /** Vem marcada na tela? Meta opcional inexistente comeca desmarcada. */
   marcada: boolean;
+  /** Meta que o painel criou a mao, fora do catalogo. Vale so para o cliente. */
+  fora?: boolean;
+}
+
+/** Uma etapa que ja tem conversao ligada, lida do banco. */
+export interface EtapaLigada {
+  stageId: number;
+  evento: string;
+  nome: string;
+  categoria: 'CONTACT' | 'QUALIFIED_LEAD' | 'PURCHASE';
+  valor: number | null;
+  primary: boolean;
+  contagem: 'ONE_PER_CLICK' | 'MANY_PER_CLICK';
+  janelaClique: number;
+  janelaView: number;
+  actionId: string | null;
 }
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
+/**
+ * Etapas que podem disparar uma conversao: tudo menos a entrada, a etapa de
+ * resposta automatica e as de perda.
+ */
+function etapasUteis(stages: Stage[]): Stage[] {
+  const ordenadas = [...stages].sort((a, b) => a.posicao - b.posicao);
+  const entrada = ordenadas[0]?.id;
+  return ordenadas.filter(
+    (s) => s.id !== entrada && !s.autoOnReply && !(s.isFinal && !ehGanho(s)),
+  );
+}
+
 export function proporMetas(stages: Stage[], existentes: ConversionAction[]): MetaProposta[] {
   const porNome = new Map(existentes.map((a) => [norm(a.name), a]));
   const ordenadas = [...stages].sort((a, b) => a.posicao - b.posicao);
-  const entrada = ordenadas[0]?.id;
-
-  // Etapas que podem disparar uma conversao: tudo menos a entrada, a etapa de
-  // resposta automatica e as de perda.
-  const uteis = ordenadas.filter(
-    (s) => s.id !== entrada && !s.autoOnReply && !(s.isFinal && !ehGanho(s)),
-  );
+  const uteis = etapasUteis(stages);
   const intermediarias = uteis.filter((s) => !s.isFinal);
   const ganha = ordenadas.find((s) => s.isFinal && ehGanho(s)) ?? null;
 
@@ -163,6 +185,45 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
       marcada: m.opcional ? !!achada : true,
     };
   });
+}
+
+/**
+ * As metas que o cliente tem alem do catalogo.
+ *
+ * Sem isto, uma meta adicionada a mao no painel some da tela na proxima previa —
+ * continuaria ligada a etapa no banco, mas invisivel, e a etapa nao teria como
+ * ser trocada nem a meta desligada.
+ */
+export function metasForaDoCatalogo(
+  stages: Stage[],
+  ligadas: EtapaLigada[],
+  existentes: ConversionAction[],
+): MetaProposta[] {
+  const doCatalogo = new Set(CATALOGO.map((m) => m.evento));
+  const porId = new Map(existentes.map((a) => [String(a.id), a]));
+  const opcoes = etapasUteis(stages).map((s) => ({ id: s.id, nome: s.nome }));
+  const nomeDa = new Map(stages.map((s) => [s.id, s.nome]));
+
+  return ligadas
+    .filter((l) => l.evento && !doCatalogo.has(l.evento))
+    .map((l) => ({
+      evento: l.evento,
+      nome: l.nome,
+      categoria: l.categoria,
+      valor: l.valor,
+      primary: l.primary,
+      contagem: l.contagem,
+      janelaClique: l.janelaClique,
+      janelaView: l.janelaView,
+      stageId: l.stageId,
+      stageNome: nomeDa.get(l.stageId) ?? '(sem etapa)',
+      etapasPossiveis: opcoes,
+      // ja foi criada no Google numa publicacao anterior
+      jaExiste: !!l.actionId && porId.has(String(l.actionId)),
+      idExistente: l.actionId ? String(l.actionId) : null,
+      marcada: true,
+      fora: true,
+    }));
 }
 
 /** A unica etapa final que vira conversao e' a de ganho. */
