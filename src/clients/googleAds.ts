@@ -82,6 +82,28 @@ export class GoogleAdsClient {
     return ((JSON.parse(txt) as { results?: T[] }).results ?? []);
   }
 
+  /** POST generico na Google Ads API, para os endpoints de escrita. */
+  async mutate<T>(caminho: string, corpo: unknown): Promise<T> {
+    const token = await this.accessToken();
+    const r = await fetch(`https://googleads.googleapis.com/${V}/${caminho}`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'developer-token': exigir(this.env, 'GOOGLE_ADS_DEVELOPER_TOKEN'),
+        'login-customer-id': exigir(this.env, 'GOOGLE_ADS_MCC_ID'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(corpo),
+    });
+
+    const txt = await r.text();
+    if (!r.ok) {
+      const corpoErro = txt.trimStart().startsWith('<') ? `(HTML ${r.status})` : txt.slice(0, 500);
+      throw new Error(`Google Ads ${r.status}: ${corpoErro}`);
+    }
+    return JSON.parse(txt) as T;
+  }
+
   async conversionActions(customerId: string): Promise<ConversionAction[]> {
     const rows = await this.search<{ conversionAction: ConversionAction }>(
       customerId,
@@ -105,4 +127,53 @@ export class GoogleAdsClient {
       .filter((r) => !r.customerClient.manager)
       .map((r) => ({ id: r.customerClient.id, nome: r.customerClient.descriptiveName ?? '' }));
   }
+}
+
+export interface CriarMeta {
+  nome: string;
+  categoria: string;
+  /** null = a conversao carrega o valor real; o Google nao usa valor padrao. */
+  valor: number | null;
+  primary: boolean;
+  contagem: string;
+  janelaClique: number;
+  janelaView: number;
+}
+
+/**
+ * Cria acoes de conversao offline (`UPLOAD_CLICKS`) na conta do cliente.
+ *
+ * `validateOnly` deixa o Google conferir tudo sem gravar nada — e' o que a tela
+ * de pre-visualizacao usa antes de publicar.
+ */
+export async function criarConversionActions(
+  cli: GoogleAdsClient,
+  customerId: string,
+  metas: CriarMeta[],
+  validateOnly = false,
+): Promise<Array<{ nome: string; id: string | null; erro: string | null }>> {
+  const operations = metas.map((m) => ({
+    create: {
+      name: m.nome,
+      category: m.categoria,
+      type: 'UPLOAD_CLICKS',
+      status: 'ENABLED',
+      primaryForGoal: m.primary,
+      countingType: m.contagem,
+      clickThroughLookbackWindowDays: m.janelaClique,
+      viewThroughLookbackWindowDays: m.janelaView,
+      valueSettings:
+        m.valor === null
+          ? { alwaysUseDefaultValue: false }
+          : { defaultValue: m.valor, alwaysUseDefaultValue: true },
+    },
+  }));
+
+  const resp = await cli.mutate<{ results?: Array<{ resourceName: string }> }>(
+    `customers/${customerId}/conversionActions:mutate`,
+    { operations, validateOnly, partialFailure: false },
+  );
+
+  const ids = (resp.results ?? []).map((r) => r.resourceName.split('/').pop() ?? null);
+  return metas.map((m, i) => ({ nome: m.nome, id: ids[i] ?? null, erro: null }));
 }

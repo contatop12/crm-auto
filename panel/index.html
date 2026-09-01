@@ -182,7 +182,31 @@
       .linha-acoes { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
       .carregando { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
 
+      /* ---------- formulario ---------- */
+      .campo { margin-bottom: 14px; }
+      .campo label {
+        display: block; font-family: var(--mono); font-size: 11px;
+        text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); margin-bottom: 5px;
+      }
+      .campo .dica { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 4px; }
+      input, select {
+        width: 100%; font-family: var(--mono); font-size: 13px; color: var(--ink);
+        background: var(--panel); border: 1px solid var(--rule); border-radius: 3px; padding: 7px 9px;
+      }
+      input:focus, select:focus { outline: 2px solid var(--ink); outline-offset: -1px; border-color: var(--ink); }
+      input[type=checkbox] { width: auto; }
+      .grade { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+      .erro {
+        font-family: var(--mono); font-size: 12px; color: var(--halt);
+        background: var(--panel); border: 1px solid var(--rule); border-left: 2px solid var(--halt);
+        border-radius: 3px; padding: 10px 14px; margin-bottom: 14px;
+      }
+      .principal { color: var(--panel); background: var(--ink); border-color: var(--ink); }
+      .principal:hover { color: var(--panel); background: #000; }
+      td input, td select { padding: 4px 6px; font-size: 12px; }
+
       @media (max-width: 700px) {
+        .grade { grid-template-columns: 1fr; }
         .checagem { flex-wrap: wrap; }
         .checagem-titulo { width: auto; }
         .esconder-mobile { display: none; }
@@ -195,6 +219,7 @@
       <header>
         <h1>P12 CRM Auto</h1>
         <button id="btn-atualizar">Atualizar</button>
+        <button id="btn-novo">Adicionar cliente</button>
         <span class="meta" id="rodape"></span>
       </header>
       <main id="tela"><p class="carregando">Carregando…</p></main>
@@ -301,12 +326,35 @@
           <p class="cliente-slug" style="margin:0 0 28px">${esc(cliente ? cliente.slug : '')}</p>
 
           <section>
+            <h2>Fluxo do lead</h2>
+            <div id="fluxo"></div>
+          </section>
+
+          <section>
             <h2>Integrações</h2>
             <div class="linha-acoes">
               <button id="btn-checar">Checar agora</button>
               <span class="carregando" id="checagem-estado">consulta Chatwoot, Google Ads, etiquetas e WhatsApp ao vivo</span>
             </div>
             <div id="checagens"></div>
+          </section>
+
+          <section>
+            <h2>Etapas do funil</h2>
+            <div class="linha-acoes">
+              <button id="btn-sync">Sincronizar do board</button>
+              <span class="carregando" id="etapas-estado"></span>
+            </div>
+            <div id="etapas"></div>
+          </section>
+
+          <section>
+            <h2>Metas de conversão no Google Ads</h2>
+            <div class="linha-acoes">
+              <button id="btn-metas">Gerar metas</button>
+              <span class="carregando" id="metas-estado">propõe a partir das etapas e mostra antes de publicar</span>
+            </div>
+            <div id="metas"></div>
           </section>
 
           <section>
@@ -363,6 +411,10 @@
 
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
+        document.getElementById('btn-sync').addEventListener('click', () => sincronizarEtapas(id));
+        document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
+        carregarFluxo(id);
+        carregarEtapas(id);
         carregarWebhooks(id, cliente ? cliente.slug : '');
         carregarAvisos(id);
         tela.querySelectorAll('tr.clicavel').forEach((tr) =>
@@ -539,6 +591,279 @@
         }
       }
 
+      async function enviar(caminho, metodo, corpo) {
+        const r = await fetch('/api' + caminho, {
+          method: metodo,
+          headers: { 'content-type': 'application/json' },
+          body: corpo === undefined ? undefined : JSON.stringify(corpo),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+        return j;
+      }
+
+      function normalizarSlug(v) {
+        return String(v || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '');
+      }
+
+      function opcoes(lista, valorAtual) {
+        return lista
+          .map(function (o) { return '<option ' + (o === valorAtual ? 'selected' : '') + '>' + o + '</option>'; })
+          .join('');
+      }
+
+      // ---------- cadastro de cliente ----------
+      async function verFormulario() {
+        tela.innerHTML = '<p class="carregando">carregando contas…</p>';
+        rodape.textContent = '';
+
+        let contasCw = [];
+        let contasGa = [];
+        try {
+          contasCw = await api('/chatwoot/accounts');
+          contasGa = await api('/google-ads/accounts').catch(function () { return []; });
+        } catch (e) {
+          tela.innerHTML =
+            '<div class="vazio"><p>Não foi possível carregar as contas.</p><p class="mono">' +
+            esc(e.message) + '</p></div>';
+          return;
+        }
+
+        const optCw = contasCw
+          .map(function (a) { return '<option value="' + a.id + '">#' + a.id + ' — ' + esc(a.nome) + '</option>'; })
+          .join('');
+        const optGa = contasGa
+          .map(function (a) { return '<option value="' + a.id + '">' + a.id + ' — ' + esc(a.nome) + '</option>'; })
+          .join('');
+
+        tela.innerHTML =
+          '<div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>' +
+          '<h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 24px;letter-spacing:-0.02em">Adicionar cliente</h2>' +
+          '<div id="form-erro"></div>' +
+          '<section><h2>Identificação</h2>' +
+            '<div class="campo"><label for="f-nome">Nome do cliente</label>' +
+            '<input id="f-nome" placeholder="Persianas Paulista" /></div>' +
+            '<div class="campo"><label for="f-slug">Endereço nas URLs</label>' +
+            '<input id="f-slug" placeholder="gerado a partir do nome" />' +
+            '<p class="dica">os webhooks vão apontar para /ingest/&lt;endereço&gt;/…</p></div>' +
+          '</section>' +
+          '<section><h2>Chatwoot</h2>' +
+            '<div class="campo"><label for="f-cw">Conta</label>' +
+            '<select id="f-cw"><option value="">selecione…</option>' + optCw + '</select></div>' +
+            '<div class="grade">' +
+              '<div class="campo"><label for="f-funil">Board do funil de Ads</label>' +
+              '<select id="f-funil" disabled><option value="">escolha a conta antes</option></select>' +
+              '<p class="dica">é a entrada neste board que avisa o grupo</p></div>' +
+              '<div class="campo"><label for="f-organico">Board de entrada (Orgânico)</label>' +
+              '<select id="f-organico" disabled><option value="">escolha a conta antes</option></select></div>' +
+            '</div>' +
+          '</section>' +
+          '<section><h2>Google Ads e envio</h2>' +
+            '<div class="grade">' +
+              '<div class="campo"><label for="f-ga">Conta do Google Ads</label>' +
+              '<select id="f-ga"><option value="">nenhuma</option>' + optGa + '</select></div>' +
+              '<div class="campo"><label for="f-evo">Instância do WhatsApp</label>' +
+              '<input id="f-evo" placeholder="nome exato no Evolution" /></div>' +
+            '</div>' +
+            '<div class="campo"><label for="f-pulse">codi_id do Pulseboard</label>' +
+            '<input id="f-pulse" placeholder="usado para avisar o grupo do cliente" /></div>' +
+          '</section>' +
+          '<div class="linha-acoes"><button id="btn-salvar" class="principal">Adicionar cliente</button>' +
+          '<span class="carregando" id="form-estado">começa em modo sombra: nada é enviado ao Google Ads</span></div>';
+
+        document.getElementById('btn-voltar').addEventListener('click', verOverview);
+
+        const nome = document.getElementById('f-nome');
+        const slug = document.getElementById('f-slug');
+        nome.addEventListener('input', function () {
+          if (!slug.dataset.editado) slug.value = normalizarSlug(nome.value);
+        });
+        slug.addEventListener('input', function () { slug.dataset.editado = '1'; });
+
+        document.getElementById('f-cw').addEventListener('change', async function (ev) {
+          const acc = ev.target.value;
+          const funil = document.getElementById('f-funil');
+          const org = document.getElementById('f-organico');
+          for (const el of [funil, org]) {
+            el.disabled = true;
+            el.innerHTML = '<option value="">carregando…</option>';
+          }
+          if (!acc) return;
+          const boards = await api('/chatwoot/accounts/' + acc + '/boards');
+          const opts = boards
+            .map(function (b) { return '<option value="' + b.id + '">#' + b.id + ' — ' + esc(b.nome) + ' (' + b.tarefas + ' cards)</option>'; })
+            .join('');
+          funil.innerHTML = '<option value="">selecione…</option>' + opts;
+          org.innerHTML = '<option value="">nenhum</option>' + opts;
+          funil.disabled = false;
+          org.disabled = false;
+        });
+
+        document.getElementById('btn-salvar').addEventListener('click', async function () {
+          const alvo = document.getElementById('form-erro');
+          const estado = document.getElementById('form-estado');
+          alvo.innerHTML = '';
+          estado.textContent = 'salvando…';
+          try {
+            const r = await enviar('/tenants', 'POST', {
+              nome: nome.value,
+              slug: slug.value,
+              cw_account_id: document.getElementById('f-cw').value,
+              cw_board_funil_id: document.getElementById('f-funil').value,
+              cw_board_organico_id: document.getElementById('f-organico').value,
+              ga_customer_id: document.getElementById('f-ga').value,
+              evo_instancia: document.getElementById('f-evo').value,
+              pulseboard_codi_id: document.getElementById('f-pulse').value,
+            });
+            verCliente(r.id);
+          } catch (e) {
+            alvo.innerHTML = '<div class="erro">' + esc(e.message) + '</div>';
+            estado.textContent = '';
+          }
+        });
+      }
+
+      // ---------- etapas do funil ----------
+      async function carregarFluxo(id) {
+        const alvo = document.getElementById('fluxo');
+        alvo.innerHTML = '<p class="carregando">carregando…</p>';
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/fluxo');
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+
+        const rotulo = { ok: 'ok', erro: 'erro', aguardando: 'aguarda', pendente: 'falta' };
+        const marca = { ok: 'marca-ok', erro: 'marca-erro', aguardando: 'marca-na', pendente: 'marca-aviso' };
+
+        alvo.innerHTML =
+          (r.modo_sombra
+            ? '<div class="aviso">Modo sombra ligado: nada é enviado de verdade ao Google Ads.</div>'
+            : '') +
+          r.etapas.map(function (e) {
+            return '<div class="checagem">' +
+              '<span class="checagem-marca ' + marca[e.estado] + '">' + rotulo[e.estado] + '</span>' +
+              '<span class="checagem-titulo" style="width:260px">' + esc(e.titulo) + '</span>' +
+              '<span class="checagem-detalhe">' + esc(e.detalhe) +
+              '<br><span style="color:var(--ink-3)">' + esc(e.comoFunciona) + '</span></span>' +
+              '</div>';
+          }).join('');
+      }
+
+      async function carregarEtapas(id) {
+        const alvo = document.getElementById('etapas');
+        const estado = document.getElementById('etapas-estado');
+        const etapas = await api('/tenants/' + id + '/stages').catch(function () { return []; });
+
+        alvo.innerHTML = etapas.length
+          ? '<table><thead><tr><th>#</th><th>Etapa</th><th>Final</th><th>Conversão</th></tr></thead><tbody>' +
+            etapas.map(function (e) {
+              return '<tr><td>' + e.posicao + '</td><td>' + esc(e.nome) + '</td>' +
+                '<td class="motivo">' + (e.is_final ? 'sim' : '') + '</td>' +
+                '<td class="' + (e.conversion_action_id ? 'st-ok' : 'st-recebido') + '">' +
+                (e.conversion_action_id ? esc(e.conversion_event) + ' · ' + esc(e.conversion_action_id) : '—') +
+                '</td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="vazio"><p>Etapas ainda não sincronizadas.</p>' +
+            '<p class="mono">Elas vêm do board do Chatwoot, não são digitadas aqui.</p></div>';
+
+        estado.textContent = etapas.length ? etapas.length + ' etapas' : '';
+      }
+
+      async function sincronizarEtapas(id) {
+        const estado = document.getElementById('etapas-estado');
+        estado.textContent = 'lendo o board…';
+        try {
+          const r = await enviar('/tenants/' + id + '/stages/sync', 'POST');
+          estado.textContent = r.etapas + ' etapas sincronizadas';
+          await carregarEtapas(id);
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
+      }
+
+      // ---------- metas de conversão ----------
+      let metasPropostas = [];
+
+      async function preverMetas(id) {
+        const alvo = document.getElementById('metas');
+        const estado = document.getElementById('metas-estado');
+        estado.textContent = 'consultando a conta do Google Ads…';
+        alvo.innerHTML = '';
+        try {
+          const r = await api('/tenants/' + id + '/metas/preview');
+          metasPropostas = r.metas;
+          const novas = r.metas.filter(function (m) { return !m.jaExiste; }).length;
+          estado.textContent = 'conta ' + r.conta + ' · ' + novas + ' a criar · ' + (r.metas.length - novas) + ' já existem';
+
+          alvo.innerHTML =
+            '<table><thead><tr><th>Criar</th><th>Nome</th><th>Etapa</th><th>Categoria</th>' +
+            '<th>Valor</th><th>Contagem</th><th>Clique</th><th>Situação</th></tr></thead><tbody>' +
+            r.metas.map(function (m, i) {
+              return '<tr><td><input type="checkbox" data-i="' + i + '" class="m-on" ' + (m.jaExiste ? '' : 'checked') + ' /></td>' +
+                '<td><input class="m-nome" data-i="' + i + '" value="' + esc(m.nome) + '" /></td>' +
+                '<td class="motivo">' + esc(m.stageNome) + '</td>' +
+                '<td><select class="m-cat" data-i="' + i + '">' + opcoes(['CONTACT', 'QUALIFIED_LEAD', 'PURCHASE'], m.categoria) + '</select></td>' +
+                '<td><input class="m-valor" data-i="' + i + '" value="' + (m.valor === null ? '' : m.valor) + '" placeholder="real" /></td>' +
+                '<td><select class="m-cont" data-i="' + i + '">' + opcoes(['ONE_PER_CLICK', 'MANY_PER_CLICK'], m.contagem) + '</select></td>' +
+                '<td><input class="m-jc" data-i="' + i + '" value="' + m.janelaClique + '" style="width:52px" /></td>' +
+                '<td class="' + (m.jaExiste ? 'st-ok' : 'st-recebido') + '">' + (m.jaExiste ? 'já existe' : 'nova') + '</td></tr>';
+            }).join('') +
+            '</tbody></table>' +
+            '<p class="carregando" style="margin-top:10px">Valor vazio = a conversão carrega o valor real da negociação. ' +
+            'Meta que já existe é apenas ligada à etapa, não é criada de novo.</p>' +
+            '<div class="linha-acoes" style="margin-top:12px">' +
+            '<button id="btn-validar">Validar no Google</button>' +
+            '<button id="btn-publicar" class="principal">Publicar na conta</button></div>';
+
+          document.getElementById('btn-validar').addEventListener('click', function () { publicarMetas(id, true); });
+          document.getElementById('btn-publicar').addEventListener('click', function () { publicarMetas(id, false); });
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
+      }
+
+      function metasEditadas() {
+        function ler(cls, i) { return document.querySelector('.' + cls + '[data-i="' + i + '"]'); }
+        return metasPropostas
+          .map(function (m, i) {
+            if (!ler('m-on', i).checked) return null;
+            const valor = ler('m-valor', i).value.trim();
+            return Object.assign({}, m, {
+              nome: ler('m-nome', i).value.trim(),
+              categoria: ler('m-cat', i).value,
+              valor: valor === '' ? null : Number(valor),
+              contagem: ler('m-cont', i).value,
+              janelaClique: Number(ler('m-jc', i).value) || 30,
+            });
+          })
+          .filter(Boolean);
+      }
+
+      async function publicarMetas(id, validar) {
+        const estado = document.getElementById('metas-estado');
+        const metas = metasEditadas();
+        if (!metas.length) { estado.textContent = 'nenhuma meta marcada'; return; }
+        estado.textContent = validar ? 'validando no Google…' : 'publicando…';
+        try {
+          const r = await enviar('/tenants/' + id + '/metas', 'POST', { metas: metas, validar: validar });
+          estado.textContent = validar
+            ? 'validado: ' + r.seriam_criadas + ' seriam criadas, nada foi gravado'
+            : r.criadas + ' criadas · ' + r.ligadas + ' ligadas a etapas';
+          if (!validar) { await preverMetas(id); await carregarEtapas(id); }
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
+      }
+
+      document.getElementById('btn-novo').addEventListener('click', verFormulario);
       document.getElementById('btn-atualizar').addEventListener('click', verOverview);
 
       verOverview().catch((e) => {

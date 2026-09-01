@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, QueueMessage } from './env';
 import { ingest } from './routes/ingest';
 import { api } from './routes/api';
+import { admin } from './routes/admin';
 import { consumir } from './queue/consumer';
 import { expurgarPayloadsAntigos } from './db/observability';
 
@@ -24,6 +25,7 @@ app.get('/health', async (c) => {
 
 app.route('/ingest', ingest);
 app.route('/api', api);
+app.route('/api', admin);
 
 // Qualquer outra rota e' o painel (SPA).
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
