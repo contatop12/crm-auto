@@ -355,9 +355,15 @@
           return;
         }
 
-        // busca a trilha de cada cliente em paralelo
+        // busca a trilha de cada cliente em paralelo. A rota devolve uma pagina
+        // ({ linhas, total }), nao um array — o `?? []` cobre tanto a falha
+        // quanto uma resposta em formato inesperado.
         const trilhas = await Promise.all(
-          clientes.map((c) => api('/tenants/' + c.tenant_id + '/events?limit=40').catch(() => [])),
+          clientes.map((c) =>
+            api('/tenants/' + c.tenant_id + '/events?limit=40')
+              .then((r) => r.linhas ?? [])
+              .catch(() => []),
+          ),
         );
 
         tela.innerHTML = clientes
