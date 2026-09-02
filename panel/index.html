@@ -591,13 +591,17 @@
       }
 
       // O Chatwoot posta sem seguir redirect. Se o Access ainda cobre /ingest,
-      // registrar o webhook so faria ele bater numa pagina de login e perder o
+      // registrar o webhook só faria ele bater numa página de login e perder o
       // evento — por isso a sondagem antes.
+      //
+      // Usa /ping, que não grava evento. A sondagem antiga era um POST vazio na
+      // rota real: dava 401 por falta de assinatura e gravava um erro, que
+      // aparecia no painel como se o cliente estivesse quebrado.
       async function ingestAlcancavel(slug) {
         try {
-          const r = await fetch('/ingest/' + slug + '/chatwoot', { method: 'POST', body: '{}' });
+          const r = await fetch('/ingest/' + slug + '/ping', { method: 'GET' });
           if (r.redirected || /cloudflareaccess\.com/.test(r.url)) return false;
-          return true; // 401 (sem assinatura) já prova que a rota chegou no Worker
+          return r.status === 204;
         } catch {
           return false;
         }

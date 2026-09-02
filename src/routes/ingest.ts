@@ -105,6 +105,20 @@ ingest.post('/:slug/chatwoot', async (c) => {
 });
 
 /**
+ * Sondagem de alcance, para o painel conferir se o Access ainda cobre /ingest
+ * antes de registrar o webhook no Chatwoot.
+ *
+ * Existe porque a sondagem antiga era um POST vazio na rota real: dava 401 por
+ * falta de assinatura — correto — e gravava um evento de ERRO, que aparecia no
+ * painel como se o cliente estivesse quebrado. Diagnostico que inventa o
+ * problema que foi diagnosticar.
+ *
+ * Nao grava evento e nao devolve nada sobre o cliente: so' prova que a rota
+ * chega ao Worker em vez de cair na tela de login.
+ */
+ingest.get('/:slug/ping', (c) => c.body(null, 204));
+
+/**
  * Mudanca de etapa do Kanban, disparada pelas regras de automacao do Chatwoot
  * ("Evento Qualificado 1", "Evento Compra", ...). O conjunto de regras muda de
  * cliente para cliente, por isso a rota nao assume nada sobre o corpo.
