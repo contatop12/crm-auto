@@ -272,6 +272,7 @@
         <h1>P12 CRM Auto</h1>
         <button id="btn-atualizar">Atualizar</button>
         <button id="btn-novo">Adicionar cliente</button>
+        <button id="btn-padroes">Padronizações</button>
         <span class="meta" id="rodape"></span>
       </header>
       <main id="tela"><p class="carregando">Carregando…</p></main>
@@ -382,7 +383,8 @@
           <h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.02em">
             ${esc(cliente ? cliente.nome : 'Cliente ' + id)}
           </h2>
-          <p class="cliente-slug" style="margin:0 0 20px">${esc(cliente ? cliente.slug : '')}</p>
+          <p class="cliente-slug" style="margin:0 0 12px">${esc(cliente ? cliente.slug : '')}</p>
+          <div class="linha-acoes" style="margin:0 0 20px"><button id="btn-editar">Editar cliente</button></div>
 
           <div class="abas" role="tablist">
             <button class="aba" role="tab" data-aba="fluxo" aria-selected="true">Fluxo</button>
@@ -447,6 +449,16 @@
           </section>
 
           <section>
+            <h2>Etiquetas e atributos</h2>
+            <div class="linha-acoes">
+              <button id="btn-prov">Conferir</button>
+              <button id="btn-prov-criar" class="principal">Gerar no Chatwoot</button>
+              <span class="carregando" id="prov-estado">cria o que falta, conforme as Padronizacoes</span>
+            </div>
+            <div id="prov"></div>
+          </section>
+
+          <section>
             <h2>Webhooks no Chatwoot</h2>
             <div class="linha-acoes">
               <button id="btn-webhook">Registrar webhook do painel</button>
@@ -492,11 +504,14 @@
           </div>`;
 
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
+        document.getElementById('btn-editar').addEventListener('click', () => verFormulario(id));
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
         document.getElementById('btn-sync').addEventListener('click', () => sincronizarEtapas(id));
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
         document.getElementById('btn-meta-nova').addEventListener('click', () => adicionarMeta(id));
         document.getElementById('btn-gatilho').addEventListener('click', () => adicionarGatilho(id));
+        document.getElementById('btn-prov').addEventListener('click', () => provisionar(id, false));
+        document.getElementById('btn-prov-criar').addEventListener('click', () => provisionar(id, true));
 
         tela.querySelectorAll('tr.clicavel').forEach((tr) =>
           tr.addEventListener('click', () => verPayload(id, tr.dataset.ev, false)),
@@ -522,7 +537,7 @@
             carregarGatilhos(id);
             carregarInstancias(id);
           }
-          if (nome === 'integracoes') carregarWebhooks(id, slug);
+          if (nome === 'integracoes') { carregarWebhooks(id, slug); provisionar(id, false); }
           if (nome === 'atividade') carregarAvisos(id);
         }
 
@@ -812,15 +827,18 @@
       }
 
       // ---------- cadastro de cliente ----------
-      async function verFormulario() {
+      /** Serve para criar e para editar: com `id`, carrega e salva com PATCH. */
+      async function verFormulario(id) {
         tela.innerHTML = '<p class="carregando">carregando contas…</p>';
         rodape.textContent = '';
 
         let contasCw = [];
         let contasGa = [];
+        let atual = null;
         try {
           contasCw = await api('/chatwoot/accounts');
           contasGa = await api('/google-ads/accounts').catch(function () { return []; });
+          if (id) atual = await api('/tenants/' + id + '/config');
         } catch (e) {
           tela.innerHTML =
             '<div class="vazio"><p>Não foi possível carregar as contas.</p><p class="mono">' +
@@ -837,14 +855,17 @@
 
         tela.innerHTML =
           '<div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>' +
-          '<h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 24px;letter-spacing:-0.02em">Adicionar cliente</h2>' +
+          '<h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 24px;letter-spacing:-0.02em">' +
+          (atual ? 'Editar ' + esc(atual.nome) : 'Adicionar cliente') + '</h2>' +
           '<div id="form-erro"></div>' +
           '<section><h2>Identificação</h2>' +
             '<div class="campo"><label for="f-nome">Nome do cliente</label>' +
             '<input id="f-nome" placeholder="Persianas Paulista" /></div>' +
             '<div class="campo"><label for="f-slug">Endereço nas URLs</label>' +
-            '<input id="f-slug" placeholder="gerado a partir do nome" />' +
-            '<p class="dica">os webhooks vão apontar para /ingest/&lt;endereço&gt;/…</p></div>' +
+            '<input id="f-slug" placeholder="gerado a partir do nome"' + (atual ? ' disabled' : '') + ' />' +
+            '<p class="dica">' + (atual
+              ? 'não muda depois de criado: os webhooks registrados já apontam para ele'
+              : 'os webhooks vão apontar para /ingest/&lt;endereço&gt;/…') + '</p></div>' +
           '</section>' +
           '<section><h2>Chatwoot</h2>' +
             '<div class="campo"><label for="f-cw">Conta</label>' +
@@ -867,10 +888,22 @@
             '<div class="campo"><label for="f-pulse">codi_id do Pulseboard</label>' +
             '<input id="f-pulse" placeholder="usado para avisar o grupo do cliente" /></div>' +
           '</section>' +
-          '<div class="linha-acoes"><button id="btn-salvar" class="principal">Adicionar cliente</button>' +
-          '<span class="carregando" id="form-estado">começa em modo sombra: nada é enviado ao Google Ads</span></div>';
+          (atual
+            ? '<section><h2>Envio ao Google Ads</h2>' +
+              '<div class="campo"><label><input type="checkbox" id="f-sombra" ' +
+              (atual.validate_only ? 'checked' : '') + ' /> Modo sombra</label>' +
+              '<p class="dica">marcado, a conversão é validada no Google e <strong>não</strong> é gravada. ' +
+              'Desmarque só depois de importar o histórico de conversões — senão o que o n8n já mandou vai de novo.</p></div>' +
+              '</section>'
+            : '') +
+          '<div class="linha-acoes"><button id="btn-salvar" class="principal">' +
+          (atual ? 'Salvar alterações' : 'Adicionar cliente') + '</button>' +
+          '<span class="carregando" id="form-estado">' +
+          (atual ? '' : 'começa em modo sombra: nada é enviado ao Google Ads') + '</span></div>';
 
-        document.getElementById('btn-voltar').addEventListener('click', verOverview);
+        document.getElementById('btn-voltar').addEventListener('click', function () {
+          if (atual) verCliente(id); else verOverview();
+        });
 
         const nome = document.getElementById('f-nome');
         const slug = document.getElementById('f-slug');
@@ -879,8 +912,20 @@
         });
         slug.addEventListener('input', function () { slug.dataset.editado = '1'; });
 
-        document.getElementById('f-cw').addEventListener('change', async function (ev) {
-          const acc = ev.target.value;
+        // preenche o que ja existe; os boards dependem da conta, entao vem depois
+        if (atual) {
+          nome.value = atual.nome || '';
+          slug.value = atual.slug || '';
+          document.getElementById('f-cw').value = atual.cw_account_id || '';
+          document.getElementById('f-ga').value = atual.ga_customer_id || '';
+          document.getElementById('f-evo').value = atual.evo_instancia || '';
+          document.getElementById('f-pulse').value = atual.pulseboard_codi_id || '';
+          if (atual.cw_account_id) {
+            await carregarBoards(atual.cw_account_id, atual.cw_board_funil_id, atual.cw_board_organico_id);
+          }
+        }
+
+        async function carregarBoards(acc, selFunil, selOrg) {
           const funil = document.getElementById('f-funil');
           const org = document.getElementById('f-organico');
           for (const el of [funil, org]) {
@@ -894,8 +939,15 @@
             .join('');
           funil.innerHTML = '<option value="">selecione…</option>' + opts;
           org.innerHTML = '<option value="">nenhum</option>' + opts;
+          if (selFunil) funil.value = selFunil;
+          if (selOrg) org.value = selOrg;
           funil.disabled = false;
           org.disabled = false;
+        }
+
+        document.getElementById('f-cw').addEventListener('change', async function (ev) {
+          const acc = ev.target.value;
+          await carregarBoards(acc, null, null);
         });
 
         document.getElementById('btn-salvar').addEventListener('click', async function () {
@@ -903,18 +955,25 @@
           const estado = document.getElementById('form-estado');
           alvo.innerHTML = '';
           estado.textContent = 'salvando…';
+          const campos = {
+            nome: nome.value,
+            cw_account_id: document.getElementById('f-cw').value,
+            cw_board_funil_id: document.getElementById('f-funil').value,
+            cw_board_organico_id: document.getElementById('f-organico').value,
+            ga_customer_id: document.getElementById('f-ga').value,
+            evo_instancia: document.getElementById('f-evo').value,
+            pulseboard_codi_id: document.getElementById('f-pulse').value,
+          };
           try {
-            const r = await enviar('/tenants', 'POST', {
-              nome: nome.value,
-              slug: slug.value,
-              cw_account_id: document.getElementById('f-cw').value,
-              cw_board_funil_id: document.getElementById('f-funil').value,
-              cw_board_organico_id: document.getElementById('f-organico').value,
-              ga_customer_id: document.getElementById('f-ga').value,
-              evo_instancia: document.getElementById('f-evo').value,
-              pulseboard_codi_id: document.getElementById('f-pulse').value,
-            });
-            verCliente(r.id);
+            if (atual) {
+              campos.validate_only = document.getElementById('f-sombra').checked ? 1 : 0;
+              await enviar('/tenants/' + id, 'PATCH', campos);
+              verCliente(id);
+            } else {
+              campos.slug = slug.value;
+              const r = await enviar('/tenants', 'POST', campos);
+              verCliente(r.id);
+            }
           } catch (e) {
             alvo.innerHTML = '<div class="erro">' + esc(e.message) + '</div>';
             estado.textContent = '';
@@ -1271,7 +1330,168 @@
         }
       }
 
-      document.getElementById('btn-novo').addEventListener('click', verFormulario);
+      // ---------- etiquetas e atributos ----------
+
+      /**
+       * Lê a conta e mostra o que falta. Com `aplicar`, cria.
+       *
+       * A prévia é de verdade: o Worker consulta o Chatwoot antes de escrever,
+       * em vez de mandar criar tudo e adivinhar pelo texto do erro o que já
+       * existia — que era como o fluxo do n8n fazia.
+       */
+      async function provisionar(id, aplicar) {
+        const alvo = document.getElementById('prov');
+        const estado = document.getElementById('prov-estado');
+        if (!alvo) return;
+        estado.textContent = aplicar ? 'criando no Chatwoot…' : 'conferindo a conta…';
+        alvo.innerHTML = '';
+
+        let r;
+        try {
+          r = await enviar('/tenants/' + id + '/provisionar' + (aplicar ? '?aplicar=1' : ''), 'POST', {});
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+          return;
+        }
+
+        const faltando = r.etiquetas_a_criar.length + r.atributos_a_criar.length;
+        estado.textContent = r.previa
+          ? 'conta ' + r.conta + ' · ' + (faltando ? faltando + ' a criar' : 'tudo no padrão')
+          : r.criados + ' criados' + (r.falhas.length ? ' · ' + r.falhas.length + ' falharam' : '');
+
+        const bloco = function (titulo, itens, classe) {
+          if (!itens.length) return '';
+          return '<p style="margin:10px 0 4px"><strong>' + esc(titulo) + '</strong></p>' +
+            '<p class="' + classe + '">' + itens.map(esc).join(' · ') + '</p>';
+        };
+
+        alvo.innerHTML =
+          bloco('Etiquetas a criar', r.etiquetas_a_criar, 'mono') +
+          bloco('Atributos a criar', r.atributos_a_criar, 'mono') +
+          bloco('Falhas', r.falhas || [], 'st-erro') +
+          '<p class="carregando" style="margin-top:10px">' +
+            r.etiquetas_existentes.length + ' etiquetas e ' + r.atributos_existentes +
+            ' atributos do padrão já existem nesta conta.' +
+            (r.fora_do_padrao.length
+              ? ' Fora do padrão, criados à mão e mantidos: ' + esc(r.fora_do_padrao.join(', ')) + '.'
+              : '') +
+          '</p>';
+      }
+
+      // ---------- padronizações ----------
+
+      /**
+       * O catálogo que todo cliente novo recebe.
+       *
+       * É o que estava colado dentro de um nó de código no n8n, com o número da
+       * conta fixo em dois lugares. Aqui é lista editável, e a conta é a que
+       * você escolher na hora de gerar.
+       */
+      async function verPadroes() {
+        tela.innerHTML = '<p class="carregando">carregando…</p>';
+        rodape.textContent = '';
+        const r = await api('/padroes');
+
+        const MODELOS = [
+          ['contact_attribute', 'Contato', 'a atribuição mais recente da pessoa'],
+          ['conversation_attribute', 'Conversa', 'a origem daquele atendimento: o lead que volta por um anúncio novo não apaga a origem da conversa antiga'],
+          ['task_attribute', 'Tarefa (card)', 'a negociação — cada card carrega a própria origem'],
+        ];
+
+        tela.innerHTML =
+          '<div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>' +
+          '<h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.02em">Padronizações</h2>' +
+          '<p class="carregando" style="margin:0 0 24px">O que todo cliente novo recebe. Depois é um clique em <strong>Gerar no Chatwoot</strong>, na aba Integrações do cliente.</p>' +
+
+          '<section><h2>Etiquetas</h2>' +
+            '<div class="linha-acoes">' +
+              '<input id="e-slug" placeholder="slug (ex: google-ads)" />' +
+              '<input id="e-cor" type="color" value="#999999" style="width:52px;padding:2px" />' +
+              '<input id="e-desc" placeholder="descrição" />' +
+              '<button id="btn-e-add">Adicionar</button>' +
+            '</div>' +
+            '<table><thead><tr><th>Cor</th><th>Slug</th><th>Descrição</th><th></th></tr></thead><tbody>' +
+            r.etiquetas.map(function (e) {
+              return '<tr><td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:' +
+                esc(e.cor) + '"></span></td>' +
+                '<td class="mono">' + esc(e.slug) + '</td>' +
+                '<td class="motivo">' + esc(e.descricao || '') + '</td>' +
+                '<td><button class="e-del" data-id="' + e.id + '">remover</button></td></tr>';
+            }).join('') + '</tbody></table></section>' +
+
+          MODELOS.map(function (m) {
+            const linhas = r.atributos.filter(function (a) { return a.modelo === m[0]; });
+            return '<section><h2>Atributos · ' + esc(m[1]) + '</h2>' +
+              '<p class="carregando" style="margin:0 0 12px">' + esc(m[2]) + '</p>' +
+              '<div class="linha-acoes">' +
+                '<input class="a-chave" data-m="' + m[0] + '" placeholder="chave (ex: utm_id)" />' +
+                '<input class="a-nome" data-m="' + m[0] + '" placeholder="nome na tela (ex: UTM ID)" />' +
+                '<select class="a-tipo" data-m="' + m[0] + '">' +
+                  opcoes(['text', 'number', 'currency', 'percent', 'link', 'date', 'list', 'checkbox'], 'text') +
+                '</select>' +
+                '<input class="a-desc" data-m="' + m[0] + '" placeholder="descrição" />' +
+                '<button class="btn-a-add" data-m="' + m[0] + '">Adicionar</button>' +
+              '</div>' +
+              (linhas.length
+                ? '<table><thead><tr><th>Chave</th><th>Nome na tela</th><th>Tipo</th><th>Descrição</th><th></th></tr></thead><tbody>' +
+                  linhas.map(function (a) {
+                    return '<tr><td class="mono">' + esc(a.chave) + '</td><td>' + esc(a.nome) + '</td>' +
+                      '<td class="motivo">' + esc(a.tipo) + '</td>' +
+                      '<td class="motivo">' + esc(a.descricao || '') + '</td>' +
+                      '<td><button class="a-del" data-id="' + a.id + '">remover</button></td></tr>';
+                  }).join('') + '</tbody></table>'
+                : '<div class="vazio"><p>Nenhum atributo neste modelo.</p></div>') +
+              '</section>';
+          }).join('') +
+          '<div id="padroes-erro"></div>';
+
+        document.getElementById('btn-voltar').addEventListener('click', verOverview);
+
+        const falhar = function (e) {
+          document.getElementById('padroes-erro').innerHTML = '<div class="erro">' + esc(e.message) + '</div>';
+        };
+
+        document.getElementById('btn-e-add').addEventListener('click', async function () {
+          try {
+            await enviar('/padroes/etiquetas', 'POST', {
+              slug: document.getElementById('e-slug').value,
+              cor: document.getElementById('e-cor').value,
+              descricao: document.getElementById('e-desc').value,
+            });
+            verPadroes();
+          } catch (e) { falhar(e); }
+        });
+
+        document.querySelectorAll('.btn-a-add').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            const m = b.dataset.m;
+            const v = function (cls) { return document.querySelector('.' + cls + '[data-m="' + m + '"]').value; };
+            try {
+              await enviar('/padroes/atributos', 'POST', {
+                modelo: m, chave: v('a-chave'), nome: v('a-nome'), tipo: v('a-tipo'), descricao: v('a-desc'),
+              });
+              verPadroes();
+            } catch (e) { falhar(e); }
+          });
+        });
+
+        document.querySelectorAll('.e-del').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            try { await enviar('/padroes/etiquetas/' + b.dataset.id, 'DELETE'); verPadroes(); }
+            catch (e) { falhar(e); }
+          });
+        });
+        document.querySelectorAll('.a-del').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            try { await enviar('/padroes/atributos/' + b.dataset.id, 'DELETE'); verPadroes(); }
+            catch (e) { falhar(e); }
+          });
+        });
+      }
+
+      document.getElementById('btn-padroes').addEventListener('click', () => verPadroes());
+      document.getElementById('btn-novo').addEventListener('click', () => verFormulario());
+
       document.getElementById('btn-atualizar').addEventListener('click', verOverview);
 
       verOverview().catch((e) => {
