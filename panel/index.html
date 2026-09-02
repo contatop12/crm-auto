@@ -323,8 +323,24 @@
       const esc = (s) =>
         String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
+      /**
+       * "Failed to fetch" quase sempre e' a sessao do Access que venceu.
+       *
+       * Quando ela vence, a Cloudflare responde com um redirect para o dominio
+       * de login. O navegador barra esse salto no fetch e devolve um TypeError
+       * seco — sem status, sem corpo. A tela mostrava "Failed to fetch" em cada
+       * seccao, que nao diz o que fazer.
+       */
       async function api(caminho) {
-        const r = await fetch('/api' + caminho);
+        let r;
+        try {
+          r = await fetch('/api' + caminho);
+        } catch {
+          throw new Error('sessão expirou — recarregue a página (F5)');
+        }
+        if (r.redirected || /cloudflareaccess\.com/.test(r.url)) {
+          throw new Error('sessão expirou — recarregue a página (F5)');
+        }
         if (r.status === 401) throw new Error('sem-acesso');
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
         return r.json();
@@ -907,11 +923,20 @@
       }
 
       async function enviar(caminho, metodo, corpo) {
-        const r = await fetch('/api' + caminho, {
-          method: metodo,
-          headers: { 'content-type': 'application/json' },
-          body: corpo === undefined ? undefined : JSON.stringify(corpo),
-        });
+        let r;
+        try {
+          r = await fetch('/api' + caminho, {
+            method: metodo,
+            headers: { 'content-type': 'application/json' },
+            body: corpo === undefined ? undefined : JSON.stringify(corpo),
+          });
+        } catch {
+          // mesma causa do api(): sessao do Access vencida vira TypeError seco
+          throw new Error('sessão expirou — recarregue a página (F5)');
+        }
+        if (r.redirected || /cloudflareaccess\.com/.test(r.url)) {
+          throw new Error('sessão expirou — recarregue a página (F5)');
+        }
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
         return j;
