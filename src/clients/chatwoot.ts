@@ -114,6 +114,56 @@ export class ChatwootClient {
     return (r.payload ?? []).map((l) => l.title);
   }
 
+  /** Definicoes de atributo personalizado de um modelo. */
+  async atributos(acc: number, modelo: string): Promise<Array<{ chave: string; modelo: string }>> {
+    const r = await this.req<Array<{ attribute_key: string; attribute_model: string }> | { payload?: Array<{ attribute_key: string; attribute_model: string }> }>(
+      'GET',
+      `/api/v1/accounts/${acc}/custom_attribute_definitions?attribute_model=${encodeURIComponent(modelo)}`,
+    );
+    const lista = Array.isArray(r) ? r : (r.payload ?? []);
+    return lista.map((a) => ({ chave: a.attribute_key, modelo: a.attribute_model ?? modelo }));
+  }
+
+  async criarEtiqueta(acc: number, titulo: string, cor: string, descricao: string | null): Promise<void> {
+    await this.req('POST', `/api/v1/accounts/${acc}/labels`, {
+      title: titulo,
+      color: cor,
+      description: descricao ?? '',
+      show_on_sidebar: true,
+    });
+  }
+
+  async criarAtributo(
+    acc: number,
+    a: { modelo: string; chave: string; nome: string; tipo: string; descricao: string | null },
+  ): Promise<void> {
+    await this.req('POST', `/api/v1/accounts/${acc}/custom_attribute_definitions`, {
+      attribute_model: a.modelo,
+      attribute_key: a.chave,
+      attribute_display_name: a.nome,
+      attribute_display_type: a.tipo,
+      attribute_description: a.descricao ?? '',
+      attribute_values: [],
+    });
+  }
+
+  /**
+   * Grava atributos no card do Kanban.
+   *
+   * O PUT substitui o objeto inteiro, entao o merge e' aqui: sem ele, gravar a
+   * UTM apagaria o `protocolo` que ja estava no card.
+   */
+  async mesclarAtributosDoCard(acc: number, taskId: number, novos: Record<string, string>): Promise<void> {
+    if (!Object.keys(novos).length) return;
+    const atual = await this.req<{ custom_attributes?: Record<string, unknown> }>(
+      'GET',
+      `/api/v1/accounts/${acc}/kanban/tasks/${taskId}`,
+    );
+    await this.req('PUT', `/api/v1/accounts/${acc}/kanban/tasks/${taskId}`, {
+      task: { custom_attributes: { ...(atual.custom_attributes ?? {}), ...novos } },
+    });
+  }
+
   /**
    * Registra um webhook novo. NAO mexe nos que ja existem — os do n8n
    * continuam recebendo, o que e' o que permite rodar os dois em paralelo.

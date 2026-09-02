@@ -5,6 +5,11 @@ import { ChatwootClient } from '../clients/chatwoot';
 import { GoogleAdsClient, criarConversionActions } from '../clients/googleAds';
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
+import {
+  planejarProvisionamento,
+  type PadraoEtiqueta,
+  type PadraoAtributo,
+} from '../domain/padroes';
 import { avaliarEtapa } from '../domain/fluxo';
 
 /**
@@ -625,3 +630,146 @@ admin.get('/tenants/:id/instancias', async (c) => {
     .all();
   return c.json(results);
 });
+
+// ---------------------------------------------------------------------------
+// Padronizacoes — o catalogo de etiquetas e atributos que todo cliente recebe
+// ---------------------------------------------------------------------------
+
+/**
+ * Substitui o workflow "Chatwoot - Criacao automatica de Atributos e Etiquetas".
+ *
+ * La' as listas viviam coladas dentro de um no de codigo e o numero da conta
+ * estava fixo em dois lugares — cliente novo exigia editar o fluxo. Aqui a lista
+ * e' linha de banco editavel, e a conta e' o cliente que voce escolher.
+ */
+admin.get('/padroes', async (c) => {
+  const [etiquetas, atributos] = await Promise.all([
+    c.env.DB.prepare('SELECT id, slug, cor, descricao FROM padrao_etiquetas ORDER BY posicao, slug').all(),
+    c.env.DB.prepare(
+      `SELECT id, modelo, chave, nome, tipo, descricao FROM padrao_atributos
+       ORDER BY modelo, posicao, chave`,
+    ).all(),
+  ]);
+  return c.json({ etiquetas: etiquetas.results, atributos: atributos.results });
+});
+
+admin.post('/padroes/etiquetas', async (c) => {
+  const b = await c.req.json<{ slug?: string; cor?: string; descricao?: string }>();
+  const slug = (b.slug ?? '').trim();
+  if (!slug) return c.json({ error: 'slug obrigatorio' }, 400);
+
+  await c.env.DB.prepare(
+    `INSERT INTO padrao_etiquetas (slug, cor, descricao, posicao)
+     VALUES (?, ?, ?, (SELECT COALESCE(MAX(posicao), 0) + 1 FROM padrao_etiquetas))
+     ON CONFLICT (slug) DO UPDATE SET cor = excluded.cor, descricao = excluded.descricao`,
+  )
+    .bind(slug, (b.cor ?? '#999999').trim(), (b.descricao ?? '').trim() || null)
+    .run();
+  return c.json({ ok: true });
+});
+
+admin.delete('/padroes/etiquetas/:pid', async (c) => {
+  await c.env.DB.prepare('DELETE FROM padrao_etiquetas WHERE id = ?').bind(Number(c.req.param('pid'))).run();
+  return c.json({ ok: true });
+});
+
+admin.post('/padroes/atributos', async (c) => {
+  const b = await c.req.json<{ modelo?: string; chave?: string; nome?: string; tipo?: string; descricao?: string }>();
+  const modelo = (b.modelo ?? '').trim();
+  const chave = (b.chave ?? '').trim();
+  const nome = (b.nome ?? '').trim();
+  if (!MODELOS.includes(modelo)) return c.json({ error: 'modelo invalido' }, 400);
+  if (!chave || !nome) return c.json({ error: 'chave e nome obrigatorios' }, 400);
+  const tipo = (b.tipo ?? 'text').trim();
+  if (!TIPOS.includes(tipo)) return c.json({ error: 'tipo invalido' }, 400);
+
+  await c.env.DB.prepare(
+    `INSERT INTO padrao_atributos (modelo, chave, nome, tipo, descricao, posicao)
+     VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(posicao), 0) + 1 FROM padrao_atributos WHERE modelo = ?))
+     ON CONFLICT (modelo, chave) DO UPDATE SET nome = excluded.nome, tipo = excluded.tipo,
+       descricao = excluded.descricao`,
+  )
+    .bind(modelo, chave, nome, tipo, (b.descricao ?? '').trim() || null, modelo)
+    .run();
+  return c.json({ ok: true });
+});
+
+admin.delete('/padroes/atributos/:pid', async (c) => {
+  await c.env.DB.prepare('DELETE FROM padrao_atributos WHERE id = ?').bind(Number(c.req.param('pid'))).run();
+  return c.json({ ok: true });
+});
+
+const MODELOS: string[] = ['contact_attribute', 'conversation_attribute', 'task_attribute'];
+const TIPOS: string[] = ['text', 'number', 'currency', 'percent', 'link', 'date', 'list', 'checkbox'];
+
+/**
+ * O que falta na conta deste cliente. Com `?aplicar=1`, cria.
+ *
+ * Le a conta antes de escrever, entao a previa e' de verdade: o workflow antigo
+ * mandava criar tudo sempre e classificava "ja existe" pelo texto do erro.
+ */
+admin.post('/tenants/:id/provisionar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const t = await carregarTenant(c.env.DB, id);
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+  if (!t.cwAccountId) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  const [pe, pa] = await Promise.all([
+    c.env.DB.prepare('SELECT slug, cor, descricao FROM padrao_etiquetas ORDER BY posicao, slug')
+      .all<PadraoEtiqueta>(),
+    c.env.DB.prepare('SELECT modelo, chave, nome, tipo, descricao FROM padrao_atributos ORDER BY modelo, posicao')
+      .all<PadraoAtributo>(),
+  ]);
+
+  const cw = ChatwootClient.fromEnv(c.env);
+  const acc = t.cwAccountId;
+  const naConta = await cw.labels(acc);
+  const atributosNaConta = (
+    await Promise.all(MODELOS.map((m) => cw.atributos(acc, m)))
+  ).flat();
+
+  const plano = planejarProvisionamento(pe.results, pa.results, naConta, atributosNaConta);
+  if (c.req.query('aplicar') !== '1') {
+    return c.json({ previa: true, conta: acc, ...resumo(plano) });
+  }
+
+  // Atributos primeiro: se a etiqueta falhar, o que importa ja entrou. E' a
+  // mesma ordem do workflow, pelo mesmo motivo.
+  const falhas: string[] = [];
+  let criados = 0;
+  for (const a of plano.atributosACriar) {
+    try { await cw.criarAtributo(acc, a); criados++; }
+    catch (e) { falhas.push(`${a.modelo}/${a.chave}: ${(e as Error).message.slice(0, 120)}`); }
+  }
+  for (const e of plano.etiquetasACriar) {
+    try { await cw.criarEtiqueta(acc, e.slug, e.cor, e.descricao); criados++; }
+    catch (err) { falhas.push(`label/${e.slug}: ${(err as Error).message.slice(0, 120)}`); }
+  }
+
+  // O vocabulario do motor de etiquetas segue o mesmo catalogo: sem isto, a
+  // etiqueta existe no Chatwoot mas a ferramenta nao sabe que pode usa-la.
+  for (const e of pe.results) {
+    await c.env.DB.prepare(
+      `INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
+       VALUES (?, ?, ?, NULL)
+       ON CONFLICT (tenant_id, slug) DO UPDATE SET label_chatwoot = excluded.label_chatwoot`,
+    )
+      .bind(id, e.slug, e.slug)
+      .run();
+  }
+
+  console.log(
+    JSON.stringify({ acao: 'provisionar', por: c.get('identity').email, tenant_id: id, criados }),
+  );
+  return c.json({ previa: false, conta: acc, criados, falhas, ...resumo(plano) });
+});
+
+function resumo(p: ReturnType<typeof planejarProvisionamento>) {
+  return {
+    etiquetas_a_criar: p.etiquetasACriar.map((e) => e.slug),
+    etiquetas_existentes: p.etiquetasExistentes,
+    atributos_a_criar: p.atributosACriar.map((a) => `${a.modelo}/${a.chave}`),
+    atributos_existentes: p.atributosExistentes.length,
+    fora_do_padrao: [...p.etiquetasForaDoPadrao, ...p.atributosForaDoPadrao],
+  };
+}

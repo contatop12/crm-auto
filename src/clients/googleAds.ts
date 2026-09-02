@@ -114,6 +114,42 @@ export class GoogleAdsClient {
     return rows.map((r) => r.conversionAction);
   }
 
+  /**
+   * Nome das campanhas a partir dos IDs, com cache em KV.
+   *
+   * A UTM que chega do Google traz `{campaignname}` quando o modelo de URL do
+   * anuncio nao foi preenchido — o unico dado util e' o `utm_id`, que carrega o
+   * ID numerico. O nome sai daqui.
+   *
+   * Nome de campanha quase nao muda e a consulta e' cara, entao fica 24h em KV.
+   * Campanha removida continua respondendo: o clique dela e' historico e o card
+   * precisa do nome mesmo assim.
+   */
+  async nomesDeCampanha(customerId: string, ids: string[]): Promise<Map<string, string>> {
+    const saida = new Map<string, string>();
+    const faltando: string[] = [];
+
+    for (const id of [...new Set(ids.filter((i) => /^\d+$/.test(i)))]) {
+      const cache = await this.env.CACHE.get(`campanha:${customerId}:${id}`);
+      if (cache) saida.set(id, cache);
+      else faltando.push(id);
+    }
+    if (!faltando.length) return saida;
+
+    const rows = await this.search<{ campaign: { id: string; name: string } }>(
+      customerId,
+      `SELECT campaign.id, campaign.name FROM campaign
+       WHERE campaign.id IN (${faltando.join(',')})`,
+    );
+    for (const r of rows) {
+      saida.set(String(r.campaign.id), r.campaign.name);
+      await this.env.CACHE.put(`campanha:${customerId}:${r.campaign.id}`, r.campaign.name, {
+        expirationTtl: 86_400,
+      });
+    }
+    return saida;
+  }
+
   /** Contas nao-gerenciadoras sob o MCC. Alimenta o seletor do painel. */
   async contasDoMcc(): Promise<Array<{ id: string; nome: string }>> {
     const rows = await this.search<{
