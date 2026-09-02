@@ -182,6 +182,25 @@
       .tag-anuncio { border-color: var(--hold); color: var(--hold); }
       .nada { color: var(--ink-3); }
 
+      /* Switch de envio ao Google. Estado ligado = conversao vai de verdade,
+         entao ele e' vermelho quando armado, nao verde. */
+      .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+      .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+      .switch .trilho {
+        width: 40px; height: 22px; border-radius: 11px;
+        background: var(--idle); border: 1px solid var(--rule);
+        position: relative; transition: background .15s;
+      }
+      .switch .trilho::after {
+        content: ''; position: absolute; top: 2px; left: 2px;
+        width: 16px; height: 16px; border-radius: 50%;
+        background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s;
+      }
+      .switch input:checked + .trilho { background: var(--halt); border-color: var(--halt); }
+      .switch input:checked + .trilho::after { transform: translateX(18px); }
+      .switch input:focus-visible + .trilho { outline: 2px solid var(--ink); outline-offset: 2px; }
+      .switch .rotulo { font-size: 13px; }
+
       dl.resumo {
         display: grid;
         grid-template-columns: max-content 1fr;
@@ -384,7 +403,14 @@
             ${esc(cliente ? cliente.nome : 'Cliente ' + id)}
           </h2>
           <p class="cliente-slug" style="margin:0 0 12px">${esc(cliente ? cliente.slug : '')}</p>
-          <div class="linha-acoes" style="margin:0 0 20px"><button id="btn-editar">Editar cliente</button></div>
+          <div class="linha-acoes" style="margin:0 0 20px">
+            <button id="btn-editar">Editar cliente</button>
+            <label class="switch" title="Ligado, a conversão é gravada no Google Ads">
+              <input type="checkbox" id="sw-envio" />
+              <span class="trilho"></span>
+              <span class="rotulo" id="sw-rotulo">…</span>
+            </label>
+          </div>
 
           <div class="abas" role="tablist">
             <button class="aba" role="tab" data-aba="fluxo" aria-selected="true">Fluxo</button>
@@ -517,6 +543,7 @@
 
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
         document.getElementById('btn-editar').addEventListener('click', () => verFormulario(id));
+        montarSwitchEnvio(id);
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
         document.getElementById('btn-sync').addEventListener('click', () => sincronizarEtapas(id));
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
@@ -1342,6 +1369,61 @@
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         }
+      }
+
+      /**
+       * Liga e desliga o envio de conversao ao Google Ads.
+       *
+       * `validate_only` no banco: ligado, o Google valida e NAO grava. O switch
+       * mostra o inverso disso — o que a pessoa quer saber e' "está enviando?".
+       *
+       * Armar pede confirmação porque é o único botão do painel que faz dado
+       * sair para fora e não dá para desfazer: conversão gravada no Google Ads
+       * não volta atrás.
+       */
+      async function montarSwitchEnvio(id) {
+        const sw = document.getElementById('sw-envio');
+        const rot = document.getElementById('sw-rotulo');
+        if (!sw) return;
+
+        const pintar = function (enviando) {
+          sw.checked = enviando;
+          rot.textContent = enviando ? 'Enviando ao Google Ads' : 'Modo sombra';
+          rot.className = 'rotulo ' + (enviando ? 'st-erro' : 'motivo');
+        };
+
+        let cfg;
+        try {
+          cfg = await api('/tenants/' + id + '/config');
+        } catch (e) {
+          rot.textContent = 'não foi possível ler a configuração';
+          sw.disabled = true;
+          return;
+        }
+        pintar(!cfg.validate_only);
+
+        sw.addEventListener('change', async function () {
+          const armar = sw.checked;
+          if (armar && !confirm(
+            'Ligar o envio faz a conversão ser GRAVADA no Google Ads, de verdade.\n\n' +
+            'Antes disso o histórico da aba Conversoes precisa estar importado — ' +
+            'senão o que o n8n já mandou vai de novo, e conversão gravada não volta atrás.\n\n' +
+            'Ligar mesmo assim?')) {
+            pintar(false);
+            return;
+          }
+          sw.disabled = true;
+          rot.textContent = 'salvando…';
+          try {
+            await enviar('/tenants/' + id, 'PATCH', { validate_only: armar ? 0 : 1 });
+            pintar(armar);
+          } catch (e) {
+            pintar(!armar);
+            rot.textContent = 'falhou: ' + e.message;
+          } finally {
+            sw.disabled = false;
+          }
+        });
       }
 
       // ---------- etiquetas do cliente ----------

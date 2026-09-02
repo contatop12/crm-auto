@@ -15,6 +15,31 @@ const V = 'v22';
 const CACHE_TOKEN = 'gads:access_token';
 const TTL_TOKEN = 3300; // 55min, com folga sobre os 60 reais
 
+/**
+ * Primeiro nivel do cache do token, na memoria do isolate.
+ *
+ * O KV cobra escrita e tem teto diario. Cada isolate vive minutos e atende
+ * varias requisicoes, entao guardar aqui corta a maior parte das idas ao KV —
+ * e, no dia em que o KV recusar escrita, o token continua sendo reaproveitado.
+ */
+let tokenNaMemoria: { valor: string; expiraEm: number } | null = null;
+
+/**
+ * Escrita de cache nunca derruba a operacao.
+ *
+ * Foi o que aconteceu com "KV put() limit exceeded for the day": a checagem do
+ * Google Ads falhava inteira por causa da GRAVACAO do cache, com o token ja em
+ * maos. Pior, virava bola de neve — sem poder gravar, toda chamada seguinte
+ * pedia token novo e tentava gravar de novo.
+ */
+async function guardar(kv: KVNamespace, chave: string, valor: string, ttl: number): Promise<void> {
+  try {
+    await kv.put(chave, valor, { expirationTtl: ttl });
+  } catch (e) {
+    console.log(JSON.stringify({ acao: 'cache_put_falhou', chave, erro: (e as Error).message }));
+  }
+}
+
 export interface ConversionAction {
   id: string;
   name: string;
@@ -35,8 +60,14 @@ export class GoogleAdsClient {
   }
 
   private async accessToken(): Promise<string> {
-    const cacheado = await this.cache.get(CACHE_TOKEN);
-    if (cacheado) return cacheado;
+    const agora = Date.now();
+    if (tokenNaMemoria && tokenNaMemoria.expiraEm > agora) return tokenNaMemoria.valor;
+
+    const cacheado = await this.cache.get(CACHE_TOKEN).catch(() => null);
+    if (cacheado) {
+      tokenNaMemoria = { valor: cacheado, expiraEm: agora + TTL_TOKEN * 1000 };
+      return cacheado;
+    }
 
     const r = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -54,7 +85,9 @@ export class GoogleAdsClient {
       throw new Error(`OAuth do Google Ads falhou: ${j.error_description ?? 'sem access_token'}`);
     }
 
-    await this.cache.put(CACHE_TOKEN, j.access_token, { expirationTtl: TTL_TOKEN });
+    // guarda na memoria ANTES do KV: se o KV recusar, o isolate ainda aproveita
+    tokenNaMemoria = { valor: j.access_token, expiraEm: Date.now() + TTL_TOKEN * 1000 };
+    await guardar(this.cache, CACHE_TOKEN, j.access_token, TTL_TOKEN);
     return j.access_token;
   }
 
@@ -130,7 +163,7 @@ export class GoogleAdsClient {
     const faltando: string[] = [];
 
     for (const id of [...new Set(ids.filter((i) => /^\d+$/.test(i)))]) {
-      const cache = await this.env.CACHE.get(`campanha:${customerId}:${id}`);
+      const cache = await this.env.CACHE.get(`campanha:${customerId}:${id}`).catch(() => null);
       if (cache) saida.set(id, cache);
       else faltando.push(id);
     }
@@ -143,9 +176,7 @@ export class GoogleAdsClient {
     );
     for (const r of rows) {
       saida.set(String(r.campaign.id), r.campaign.name);
-      await this.env.CACHE.put(`campanha:${customerId}:${r.campaign.id}`, r.campaign.name, {
-        expirationTtl: 86_400,
-      });
+      await guardar(this.env.CACHE, `campanha:${customerId}:${r.campaign.id}`, r.campaign.name, 86_400);
     }
     return saida;
   }
