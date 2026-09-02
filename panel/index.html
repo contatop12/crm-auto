@@ -182,6 +182,23 @@
       .tag-anuncio { border-color: var(--hold); color: var(--hold); }
       .nada { color: var(--ink-3); }
 
+      .paginacao {
+        display: flex; align-items: center; gap: 12px;
+        margin-top: 12px; flex-wrap: wrap;
+      }
+      .paginacao button[disabled] { opacity: .4; cursor: default; }
+
+      /* Gira enquanto a fila trabalha. O reprocessamento e' assincrono: sem
+         sinal de atividade a tela parece travada. */
+      .girando {
+        display: inline-block; width: 12px; height: 12px;
+        border: 2px solid var(--rule); border-top-color: var(--ink-2);
+        border-radius: 50%; vertical-align: -2px; margin-right: 6px;
+        animation: gira .7s linear infinite;
+      }
+      @keyframes gira { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .girando { animation-duration: 2.5s; } }
+
       /* Switch de envio ao Google. Estado ligado = conversao vai de verdade,
          entao ele e' vermelho quando armado, nao verde. */
       .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
@@ -395,7 +412,6 @@
       async function verCliente(id) {
         tela.innerHTML = '<p class="carregando">Carregando…</p>';
         const [cliente] = (await api('/overview')).filter((c) => String(c.tenant_id) === String(id));
-        const eventos = await api('/tenants/' + id + '/events?limit=60');
 
         tela.innerHTML = `
           <div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>
@@ -523,22 +539,7 @@
 
           <section>
             <h2>Últimos webhooks recebidos</h2>
-            ${
-              eventos.length
-                ? `<table>
-                    <thead><tr>
-                      <th>Quando</th><th>O que chegou</th><th>Lead</th><th>Conversa</th>
-                      <th class="esconder-mobile">Card</th><th>Status</th>
-                      <th class="esconder-mobile">Motivo</th><th>Assin.</th>
-                    </tr></thead>
-                    <tbody>${eventos.map(linhaEvento).join('')}</tbody>
-                  </table>
-                  <p class="carregando" style="margin-top:10px">Clique numa linha para ver o corpo do webhook. Telefone mascarado; o nome vem só com a inicial do sobrenome.</p>`
-                : `<div class="vazio">
-                     <p>Nenhum webhook recebido deste cliente.</p>
-                     <p class="mono">Confira em Integrações se o webhook está registrado apontando para este Worker.</p>
-                   </div>`
-            }
+            <div id="eventos"><p class="carregando">carregando…</p></div>
           </section>
 
           <section id="secao-payload" hidden>
@@ -564,9 +565,7 @@
         document.getElementById('btn-prov').addEventListener('click', () => provisionar(id, false));
         document.getElementById('btn-prov-criar').addEventListener('click', () => provisionar(id, true));
 
-        tela.querySelectorAll('tr.clicavel').forEach((tr) =>
-          tr.addEventListener('click', () => verPayload(id, tr.dataset.ev, false)),
-        );
+
 
         const carregadas = new Set();
         const slug = cliente ? cliente.slug : '';
@@ -590,7 +589,7 @@
             carregarInstancias(id);
           }
           if (nome === 'integracoes') { carregarWebhooks(id, slug); provisionar(id, false); }
-          if (nome === 'atividade') carregarAvisos(id);
+          if (nome === 'atividade') { carregarAvisos(id, 0); carregarEventos(id, 0); }
         }
 
         tela.querySelectorAll('.aba').forEach((b) => {
@@ -598,7 +597,7 @@
         });
 
         abrirAba('fluxo');
-        rodape.textContent = eventos.length + ' eventos · ' + new Date().toLocaleTimeString('pt-BR');
+        rodape.textContent = new Date().toLocaleTimeString('pt-BR');
       }
 
       // O Chatwoot posta sem seguir redirect. Se o Access ainda cobre /ingest,
@@ -618,15 +617,49 @@
         }
       }
 
-      async function carregarAvisos(id) {
-        const alvo = document.getElementById('avisos');
-        let linhas;
+      const POR_PAGINA = 25;
+
+      async function carregarEventos(id, offset) {
+        const alvo = document.getElementById('eventos');
+        if (!alvo) return;
+        alvo.innerHTML = '<p class="carregando"><span class="girando"></span>carregando…</p>';
+
+        let r;
         try {
-          linhas = await api('/tenants/' + id + '/avisos');
+          r = await api('/tenants/' + id + '/events?limit=' + POR_PAGINA + '&offset=' + (offset || 0));
         } catch (e) {
           alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
           return;
         }
+
+        alvo.innerHTML = r.linhas.length
+          ? '<table><thead><tr>' +
+              '<th>Quando</th><th>O que chegou</th><th>Lead</th><th>Conversa</th>' +
+              '<th class="esconder-mobile">Card</th><th>Status</th>' +
+              '<th class="esconder-mobile">Motivo</th><th>Assin.</th>' +
+            '</tr></thead><tbody>' + r.linhas.map(linhaEvento).join('') + '</tbody></table>' +
+            paginacao('eventos', r.total, r.limite, r.offset) +
+            '<p class="carregando" style="margin-top:10px">Clique numa linha para ver o corpo do webhook. ' +
+            'Telefone mascarado; o nome vem só com a inicial do sobrenome.</p>'
+          : '<div class="vazio"><p>Nenhum webhook recebido deste cliente.</p>' +
+            '<p class="mono">Confira em Integrações se o webhook está registrado apontando para este Worker.</p></div>';
+
+        alvo.querySelectorAll('tr.clicavel').forEach(function (tr) {
+          tr.addEventListener('click', function () { verPayload(id, tr.dataset.ev, false); });
+        });
+        ligarPaginacao(alvo, function (o) { carregarEventos(id, o); });
+      }
+
+      async function carregarAvisos(id, offset) {
+        const alvo = document.getElementById('avisos');
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/avisos?limit=' + POR_PAGINA + '&offset=' + (offset || 0));
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+        const linhas = r.linhas;
 
         alvo.innerHTML = linhas.length
           ? `<table><thead><tr><th>Quando</th><th>Lead</th><th>Canal</th><th>Telefone</th><th>Status</th></tr></thead><tbody>${linhas
@@ -641,11 +674,13 @@
                   )}${l.erro ? ' · ' + esc(l.erro) : ''}</td>
                 </tr>`,
               )
-              .join('')}</tbody></table>`
+              .join('')}</tbody></table>` + paginacao('avisos', r.total, r.limite, r.offset)
           : `<div class="vazio">
                <p>Nenhum aviso enviado ainda.</p>
                <p class="mono">Dispara quando um card entra no board de Ads. Leads do Orgânico não avisam.</p>
              </div>`;
+
+        ligarPaginacao(alvo, function (o) { carregarAvisos(id, o); });
       }
 
       async function carregarWebhooks(id, slug) {
@@ -1459,16 +1494,73 @@
           'conversas que ainda não têm.\n\nConversa que já tem protocolo é pulada.\n\nReprocessar?')) {
           return;
         }
-        estado.textContent = aplicar ? 'enfileirando…' : 'conferindo…';
+        const botoes = ['btn-reproc', 'btn-reproc-aplicar'].map(function (x) { return document.getElementById(x); });
+        botoes.forEach(function (b) { if (b) b.disabled = true; });
+        const girar = function (texto) {
+          estado.innerHTML = '<span class="girando"></span>' + esc(texto);
+        };
+        girar(aplicar ? 'enfileirando…' : 'conferindo…');
+
         try {
           const r = await enviar(
             '/tenants/' + id + '/reprocessar' + (aplicar ? '?aplicar=1' : ''), 'POST', {});
-          estado.textContent = r.previa
-            ? r.na_fila + ' conversa(s) entrariam na fila'
-            : r.na_fila + ' conversa(s) na fila · recarregue em alguns segundos para ver o resultado';
+
+          if (r.previa) {
+            estado.textContent = r.na_fila + ' conversa(s) sem atribuição';
+            return;
+          }
+          if (!r.na_fila) {
+            estado.textContent = 'nada para reprocessar';
+            return;
+          }
+
+          // A fila é assíncrona: o POST só enfileira. Acompanhar até acabar
+          // evita o usuário recarregar no escuro sem saber se terminou.
+          girar(r.na_fila + ' na fila · processando…');
+          const alvo = r.na_fila;
+          for (let i = 1; i <= 15; i++) {
+            await new Promise(function (ok) { setTimeout(ok, 2000); });
+            let restam;
+            try {
+              restam = (await enviar('/tenants/' + id + '/reprocessar', 'POST', {})).na_fila;
+            } catch { continue; }
+            girar('processando… ' + Math.max(alvo - restam, 0) + ' de ' + alvo);
+            if (restam < alvo) break;
+          }
+          estado.textContent = 'reprocessado';
+          await carregarEventos(id, 0);
+          await carregarAvisos(id, 0);
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
+        } finally {
+          botoes.forEach(function (b) { if (b) b.disabled = false; });
         }
+      }
+
+      /**
+       * Controles de página.
+       *
+       * Só aparecem quando há mais de uma página: numa lista de 8 itens, dois
+       * botões inertes só ocupam espaço e sugerem que existe algo adiante.
+       */
+      function paginacao(id, total, limite, offset) {
+        if (total <= limite) return '';
+        const pagina = Math.floor(offset / limite) + 1;
+        const paginas = Math.ceil(total / limite);
+        return '<div class="paginacao">' +
+          '<button class="pag" data-alvo="' + id + '" data-offset="' + Math.max(offset - limite, 0) + '"' +
+            (offset <= 0 ? ' disabled' : '') + '>← anterior</button>' +
+          '<span class="carregando">' + (offset + 1) + '–' + Math.min(offset + limite, total) +
+            ' de ' + total + ' · página ' + pagina + ' de ' + paginas + '</span>' +
+          '<button class="pag" data-alvo="' + id + '" data-offset="' + (offset + limite) + '"' +
+            (offset + limite >= total ? ' disabled' : '') + '>próxima →</button>' +
+          '</div>';
+      }
+
+      function ligarPaginacao(alvo, recarregar) {
+        alvo.querySelectorAll('.pag').forEach(function (b) {
+          b.addEventListener('click', function () { recarregar(Number(b.dataset.offset)); });
+        });
       }
 
       // ---------- etiquetas do cliente ----------

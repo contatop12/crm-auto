@@ -70,20 +70,38 @@ export interface LinhaEvento {
   resumo: ResumoEvento;
 }
 
-/** Ultimos eventos do cliente. O payload NAO vem aqui — so no detalhe. */
+export interface PaginaEventos {
+  linhas: LinhaEvento[];
+  /** Quantos existem no total, com os mesmos filtros. Alimenta a paginacao. */
+  total: number;
+  limite: number;
+  offset: number;
+}
+
+/** Uma pagina de eventos do cliente. O payload NAO vem aqui — so no detalhe. */
 export async function eventosDoTenant(
   db: D1Database,
   tenantId: number,
-  filtros: { status?: string; source?: string; limite?: number } = {},
+  filtros: { status?: string; source?: string; limite?: number; offset?: number } = {},
   boards: BoardsDoTenant = { organico: null, funil: null },
-): Promise<LinhaEvento[]> {
+): Promise<PaginaEventos> {
   const cond: string[] = ['tenant_id = ?'];
   const bind: unknown[] = [tenantId];
 
   if (filtros.status) { cond.push('status = ?'); bind.push(filtros.status); }
   if (filtros.source) { cond.push('source = ?'); bind.push(filtros.source); }
 
-  bind.push(Math.min(filtros.limite ?? 50, 200));
+  const limite = Math.min(Math.max(filtros.limite ?? 25, 1), 200);
+  const offset = Math.max(filtros.offset ?? 0, 0);
+
+  // O total sai antes da pagina: sem ele a tela nao sabe se existe proxima,
+  // e "proxima" que leva a uma pagina vazia e' pior do que nao ter botao.
+  const total = await db
+    .prepare(`SELECT COUNT(*) AS n FROM events WHERE ${cond.join(' AND ')}`)
+    .bind(...bind)
+    .first<{ n: number }>();
+
+  bind.push(limite, offset);
 
   // O payload sai do banco so' para virar resumo — nunca chega ao navegador.
   const { results } = await db
@@ -92,16 +110,21 @@ export async function eventosDoTenant(
               received_at, processed_at, payload,
               CASE WHEN payload IS NULL OR payload = '' THEN 0 ELSE 1 END AS tem_payload
        FROM events WHERE ${cond.join(' AND ')}
-       ORDER BY received_at DESC LIMIT ?`,
+       ORDER BY received_at DESC, id DESC LIMIT ? OFFSET ?`,
     )
     .bind(...bind)
     .all<LinhaEvento & { payload: string | null }>();
 
-  return results.map(({ payload, ...linha }) => ({
-    ...linha,
-    pipeline: nomeDoPipeline(linha.source, linha.event_type),
-    resumo: resumirEvento(payload, boards),
-  }));
+  return {
+    total: total?.n ?? 0,
+    limite,
+    offset,
+    linhas: results.map(({ payload, ...linha }) => ({
+      ...linha,
+      pipeline: nomeDoPipeline(linha.source, linha.event_type),
+      resumo: resumirEvento(payload, boards),
+    })),
+  };
 }
 
 export async function payloadDoEvento(

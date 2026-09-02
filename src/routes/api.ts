@@ -117,7 +117,8 @@ api.get('/tenants/:id/events', async (c) => {
       {
         status: c.req.query('status'),
         source: c.req.query('source'),
-        limite: Number(c.req.query('limit') ?? 50),
+        limite: Number(c.req.query('limit') ?? 25),
+        offset: Number(c.req.query('offset') ?? 0),
       },
       boards ?? { organico: null, funil: null },
     ),
@@ -287,21 +288,34 @@ api.delete('/tenants/:id/webhook', async (c) => {
 
 /** Avisos de lead novo mandados ao grupo do cliente. */
 api.get('/tenants/:id/avisos', async (c) => {
+  const id = Number(c.req.param('id'));
+  const limite = Math.min(Math.max(Number(c.req.query('limit') ?? 25), 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0), 0);
+
+  const total = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM group_notifications WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ n: number }>();
+
   const { results } = await c.env.DB.prepare(
     `SELECT chave, protocolo, canal, lead_nome, telefone, status, erro, enviado_em, created_at
      FROM group_notifications WHERE tenant_id = ?
-     ORDER BY created_at DESC LIMIT ?`,
+     ORDER BY created_at DESC LIMIT ? OFFSET ?`,
   )
-    .bind(Number(c.req.param('id')), Math.min(Number(c.req.query('limit') ?? 30), 200))
+    .bind(id, limite, offset)
     .all<{ lead_nome: string | null; telefone: string | null }>();
 
   // Mesma regra do payload e da lista de eventos: o nome do lead e o telefone
   // sao dados do cliente, e o painel junta todos eles numa tela so'.
-  return c.json(
-    results.map((l) => ({
+  return c.json({
+    total: total?.n ?? 0,
+    limite,
+    offset,
+    linhas: results.map((l) => ({
       ...l,
       lead_nome: encurtarNome(l.lead_nome),
       telefone: maskPhone(l.telefone),
     })),
-  );
+  });
 });
