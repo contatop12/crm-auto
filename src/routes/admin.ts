@@ -52,6 +52,7 @@ const CAMPOS_CONFIG = [
   'ga_customer_id',
   'evo_instancia',
   'pulseboard_codi_id',
+  'pulseboard_url',
   'validate_only',
   'janela_match_dias',
 ] as const;
@@ -60,7 +61,7 @@ admin.get('/tenants/:id/config', async (c) => {
   const t = await c.env.DB.prepare(
     `SELECT t.id, t.slug, t.nome, t.ativo, c.cw_account_id, c.cw_board_funil_id,
             c.cw_board_organico_id, c.ga_customer_id, c.evo_instancia,
-            c.pulseboard_codi_id, c.validate_only, c.janela_match_dias, c.ingest_key,
+            c.pulseboard_codi_id, c.pulseboard_url, c.validate_only, c.janela_match_dias, c.ingest_key,
             CASE WHEN c.cw_webhook_secret IS NULL THEN 0 ELSE 1 END AS tem_segredo_webhook
      FROM tenants t LEFT JOIN tenant_config c ON c.tenant_id = t.id WHERE t.id = ?`,
   )

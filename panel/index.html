@@ -1016,8 +1016,13 @@
               '<div class="campo"><label for="f-evo">Instância do WhatsApp</label>' +
               '<input id="f-evo" placeholder="nome exato no Evolution" /></div>' +
             '</div>' +
-            '<div class="campo"><label for="f-pulse">codi_id do Pulseboard</label>' +
-            '<input id="f-pulse" placeholder="usado para avisar o grupo do cliente" /></div>' +
+            '<div class="grade">' +
+              '<div class="campo"><label for="f-pulse">codi_id do Pulseboard</label>' +
+              '<input id="f-pulse" placeholder="usado para avisar o grupo do cliente" /></div>' +
+              '<div class="campo"><label for="f-pulse-url">Webhook do Pulseboard</label>' +
+              '<input id="f-pulse-url" placeholder="https://pulseboard.sitespdoze.com.br/meta-new-lead" />' +
+              '<p class="dica">em branco usa o padrão; preencha quando o cliente tiver o dele</p></div>' +
+            '</div>' +
           '</section>' +
           (atual
             ? '<section><h2>Envio ao Google Ads</h2>' +
@@ -1051,6 +1056,7 @@
           document.getElementById('f-ga').value = atual.ga_customer_id || '';
           document.getElementById('f-evo').value = atual.evo_instancia || '';
           document.getElementById('f-pulse').value = atual.pulseboard_codi_id || '';
+          document.getElementById('f-pulse-url').value = atual.pulseboard_url || '';
           if (atual.cw_account_id) {
             await carregarBoards(atual.cw_account_id, atual.cw_board_funil_id, atual.cw_board_organico_id);
           }
@@ -1094,6 +1100,7 @@
             ga_customer_id: document.getElementById('f-ga').value,
             evo_instancia: document.getElementById('f-evo').value,
             pulseboard_codi_id: document.getElementById('f-pulse').value,
+            pulseboard_url: document.getElementById('f-pulse-url').value,
           };
           try {
             if (atual) {

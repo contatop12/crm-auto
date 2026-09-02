@@ -17,7 +17,11 @@ export interface NovoLead {
   url: string;
 }
 
-const ENDPOINT = 'https://pulseboard.sitespdoze.com.br/site-new-lead';
+/**
+  * Endpoint padrao. Cada cliente pode ter o seu em `tenant_config.pulseboard_url`
+  * — a intencao e' um por cliente, e ate' la' todos usam este.
+  */
+const ENDPOINT = 'https://pulseboard.sitespdoze.com.br/meta-new-lead';
 
 export class PulseboardClient {
   constructor(private readonly endpoint: string = ENDPOINT) {}

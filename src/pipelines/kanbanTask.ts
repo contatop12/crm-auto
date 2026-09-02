@@ -24,6 +24,7 @@ export interface Resultado {
 interface ConfigTenant {
   cw_board_funil_id: number | null;
   pulseboard_codi_id: string | null;
+  pulseboard_url: string | null;
 }
 
 interface LinhaLead {
@@ -48,7 +49,7 @@ export async function avisarLeadNoGrupo(
   payload: string,
 ): Promise<Resultado> {
   const cfg = await env.DB.prepare(
-    'SELECT cw_board_funil_id, pulseboard_codi_id FROM tenant_config WHERE tenant_id = ?',
+    'SELECT cw_board_funil_id, pulseboard_codi_id, pulseboard_url FROM tenant_config WHERE tenant_id = ?',
   )
     .bind(tenantId)
     .first<ConfigTenant>();
@@ -149,7 +150,7 @@ export async function avisarLeadNoGrupo(
   }
 
   try {
-    await new PulseboardClient().avisarLeadNovo({
+    await new PulseboardClient(cfg.pulseboard_url || undefined).avisarLeadNovo({
       codiId: cfg.pulseboard_codi_id,
       canal,
       nome,
