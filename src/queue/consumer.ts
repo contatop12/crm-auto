@@ -2,6 +2,7 @@ import type { Env, QueueMessage } from '../env';
 import { eventoPorId, marcarEvento } from '../db/queries';
 import { avisarLeadNoGrupo } from '../pipelines/kanbanTask';
 import { atribuirLead } from '../pipelines/leadMessage';
+import { registrarClique } from '../pipelines/click';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -20,7 +21,9 @@ type Resultado = { status: 'ok' | 'ignorado' | 'erro'; motivo: string };
 async function processar(msg: QueueMessage, env: Env, payload: string): Promise<Resultado> {
   switch (msg.source) {
     case 'click':
-      return { status: 'ignorado', motivo: 'pipeline click ainda nao implementado (Fase 3)' };
+      // cabeca da corrente: sem a linha em `leads`, o protocolo que o lead
+      // manda depois nao casa com nada
+      return registrarClique(env, msg.tenantId, payload);
 
     case 'chatwoot':
       switch (msg.eventType) {
