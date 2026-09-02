@@ -165,6 +165,49 @@ export class ChatwootClient {
   }
 
   /**
+   * Grava atributos na conversa.
+   *
+   * O POST substitui o objeto inteiro, entao o merge e' aqui: sem ele, gravar
+   * a UTM apagaria o `funil` e o `conversa_enviada` que ja estavam la'.
+   */
+  async mesclarAtributosDaConversa(
+    acc: number,
+    conversaId: number,
+    novos: Record<string, string>,
+  ): Promise<void> {
+    if (!Object.keys(novos).length) return;
+    const atual = await this.req<{ custom_attributes?: Record<string, unknown> }>(
+      'GET',
+      `/api/v1/accounts/${acc}/conversations/${conversaId}`,
+    );
+    await this.req('POST', `/api/v1/accounts/${acc}/conversations/${conversaId}/custom_attributes`, {
+      custom_attributes: { ...(atual.custom_attributes ?? {}), ...novos },
+    });
+  }
+
+  /**
+   * Acrescenta etiquetas a conversa, sem tirar as que ja estao.
+   *
+   * O POST de labels tambem substitui o conjunto inteiro. Mandar so' as nossas
+   * apagaria "Ligar mais tarde" e tudo que o vendedor aplicou a mao.
+   */
+  async acrescentarEtiquetas(acc: number, conversaId: number, novas: string[]): Promise<string[]> {
+    if (!novas.length) return [];
+    const atual = await this.req<{ labels?: string[] }>(
+      'GET',
+      `/api/v1/accounts/${acc}/conversations/${conversaId}`,
+    );
+    const antes = atual.labels ?? [];
+    const juntas = [...new Set([...antes, ...novas])];
+    if (juntas.length === antes.length) return [];
+
+    await this.req('POST', `/api/v1/accounts/${acc}/conversations/${conversaId}/labels`, {
+      labels: juntas,
+    });
+    return novas.filter((l) => !antes.includes(l));
+  }
+
+  /**
    * Registra um webhook novo. NAO mexe nos que ja existem — os do n8n
    * continuam recebendo, o que e' o que permite rodar os dois em paralelo.
    * O `secret` e' gerado pelo Chatwoot e volta na resposta.

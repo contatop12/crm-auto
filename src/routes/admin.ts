@@ -893,3 +893,47 @@ admin.patch('/tenants/:id/etiquetas/:slug', async (c) => {
     .run();
   return c.json({ ok: true, no_vocabulario: true, label_whatsapp: zap });
 });
+
+/**
+ * Reprocessa os webhooks que ficaram para tras.
+ *
+ * Os eventos foram gravados enquanto o pipeline nao existia e marcados como
+ * `ignorado`. Reenfileirar faz o pipeline de verdade rodar sobre o payload
+ * original — corrige o passado sem duplicar a logica num script a parte, que
+ * inevitavelmente divergiria do que roda em producao.
+ *
+ * Sem `?aplicar=1` so' conta quantos entrariam na fila.
+ */
+admin.post('/tenants/:id/reprocessar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const tipo = c.req.query('evento') ?? 'message_incoming';
+  const limite = Math.min(Number(c.req.query('limit') ?? 200), 500);
+
+  // Um evento por conversa, o mais antigo: e' a mensagem que carrega o
+  // protocolo. Reprocessar as 40 mensagens de uma conversa daria no mesmo
+  // resultado gastando 40 vezes mais chamadas.
+  const { results } = await c.env.DB.prepare(
+    `SELECT MIN(e.id) AS id
+     FROM events e
+     WHERE e.tenant_id = ? AND e.event_type = ? AND e.status = 'ignorado'
+       AND e.payload IS NOT NULL AND e.payload != ''
+     GROUP BY json_extract(e.payload, '$.conversation.id')
+     ORDER BY id
+     LIMIT ?`,
+  )
+    .bind(id, tipo, limite)
+    .all<{ id: number }>();
+
+  if (c.req.query('aplicar') !== '1') {
+    return c.json({ previa: true, evento: tipo, na_fila: results.length });
+  }
+
+  for (const r of results) {
+    await c.env.QUEUE.send({ eventId: r.id, tenantId: id, source: 'chatwoot', eventType: tipo });
+  }
+
+  console.log(
+    JSON.stringify({ acao: 'reprocessar', por: c.get('identity').email, tenant_id: id, n: results.length }),
+  );
+  return c.json({ previa: false, evento: tipo, na_fila: results.length });
+});

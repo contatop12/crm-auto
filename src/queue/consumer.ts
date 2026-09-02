@@ -1,6 +1,7 @@
 import type { Env, QueueMessage } from '../env';
 import { eventoPorId, marcarEvento } from '../db/queries';
 import { avisarLeadNoGrupo } from '../pipelines/kanbanTask';
+import { atribuirLead } from '../pipelines/leadMessage';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -30,10 +31,9 @@ async function processar(msg: QueueMessage, env: Env, payload: string): Promise<
           };
         case 'message_created':
         case 'message_incoming':
-          return {
-            status: 'ignorado',
-            motivo: 'pipeline leadMessage ainda nao implementado (Fase 3)',
-          };
+          // Onde a atribuicao acontece: le o protocolo da mensagem, acha o
+          // clique e escreve origem, UTMs e etiquetas na conversa e no card.
+          return atribuirLead(env, msg.tenantId, payload);
         case 'message_outgoing':
           return {
             status: 'ignorado',
