@@ -57,10 +57,13 @@ function webhook(over: Record<string, unknown> = {}, conv: Record<string, unknow
 let chamadas: Array<{ metodo: string; url: string; corpo: unknown }>;
 /** Etiquetas que o Chatwoot devolve no GET — e' delas que o merge parte. */
 let etiquetasAtuais: string[];
+/** Atributos que o Chatwoot devolve no GET — e' deles que o merge parte. */
+let atributosAtuais: Record<string, string>;
 
 beforeEach(() => {
   chamadas = [];
   etiquetasAtuais = ['mensagem'];
+  atributosAtuais = { conversa_enviada: 'true' };
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const metodo = init.method ?? 'GET';
     // o corpo do OAuth e urlencoded: parsear tudo como json quebrava o stub
@@ -69,7 +72,7 @@ beforeEach(() => {
     chamadas.push({ metodo, url: String(url), corpo });
 
     if (metodo === 'GET' && /\/conversations\/76$/.test(String(url))) {
-      return Response.json({ custom_attributes: { funil: 'Organico' }, labels: etiquetasAtuais });
+      return Response.json({ custom_attributes: atributosAtuais, labels: etiquetasAtuais });
     }
     if (metodo === 'GET' && /\/kanban\/tasks\/1421$/.test(String(url))) {
       return Response.json({ custom_attributes: { protocolo: 'antigo' } });
@@ -104,11 +107,43 @@ describe('atribuirLead', () => {
   });
 
   test('preserva os atributos que ja estavam na conversa', async () => {
-    // o POST substitui o objeto inteiro: sem merge, o `funil` sumia
+    // o POST substitui o objeto inteiro: sem merge, o que ja estava sumia
     const { env } = cenario();
     await atribuirLead(env, 1, webhook());
     const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
-    expect(attrs.funil).toBe('Organico');
+    expect(attrs.conversa_enviada).toBe('true');
+  });
+
+  test('lead de anuncio e marcado para promover ao funil de Ads', async () => {
+    // a API nao move card entre boards: quem executa e' a regra nativa, que
+    // reage a este valor
+    const { env } = cenario();
+    const r = await atribuirLead(env, 1, webhook());
+    const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+    expect(attrs.funil).toBe('PROMOVER');
+    expect(r.motivo).toMatch(/marcada para promover/);
+  });
+
+  test('clique sem plataforma de anuncio nao promove', async () => {
+    // era o erro da regra "Lead do Google": promovia qualquer coisa com
+    // protocolo, e o fluxo carimbava ORG-<id> no organico tambem
+    const { env, exec } = cenario();
+    exec(`UPDATE leads SET gclid = NULL, utm_source = NULL, utm_medium = NULL WHERE tenant_id = 1`);
+    const r = await atribuirLead(env, 1, webhook());
+    const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+    expect(attrs.funil).toBeUndefined();
+    expect(r.motivo).toMatch(/fica no Organico/);
+  });
+
+  test('conversa ja no funil nao e remarcada', async () => {
+    // remarcar faria a regra atuadora resetar o card para "Novo Lead",
+    // desfazendo o avanco do vendedor
+    const { env } = cenario();
+    atributosAtuais = { funil: 'Lead' };
+    const r = await atribuirLead(env, 1, webhook({}, { custom_attributes: { funil: 'Lead' } }));
+    const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+    expect(attrs.funil).toBe('Lead');
+    expect(r.motivo).toMatch(/ja estava no funil/);
   });
 
   test('resolve o nome da campanha pelo utm_id', async () => {

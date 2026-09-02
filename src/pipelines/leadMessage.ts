@@ -20,10 +20,18 @@ import type { LabelVocabulary, LeadCandidate } from '../domain/types';
  * Sem ele a conversa fica com "Protocolo: ---" e so' a etiqueta `mensagem`,
  * que foi exatamente o que o cliente viu na tela.
  *
- * NAO move card entre boards: a API do Chatwoot nao permite (ver
- * docs/api-reference.md). A promocao depende de uma regra nativa atuando sobre
- * o atributo `funil`, e ela e' passo separado.
+ * A promocao Organico -> Ads acontece aqui, mas por procuracao: a API do
+ * Chatwoot nao move card entre boards (ver docs/api-reference.md), entao quem
+ * executa a transferencia e' uma regra nativa sem logica nenhuma, disparada
+ * pelo atributo `funil = PROMOVER` que gravamos.
+ *
+ * A decisao — quem merece ir para o funil de Ads — passa a ser nossa. Era isso
+ * que a regra "Lead do Google" fazia errado: ela promovia qualquer conversa com
+ * protocolo, e o fluxo carimbava `ORG-<id>` tambem no lead organico.
  */
+
+/** Valor sentinela que a regra atuadora do Chatwoot espera. */
+export const SENTINELA_PROMOVER = 'PROMOVER';
 
 interface Resultado {
   status: 'ok' | 'ignorado' | 'erro';
@@ -146,6 +154,12 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
     plataforma,
   });
 
+  // Promove so' o que veio de anuncio de verdade. `outro` cobre o clique sem
+  // gclid e sem utm de plataforma — nao ha o que atribuir a uma campanha.
+  const daAds = plataforma === 'google' || plataforma === 'meta';
+  const jaNoFunil = str(attrs.funil) === 'Lead';
+  const promover = daAds && !jaNoFunil;
+
   const atribuicao = {
     protocolo: lead.protocol,
     gclid: lead.gclid,
@@ -157,7 +171,12 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
     utmContent: lead.utm_content,
   };
 
-  await cw.mesclarAtributosDaConversa(acc, conversaId, utmsDoCard(atribuicao));
+  await cw.mesclarAtributosDaConversa(acc, conversaId, {
+    ...utmsDoCard(atribuicao),
+    // gravado por ultimo, junto com o resto: a regra atuadora reage ao update
+    // da conversa, entao quando ela rodar os atributos ja estao todos la'
+    ...(promover ? { funil: SENTINELA_PROMOVER } : {}),
+  });
 
   const vocab = await vocabulario(env, tenantId);
   const etiquetas = buildLabels(
@@ -210,8 +229,11 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   return {
     status: 'ok',
     motivo:
-      `conversa ${conversaId} atribuida a ${lead.protocol} (${plataforma}/${campanha.slug ?? 'sem campanha'})` +
-      (aplicadas.length ? ` · etiquetas: ${aplicadas.join(', ')}` : ' · etiquetas ja estavam'),
+      `conversa ${conversaId} atribuida a ${lead.protocol} (${plataforma}/${campanha.slug || 'sem campanha'})` +
+      (aplicadas.length ? ` · etiquetas: ${aplicadas.join(', ')}` : ' · etiquetas ja estavam') +
+      (promover ? ' · marcada para promover ao funil de Ads'
+        : jaNoFunil ? ' · ja estava no funil'
+        : ' · sem plataforma de anuncio, fica no Organico'),
   };
 }
 
