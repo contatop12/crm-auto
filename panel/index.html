@@ -194,6 +194,11 @@
       .endereco .rotulo { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
       .endereco .linha { display: flex; gap: 8px; align-items: stretch; }
       .endereco .uso { margin-top: 4px; }
+      a.botao-link {
+        display: inline-block; text-decoration: none;
+        font: inherit; padding: 7px 14px; border-radius: 4px;
+        background: var(--ink); color: #fff;
+      }
       .endereco code {
         flex: 1; font-family: var(--mono); font-size: 12px;
         background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
@@ -321,6 +326,7 @@
         <button id="btn-atualizar">Atualizar</button>
         <button id="btn-novo">Adicionar cliente</button>
         <button id="btn-padroes">Padronizações</button>
+        <button id="btn-google">Acesso Google</button>
         <span class="meta" id="rodape"></span>
       </header>
       <main id="tela"><p class="carregando">Carregando…</p></main>
@@ -2037,6 +2043,52 @@
         });
       }
 
+      /**
+       * Consentimento do Google, iniciado de dentro do painel.
+       *
+       * O `state` sai daqui, autenticado pelo Access, e é o que amarra a volta
+       * do Google a alguém que já provou quem é. Link colado de fora não serve.
+       */
+      async function verGoogle() {
+        tela.innerHTML = '<p class="carregando">carregando…</p>';
+        rodape.textContent = '';
+
+        const st = await api('/oauth/google/status').catch(function () { return { autorizado: false }; });
+        const inicio = await api('/oauth/google/start').catch(function () { return null; });
+
+        tela.innerHTML =
+          '<div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>' +
+          '<h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.02em">Acesso Google</h2>' +
+          '<p class="carregando" style="margin:0 0 24px">Tag Manager e Google Ads no mesmo consentimento.</p>' +
+
+          '<section><h2>Situação</h2>' +
+          (st.autorizado
+            ? '<p><span class="tag tag-novo">autorizado</span> por <strong>' + esc(st.por || '?') + '</strong>' +
+              ' · ' + haQuanto(st.em) + (st.tag_manager ? ' · inclui Tag Manager' : ' · <span class="st-erro">sem escopo do Tag Manager</span>') + '</p>'
+            : '<p><span class="tag">ainda não autorizado</span></p>') +
+          '</section>' +
+
+          '<section><h2>Autorizar</h2>' +
+          (inicio
+            ? '<p class="dica">O link abaixo vale <strong>10 minutos</strong> e serve uma vez. Entre com a conta que administra os containers dos clientes.</p>' +
+              '<div class="linha-acoes"><a class="botao-link" id="link-google" href="' + esc(inicio.url) + '">Abrir consentimento do Google</a></div>' +
+              '<p class="dica" style="margin-top:14px">Este endereço precisa estar cadastrado como <strong>URI de redirecionamento autorizado</strong> no cliente OAuth do Google Cloud:</p>' +
+              '<div class="endereco"><div class="linha"><code>' + esc(inicio.redirect_uri) + '</code>' +
+              '<button class="copiar" data-url="' + esc(inicio.redirect_uri) + '">copiar</button></div></div>'
+            : '<div class="erro">não foi possível gerar o link</div>') +
+          '</section>';
+
+        document.getElementById('btn-voltar').addEventListener('click', verOverview);
+        tela.querySelectorAll('.copiar').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            try { await navigator.clipboard.writeText(b.dataset.url); b.textContent = 'copiado'; }
+            catch { b.textContent = 'selecione e copie'; }
+            setTimeout(function () { b.textContent = 'copiar'; }, 2000);
+          });
+        });
+      }
+
+      document.getElementById('btn-google').addEventListener('click', () => verGoogle());
       document.getElementById('btn-padroes').addEventListener('click', () => verPadroes());
       document.getElementById('btn-novo').addEventListener('click', () => verFormulario());
 

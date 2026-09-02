@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, QueueMessage } from './env';
 import { ingest } from './routes/ingest';
+import { oauth } from './routes/oauth';
 import { api } from './routes/api';
 import { admin } from './routes/admin';
 import { consumir } from './queue/consumer';
@@ -23,6 +24,9 @@ app.get('/health', async (c) => {
   return c.json({ ok: db === 'ok', db, env: c.env.ENVIRONMENT ?? 'desconhecido' });
 });
 
+// o callback do Google entra sob /ingest porque esse prefixo ja e' publico:
+// o navegador volta do Google sem sessao do Access
+app.route('/ingest', oauth);
 app.route('/ingest', ingest);
 app.route('/api', api);
 app.route('/api', admin);

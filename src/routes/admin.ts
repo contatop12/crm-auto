@@ -4,6 +4,7 @@ import { requireAccess, type AccessIdentity } from '../middleware/access';
 import { ChatwootClient } from '../clients/chatwoot';
 import { GoogleAdsClient, criarConversionActions } from '../clients/googleAds';
 import { EvolutionClient } from '../clients/evolution';
+import { urlDeConsentimento, CAMINHO_CALLBACK } from './oauth';
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
@@ -937,4 +938,38 @@ admin.post('/tenants/:id/reprocessar', async (c) => {
     JSON.stringify({ acao: 'reprocessar', por: c.get('identity').email, tenant_id: id, n: results.length }),
   );
   return c.json({ previa: false, evento: tipo, na_fila: results.length });
+});
+
+// ---------------------------------------------------------------------------
+// Consentimento do Google (Tag Manager)
+// ---------------------------------------------------------------------------
+
+/**
+ * Comeca o consentimento. Devolve a URL do Google com um `state` de uso unico.
+ *
+ * Sai daqui, de dentro do Access, e nao de um link colado: e' isso que amarra o
+ * callback a uma pessoa que ja provou quem e'.
+ */
+admin.get('/oauth/google/start', async (c) => {
+  const state = crypto.randomUUID().replace(/-/g, '');
+  const email = c.get('identity').email;
+  await c.env.CACHE.put(`oauth:state:${state}`, email, { expirationTtl: 600 });
+
+  const redirectUri = new URL(c.req.url).origin + CAMINHO_CALLBACK;
+  return c.json({ url: urlDeConsentimento(c.env, redirectUri, state), redirect_uri: redirectUri });
+});
+
+/** O que ja foi autorizado, sem devolver o token. */
+admin.get('/oauth/google/status', async (c) => {
+  const l = await c.env.DB.prepare(
+    "SELECT obtido_por, escopos, atualizado_em FROM credenciais WHERE chave = 'gtm_refresh_token'",
+  ).first<{ obtido_por: string; escopos: string; atualizado_em: string }>();
+
+  if (!l) return c.json({ autorizado: false });
+  return c.json({
+    autorizado: true,
+    por: l.obtido_por,
+    em: l.atualizado_em,
+    tag_manager: (l.escopos ?? '').includes('tagmanager'),
+  });
 });
