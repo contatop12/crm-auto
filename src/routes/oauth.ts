@@ -59,14 +59,26 @@ oauth.get('/oauth/google/callback', async (c) => {
   const state = c.req.query('state');
   if (!code || !state) return c.html(pagina('Faltou informação', 'A volta do Google veio sem código ou sem state.'), 400);
 
-  const guardado = await c.env.CACHE.get(`oauth:state:${state}`);
-  if (!guardado) {
+  // uso unico e com prazo: a validade e' conferida aqui porque o D1 nao expira
+  // linha sozinho
+  const linha = await c.env.DB.prepare(
+    `SELECT valor FROM credenciais
+     WHERE chave = ? AND atualizado_em >= datetime('now', '-10 minutes')`,
+  )
+    .bind(`oauth_state:${state}`)
+    .first<{ valor: string }>();
+
+  await c.env.DB.prepare('DELETE FROM credenciais WHERE chave = ?')
+    .bind(`oauth_state:${state}`)
+    .run();
+
+  if (!linha) {
     return c.html(
       pagina('State inválido ou vencido', 'Comece de novo pelo painel. O link do consentimento vale 10 minutos e serve uma vez só.'),
       400,
     );
   }
-  await c.env.CACHE.delete(`oauth:state:${state}`);
+  const guardado = linha.valor;
 
   const redirectUri = new URL(c.req.url).origin + CAMINHO_CALLBACK;
   const r = await fetch('https://oauth2.googleapis.com/token', {

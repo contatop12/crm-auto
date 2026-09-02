@@ -953,7 +953,16 @@ admin.post('/tenants/:id/reprocessar', async (c) => {
 admin.get('/oauth/google/start', async (c) => {
   const state = crypto.randomUUID().replace(/-/g, '');
   const email = c.get('identity').email;
-  await c.env.CACHE.put(`oauth:state:${state}`, email, { expirationTtl: 600 });
+
+  // D1 e nao KV: o KV tem teto diario de escrita e ja recusou uma vez hoje.
+  // Perder o state por cota estourada deixaria o consentimento impossivel de
+  // comecar, sem dizer por que.
+  await c.env.DB.prepare(
+    `INSERT INTO credenciais (chave, valor, obtido_por, escopos, atualizado_em)
+     VALUES (?, ?, ?, NULL, datetime('now'))`,
+  )
+    .bind(`oauth_state:${state}`, email, email)
+    .run();
 
   const redirectUri = new URL(c.req.url).origin + CAMINHO_CALLBACK;
   return c.json({ url: urlDeConsentimento(c.env, redirectUri, state), redirect_uri: redirectUri });

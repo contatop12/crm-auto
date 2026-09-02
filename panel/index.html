@@ -2054,7 +2054,15 @@
         rodape.textContent = '';
 
         const st = await api('/oauth/google/status').catch(function () { return { autorizado: false }; });
-        const inicio = await api('/oauth/google/start').catch(function () { return null; });
+        // o erro daqui e' o que impede autorizar: engoli-lo deixava a tela
+        // dizendo "nao foi possivel" sem dizer por que
+        let inicio = null;
+        let falha = '';
+        try {
+          inicio = await api('/oauth/google/start');
+        } catch (e) {
+          falha = e.message;
+        }
 
         tela.innerHTML =
           '<div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>' +
@@ -2075,7 +2083,7 @@
               '<p class="dica" style="margin-top:14px">Este endereço precisa estar cadastrado como <strong>URI de redirecionamento autorizado</strong> no cliente OAuth do Google Cloud:</p>' +
               '<div class="endereco"><div class="linha"><code>' + esc(inicio.redirect_uri) + '</code>' +
               '<button class="copiar" data-url="' + esc(inicio.redirect_uri) + '">copiar</button></div></div>'
-            : '<div class="erro">não foi possível gerar o link</div>') +
+            : '<div class="erro">não foi possível gerar o link: ' + esc(falha || 'sem detalhe') + '</div>') +
           '</section>';
 
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
