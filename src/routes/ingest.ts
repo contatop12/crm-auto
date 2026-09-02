@@ -116,7 +116,18 @@ ingest.post('/:slug/chatwoot', async (c) => {
  * Nao grava evento e nao devolve nada sobre o cliente: so' prova que a rota
  * chega ao Worker em vez de cair na tela de login.
  */
-ingest.get('/:slug/ping', (c) => c.body(null, 204));
+ingest.get('/:slug/ping', async (c) => {
+  const chave = c.req.query('k');
+  // sem chave e' a sondagem do painel: so' prova que a rota chega ao Worker
+  if (!chave) return c.body(null, 204);
+
+  // com chave, confere se ela abre a porta deste cliente — e' o teste do
+  // endereco que vai para o GTM e para as automacoes, sem gravar nada
+  const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
+  if (!tenant) return c.json({ ok: false, erro: 'cliente desconhecido' }, 404);
+  if (chave !== tenant.ingestKey) return c.json({ ok: false, erro: 'chave invalida' }, 401);
+  return c.json({ ok: true, cliente: c.req.param('slug') });
+});
 
 /**
  * Mudanca de etapa do Kanban, disparada pelas regras de automacao do Chatwoot

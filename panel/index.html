@@ -193,6 +193,7 @@
       .endereco { margin-bottom: 16px; }
       .endereco .rotulo { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
       .endereco .linha { display: flex; gap: 8px; align-items: stretch; }
+      .endereco .uso { margin-top: 4px; }
       .endereco code {
         flex: 1; font-family: var(--mono); font-size: 12px;
         background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
@@ -1802,21 +1803,66 @@
         const base = location.origin + '/ingest/' + encodeURIComponent(slug);
         const k = '?k=' + encodeURIComponent(cfg.ingest_key);
 
-        const bloco = function (rotulo, url, dica) {
+        // Duas perguntas diferentes: a chave ABRE a porta, e alguém JÁ USOU o
+        // endereço. Uma URL pode estar perfeita e nunca ter sido colada no GTM.
+        const uso = await api('/tenants/' + id + '/ingest-status').catch(function () { return {}; });
+
+        const recebeu = function (d) {
+          if (!d || !d.total) return '<span class="tag">nunca recebeu</span>';
+          return '<span class="tag tag-novo">' + d.total + ' recebido' + (d.total > 1 ? 's' : '') + '</span>' +
+            '<span class="sub">último ' + haQuanto(d.ultimo) + ' · ' + d.em_24h + ' em 24h' +
+            (d.erros ? ' · ' + d.erros + ' com erro' : '') + '</span>';
+        };
+
+        const bloco = function (rotulo, url, dica, dados) {
           return '<div class="endereco">' +
             '<div class="rotulo">' + esc(rotulo) + '</div>' +
             '<div class="linha"><code>' + esc(url) + '</code>' +
             '<button class="copiar" data-url="' + esc(url) + '">copiar</button></div>' +
-            '<p class="dica">' + dica + '</p></div>';
+            '<p class="dica">' + dica + '</p>' +
+            '<div class="uso">' + recebeu(dados) + '</div></div>';
         };
 
         alvo.innerHTML =
+          '<div class="linha-acoes" style="margin-bottom:14px">' +
+            '<button id="btn-testar-chave">Testar a chave</button>' +
+            '<span class="carregando" id="chave-estado">confere se o endereço abre, sem gravar nada</span>' +
+          '</div>' +
           bloco('GTM · clique no anúncio', base + '/click' + k,
-            'POST com o corpo do clique. Grava a linha em <strong>leads</strong>, que é o que o protocolo da mensagem casa depois.') +
-          bloco('Chatwoot · mudança de etapa do card', base + '/kanban' + k,
-            'Use na ação <strong>Enviar evento de webhook</strong> de uma automação. É o que dispara o aviso no grupo.') +
+            'POST com o corpo do clique. Grava a linha em <strong>leads</strong>, que é o que o protocolo da mensagem casa depois.',
+            uso.click) +
+          bloco('Chatwoot · entrada no funil (avisa o grupo)', base + '/kanban' + k,
+            'Ação <strong>Enviar evento de webhook</strong> numa automação de <em>kanban_task_updated</em>, com o board do funil e a etapa de entrada.',
+            uso.kanban_entrada) +
+          bloco('Chatwoot · conversão por etapa', base + '/kanban' + k + '&evento=conversao',
+            'Já está nas regras <strong>Evento Qualificado</strong> e <strong>Compra</strong>. O <code>&amp;evento=conversao</code> impede que elas disparem aviso de lead novo.',
+            uso.kanban_conversao) +
           '<div class="aviso">A chave vai na própria URL, porque nem o GTM nem a automação do Chatwoot mandam header. ' +
           'Trate estes endereços como senha: quem os tiver consegue gravar dados neste cliente.</div>';
+
+        document.getElementById('btn-testar-chave').addEventListener('click', async function () {
+          const est = document.getElementById('chave-estado');
+          est.innerHTML = '<span class="girando"></span>testando…';
+          try {
+            const r = await fetch('/ingest/' + encodeURIComponent(slug) + '/ping' + k);
+            if (r.status === 200) {
+              est.textContent = 'chave válida — o endereço abre e responde';
+              est.className = 'st-ok';
+            } else if (r.status === 401) {
+              est.textContent = 'chave inválida — o GTM receberia 401 e o clique se perderia';
+              est.className = 'st-erro';
+            } else if (r.redirected || /cloudflareaccess/.test(r.url)) {
+              est.textContent = 'a rota /ingest está atrás do Access — quem postar recebe tela de login';
+              est.className = 'st-erro';
+            } else {
+              est.textContent = 'resposta inesperada: HTTP ' + r.status;
+              est.className = 'st-erro';
+            }
+          } catch (e) {
+            est.textContent = 'não respondeu: ' + e.message;
+            est.className = 'st-erro';
+          }
+        });
 
         alvo.querySelectorAll('.copiar').forEach(function (b) {
           b.addEventListener('click', async function () {

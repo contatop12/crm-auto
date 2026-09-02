@@ -126,6 +126,44 @@ api.get('/tenants/:id/events', async (c) => {
 });
 
 /**
+ * Se cada endereco de ingestao ja recebeu alguma coisa.
+ *
+ * Chave valida prova que o endereco ABRE; isto prova que ele E' USADO. Sao
+ * perguntas diferentes: a URL pode estar perfeita e ninguem ter colado ela no
+ * GTM ainda, que e' exatamente o caso de dois dos quatro clientes.
+ */
+api.get('/tenants/:id/ingest-status', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT source, event_type,
+            COUNT(*) AS total,
+            MAX(received_at) AS ultimo,
+            SUM(CASE WHEN received_at >= datetime('now','-1 day') THEN 1 ELSE 0 END) AS em_24h,
+            SUM(CASE WHEN status = 'erro' THEN 1 ELSE 0 END) AS erros
+     FROM events WHERE tenant_id = ?
+     GROUP BY source, event_type`,
+  )
+    .bind(Number(c.req.param('id')))
+    .all<{ source: string; event_type: string; total: number; ultimo: string; em_24h: number; erros: number }>();
+
+  const junta = (f: (l: (typeof results)[0]) => boolean) => {
+    const linhas = results.filter(f);
+    return {
+      total: linhas.reduce((s, l) => s + l.total, 0),
+      em_24h: linhas.reduce((s, l) => s + l.em_24h, 0),
+      erros: linhas.reduce((s, l) => s + l.erros, 0),
+      ultimo: linhas.map((l) => l.ultimo).sort().pop() ?? null,
+    };
+  };
+
+  return c.json({
+    click: junta((l) => l.source === 'click'),
+    chatwoot: junta((l) => l.source === 'chatwoot'),
+    kanban_entrada: junta((l) => l.event_type === 'kanban_entrada'),
+    kanban_conversao: junta((l) => l.event_type === 'kanban_conversao'),
+  });
+});
+
+/**
  * Corpo de um webhook recebido.
  *
  * Mascarado por padrao: telefone, e-mail e o texto das mensagens sao dados dos
