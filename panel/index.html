@@ -187,6 +187,8 @@
         margin-top: 12px; flex-wrap: wrap;
       }
       .paginacao button[disabled] { opacity: .4; cursor: default; }
+      .paginacao label { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+      .paginacao select { padding: 3px 6px; }
 
       /* Gira enquanto a fila trabalha. O reprocessamento e' assincrono: sem
          sinal de atividade a tela parece travada. */
@@ -623,8 +625,6 @@
         }
       }
 
-      const POR_PAGINA = 25;
-
       async function carregarEventos(id, offset) {
         const alvo = document.getElementById('eventos');
         if (!alvo) return;
@@ -632,7 +632,7 @@
 
         let r;
         try {
-          r = await api('/tenants/' + id + '/events?limit=' + POR_PAGINA + '&offset=' + (offset || 0));
+          r = await api('/tenants/' + id + '/events?limit=' + porPagina('eventos') + '&offset=' + (offset || 0));
         } catch (e) {
           alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
           return;
@@ -660,7 +660,7 @@
         const alvo = document.getElementById('avisos');
         let r;
         try {
-          r = await api('/tenants/' + id + '/avisos?limit=' + POR_PAGINA + '&offset=' + (offset || 0));
+          r = await api('/tenants/' + id + '/avisos?limit=' + porPagina('avisos') + '&offset=' + (offset || 0));
         } catch (e) {
           alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
           return;
@@ -1552,29 +1552,69 @@
         }
       }
 
+      const TAMANHOS = [10, 25, 50, 100, 200];
+
+      /**
+       * Quantos itens por página, por seção.
+       *
+       * Guardado no navegador: quem escolheu 100 uma vez não quer voltar a 25 a
+       * cada recarga. É preferência de quem olha, não do servidor — cai no
+       * padrão se o navegador bloquear o armazenamento.
+       */
+      function porPagina(secao) {
+        try {
+          const v = Number(localStorage.getItem('pag:' + secao));
+          if (TAMANHOS.indexOf(v) >= 0) return v;
+        } catch { /* navegador sem armazenamento */ }
+        return 25;
+      }
+
+      function guardarPorPagina(secao, n) {
+        try { localStorage.setItem('pag:' + secao, String(n)); } catch { /* segue sem lembrar */ }
+      }
+
       /**
        * Controles de página.
        *
-       * Só aparecem quando há mais de uma página: numa lista de 8 itens, dois
-       * botões inertes só ocupam espaço e sugerem que existe algo adiante.
+       * O seletor de tamanho aparece sempre que há o que paginar; os botões de
+       * anterior/próxima, só quando há mais de uma página. Numa lista de 8
+       * itens, dois botões inertes só ocupam espaço e sugerem algo adiante.
        */
-      function paginacao(id, total, limite, offset) {
-        if (total <= limite) return '';
-        const pagina = Math.floor(offset / limite) + 1;
+      function paginacao(secao, total, limite, offset) {
         const paginas = Math.ceil(total / limite);
+        const seletor =
+          '<label class="carregando">por página ' +
+          '<select class="pag-tam" data-secao="' + secao + '">' +
+          TAMANHOS.map(function (n) {
+            return '<option value="' + n + '"' + (n === limite ? ' selected' : '') + '>' + n + '</option>';
+          }).join('') +
+          '</select></label>';
+
+        if (paginas <= 1) {
+          return '<div class="paginacao"><span class="carregando">' + total +
+            (total === 1 ? ' item' : ' itens') + '</span>' + seletor + '</div>';
+        }
         return '<div class="paginacao">' +
-          '<button class="pag" data-alvo="' + id + '" data-offset="' + Math.max(offset - limite, 0) + '"' +
+          '<button class="pag" data-offset="' + Math.max(offset - limite, 0) + '"' +
             (offset <= 0 ? ' disabled' : '') + '>← anterior</button>' +
           '<span class="carregando">' + (offset + 1) + '–' + Math.min(offset + limite, total) +
-            ' de ' + total + ' · página ' + pagina + ' de ' + paginas + '</span>' +
-          '<button class="pag" data-alvo="' + id + '" data-offset="' + (offset + limite) + '"' +
+            ' de ' + total + ' · página ' + (Math.floor(offset / limite) + 1) + ' de ' + paginas + '</span>' +
+          '<button class="pag" data-offset="' + (offset + limite) + '"' +
             (offset + limite >= total ? ' disabled' : '') + '>próxima →</button>' +
-          '</div>';
+          seletor + '</div>';
       }
 
       function ligarPaginacao(alvo, recarregar) {
         alvo.querySelectorAll('.pag').forEach(function (b) {
           b.addEventListener('click', function () { recarregar(Number(b.dataset.offset)); });
+        });
+        alvo.querySelectorAll('.pag-tam').forEach(function (sel) {
+          sel.addEventListener('change', function () {
+            guardarPorPagina(sel.dataset.secao, Number(sel.value));
+            // volta para a primeira pagina: manter o offset com outro tamanho
+            // cairia num ponto arbitrario da lista
+            recarregar(0);
+          });
         });
       }
 
