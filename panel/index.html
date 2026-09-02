@@ -423,6 +423,18 @@
           </section>
 
           <section>
+            <h2>Etiquetas deste cliente</h2>
+            <div class="linha-acoes">
+              <input id="l-slug" placeholder="nome da etiqueta (ex: reagendar)" />
+              <input id="l-cor" type="color" value="#999999" style="width:52px;padding:2px" />
+              <input id="l-desc" placeholder="descrição" />
+              <button id="btn-l-add">Criar no Chatwoot</button>
+              <span class="carregando" id="etiquetas-estado"></span>
+            </div>
+            <div id="etiquetas"></div>
+          </section>
+
+          <section>
             <h2>Metas de conversão no Google Ads</h2>
             <div class="linha-acoes">
               <button id="btn-metas">Gerar metas</button>
@@ -510,6 +522,7 @@
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
         document.getElementById('btn-meta-nova').addEventListener('click', () => adicionarMeta(id));
         document.getElementById('btn-gatilho').addEventListener('click', () => adicionarGatilho(id));
+        document.getElementById('btn-l-add').addEventListener('click', () => criarEtiqueta(id));
         document.getElementById('btn-prov').addEventListener('click', () => provisionar(id, false));
         document.getElementById('btn-prov-criar').addEventListener('click', () => provisionar(id, true));
 
@@ -535,6 +548,7 @@
           if (nome === 'config') {
             carregarEtapas(id);
             carregarGatilhos(id);
+            carregarEtiquetas(id);
             carregarInstancias(id);
           }
           if (nome === 'integracoes') { carregarWebhooks(id, slug); provisionar(id, false); }
@@ -1325,6 +1339,112 @@
             ? 'validado: ' + r.seriam_criadas + ' seriam criadas, nada foi gravado'
             : r.criadas + ' criadas · ' + r.ligadas + ' ligadas a etapas';
           if (!validar) { await preverMetas(id); await carregarEtapas(id); }
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
+      }
+
+      // ---------- etiquetas do cliente ----------
+
+      /**
+       * As etiquetas da conta do Chatwoot cruzadas com o vocabulário do motor.
+       *
+       * São coisas diferentes: a etiqueta existe no Chatwoot, mas o motor só
+       * aplica o que está no vocabulário. A que o vendedor criou à mão ("Ligar
+       * mais tarde") aparece fora do vocabulário, e é assim que deve ficar —
+       * não é etiqueta de atribuição.
+       */
+      async function carregarEtiquetas(id) {
+        const alvo = document.getElementById('etiquetas');
+        const estado = document.getElementById('etiquetas-estado');
+        if (!alvo) return;
+        alvo.innerHTML = '<p class="carregando">carregando…</p>';
+
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/etiquetas');
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+
+        const noVocab = r.etiquetas.filter(function (e) { return e.no_vocabulario; }).length;
+        estado.textContent =
+          r.etiquetas.length + ' no Chatwoot · ' + noVocab + ' no vocabulário' +
+          (r.instancia ? ' · WhatsApp "' + r.instancia + '"' : ' · sem instância de WhatsApp');
+
+        const optZap = function (atual) {
+          return '<option value="">— não aplica no WhatsApp —</option>' +
+            r.whatsapp_disponiveis.map(function (l) {
+              return '<option value="' + esc(l) + '"' + (l === atual ? ' selected' : '') + '>' + esc(l) + '</option>';
+            }).join('');
+        };
+
+        alvo.innerHTML =
+          (r.orfas.length
+            ? '<div class="aviso">No vocabulário mas não existem no Chatwoot: <span class="mono">' +
+              esc(r.orfas.join(', ')) + '</span>. O motor tentaria aplicar e falharia.</div>'
+            : '') +
+          (r.etiquetas.length
+            ? '<table><thead><tr><th>Etiqueta</th><th>O motor usa</th><th>Nome no WhatsApp</th></tr></thead><tbody>' +
+              r.etiquetas.map(function (e) {
+                return '<tr>' +
+                  '<td class="mono">' + esc(e.titulo) + '</td>' +
+                  '<td><input type="checkbox" class="l-on" data-slug="' + esc(e.titulo) + '" ' +
+                    (e.no_vocabulario ? 'checked' : '') + ' /></td>' +
+                  '<td>' + (r.whatsapp_disponiveis.length
+                    ? '<select class="l-zap" data-slug="' + esc(e.titulo) + '"' +
+                      (e.no_vocabulario ? '' : ' disabled') + '>' + optZap(e.label_whatsapp) + '</select>'
+                    : '<span class="nada">' + esc(e.label_whatsapp || '—') + '</span>') +
+                  '</td></tr>';
+              }).join('') + '</tbody></table>'
+            : '<div class="vazio"><p>Nenhuma etiqueta nesta conta do Chatwoot.</p>' +
+              '<p class="mono">Use Integrações → Gerar no Chatwoot para criar as do padrão.</p></div>');
+
+        alvo.querySelectorAll('.l-on').forEach(function (b) {
+          b.addEventListener('change', async function () {
+            const zap = alvo.querySelector('.l-zap[data-slug="' + b.dataset.slug + '"]');
+            try {
+              await enviar('/tenants/' + id + '/etiquetas/' + encodeURIComponent(b.dataset.slug), 'PATCH', {
+                no_vocabulario: b.checked,
+                label_whatsapp: zap ? zap.value : null,
+              });
+              if (zap) zap.disabled = !b.checked;
+              carregarEtiquetas(id);
+            } catch (e) { estado.textContent = 'falhou: ' + e.message; }
+          });
+        });
+
+        alvo.querySelectorAll('.l-zap').forEach(function (sel) {
+          sel.addEventListener('change', async function () {
+            try {
+              await enviar('/tenants/' + id + '/etiquetas/' + encodeURIComponent(sel.dataset.slug), 'PATCH', {
+                no_vocabulario: true,
+                label_whatsapp: sel.value,
+              });
+              estado.textContent = 'salvo';
+            } catch (e) { estado.textContent = 'falhou: ' + e.message; }
+          });
+        });
+      }
+
+      async function criarEtiqueta(id) {
+        const estado = document.getElementById('etiquetas-estado');
+        const slug = document.getElementById('l-slug').value.trim();
+        if (!slug) { estado.textContent = 'dê um nome à etiqueta'; return; }
+        estado.textContent = 'criando no Chatwoot…';
+        try {
+          const r = await enviar('/tenants/' + id + '/etiquetas', 'POST', {
+            slug: slug,
+            cor: document.getElementById('l-cor').value,
+            descricao: document.getElementById('l-desc').value,
+          });
+          document.getElementById('l-slug').value = '';
+          document.getElementById('l-desc').value = '';
+          await carregarEtiquetas(id);
+          if (!r.criada_no_chatwoot) {
+            estado.textContent = 'já existia no Chatwoot — só foi ligada ao motor';
+          }
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         }

@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { requireAccess, type AccessIdentity } from '../middleware/access';
 import { ChatwootClient } from '../clients/chatwoot';
 import { GoogleAdsClient, criarConversionActions } from '../clients/googleAds';
+import { EvolutionClient } from '../clients/evolution';
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
@@ -773,3 +774,122 @@ function resumo(p: ReturnType<typeof planejarProvisionamento>) {
     fora_do_padrao: [...p.etiquetasForaDoPadrao, ...p.atributosForaDoPadrao],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Etiquetas deste cliente
+// ---------------------------------------------------------------------------
+
+/**
+ * As etiquetas da conta do Chatwoot cruzadas com o vocabulario do motor.
+ *
+ * Sao coisas diferentes e a diferenca importa: a etiqueta existe no Chatwoot,
+ * mas o motor so' aplica o que esta no vocabulario. Etiqueta que o vendedor
+ * criou a mao ("Ligar mais tarde") aparece aqui como fora do vocabulario, e e'
+ * assim que deve ficar — nao e' etiqueta de atribuicao.
+ *
+ * O nome no WhatsApp vem junto porque foi batizado a mao e diverge do Chatwoot:
+ * "Lead do Google Ads" na Vita, "Google-ads" na Persianas.
+ */
+admin.get('/tenants/:id/etiquetas', async (c) => {
+  const id = Number(c.req.param('id'));
+  const t = await carregarTenant(c.env.DB, id);
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+
+  const cfg = await c.env.DB.prepare(
+    'SELECT evo_instancia FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ evo_instancia: string | null }>();
+
+  const [noChatwoot, vocab, noWhatsapp] = await Promise.all([
+    t.cwAccountId
+      ? ChatwootClient.fromEnv(c.env).labels(t.cwAccountId).catch(() => [])
+      : Promise.resolve([]),
+    c.env.DB.prepare(
+      'SELECT slug, label_chatwoot, label_whatsapp FROM label_vocabulary WHERE tenant_id = ? ORDER BY slug',
+    )
+      .bind(id)
+      .all<{ slug: string; label_chatwoot: string; label_whatsapp: string | null }>(),
+    cfg?.evo_instancia
+      ? EvolutionClient.fromEnv(c.env).labels(cfg.evo_instancia).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+
+  const noVocab = new Map(vocab.results.map((v) => [v.slug.toLowerCase(), v]));
+
+  return c.json({
+    instancia: cfg?.evo_instancia ?? null,
+    whatsapp_disponiveis: noWhatsapp,
+    etiquetas: noChatwoot.map((titulo) => {
+      const v = noVocab.get(titulo.toLowerCase());
+      return {
+        titulo,
+        no_vocabulario: !!v,
+        label_whatsapp: v?.label_whatsapp ?? null,
+      };
+    }),
+    // no vocabulario mas nao na conta: o motor tentaria aplicar e falharia
+    orfas: vocab.results
+      .filter((v) => !noChatwoot.some((l) => l.toLowerCase() === v.slug.toLowerCase()))
+      .map((v) => v.slug),
+  });
+});
+
+/** Cria a etiqueta na conta do cliente e ja liga no vocabulario do motor. */
+admin.post('/tenants/:id/etiquetas', async (c) => {
+  const id = Number(c.req.param('id'));
+  const t = await carregarTenant(c.env.DB, id);
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+  if (!t.cwAccountId) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  const b = await c.req.json<{ slug?: string; cor?: string; descricao?: string; label_whatsapp?: string }>();
+  const slug = (b.slug ?? '').trim();
+  if (!slug) return c.json({ error: 'nome da etiqueta obrigatorio' }, 400);
+
+  const cw = ChatwootClient.fromEnv(c.env);
+  const existentes = await cw.labels(t.cwAccountId);
+  const jaExiste = existentes.some((l) => l.toLowerCase() === slug.toLowerCase());
+
+  if (!jaExiste) {
+    await cw.criarEtiqueta(t.cwAccountId, slug, (b.cor ?? '#999999').trim(), (b.descricao ?? '').trim() || null);
+  }
+
+  await c.env.DB.prepare(
+    `INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (tenant_id, slug) DO UPDATE SET label_whatsapp = excluded.label_whatsapp`,
+  )
+    .bind(id, slug, slug, (b.label_whatsapp ?? '').trim() || null)
+    .run();
+
+  console.log(
+    JSON.stringify({ acao: 'criar_etiqueta', por: c.get('identity').email, tenant_id: id, slug }),
+  );
+  return c.json({ ok: true, criada_no_chatwoot: !jaExiste });
+});
+
+/** Liga ou desliga a etiqueta do vocabulario, e ajusta o nome no WhatsApp. */
+admin.patch('/tenants/:id/etiquetas/:slug', async (c) => {
+  const id = Number(c.req.param('id'));
+  const slug = decodeURIComponent(c.req.param('slug'));
+  const b = await c.req.json<{ no_vocabulario?: boolean; label_whatsapp?: string | null }>();
+
+  if (b.no_vocabulario === false) {
+    // sai do vocabulario, fica no Chatwoot: apagar a etiqueta la' tiraria ela
+    // das conversas onde o vendedor ja aplicou
+    await c.env.DB.prepare('DELETE FROM label_vocabulary WHERE tenant_id = ? AND slug = ?')
+      .bind(id, slug)
+      .run();
+    return c.json({ ok: true, no_vocabulario: false });
+  }
+
+  const zap = (b.label_whatsapp ?? '').trim() || null;
+  await c.env.DB.prepare(
+    `INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (tenant_id, slug) DO UPDATE SET label_whatsapp = excluded.label_whatsapp`,
+  )
+    .bind(id, slug, slug, zap)
+    .run();
+  return c.json({ ok: true, no_vocabulario: true, label_whatsapp: zap });
+});
