@@ -94,3 +94,59 @@ describe('registrarClique', () => {
     expect((await registrarClique(env, 1, '[]')).status).toBe('ignorado');
   });
 });
+
+describe('formato real do GTM', () => {
+  // corpo capturado do container GTM-5867VHW5 em producao
+  const doGtm = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      protocol: 'VITA-MTKPE89XT1AW',
+      event: 'whatsapp_click',
+      event_id: 'evt-mtkpe8a0vsje43',
+      click_url: 'undefined',
+      gclid: '', gbraid: '', wbraid: '', fbc: '', fbp: '',
+      landing_url: 'https://audicao.vitaaudio.com.br/aparelhos',
+      page_url: 'https://gtm-msr.appspot.com/render?id=GTM-5867VHW5',
+      referrer: '',
+      utm: { source: 'google', medium: 'cpc', campaign: 'Vita - Search', term: 'aparelho', content: 'anuncio-1' },
+      ts: 1788390276,
+      ...over,
+    });
+
+  test('le as UTMs aninhadas em `utm`', async () => {
+    // o modelo de tag manda um objeto, nao campos achatados
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, doGtm());
+    const [l] = consultar<Record<string, string>>('SELECT * FROM leads');
+    expect(l!.utm_source).toBe('google');
+    expect(l!.utm_medium).toBe('cpc');
+    expect(l!.utm_campaign).toBe('Vita - Search');
+    expect(l!.utm_term).toBe('aparelho');
+    expect(l!.utm_content).toBe('anuncio-1');
+  });
+
+  test('a palavra "undefined" nao vira valor', async () => {
+    // o GTM serializa variavel vazia como o texto undefined
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, doGtm({ referrer: 'undefined' }));
+    const [l] = consultar<Record<string, string | null>>('SELECT referrer FROM leads');
+    expect(l!.referrer).toBeNull();
+  });
+
+  test('landing_url manda na page_url', async () => {
+    // em modo de teste a page_url e' a do renderizador do GTM, que nao diz
+    // nada sobre onde o lead estava
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, doGtm());
+    const [l] = consultar<Record<string, string>>('SELECT page_url FROM leads');
+    expect(l!.page_url).toBe('https://audicao.vitaaudio.com.br/aparelhos');
+  });
+
+  test('cinco disparos do mesmo protocolo continuam sendo um lead', async () => {
+    // a tag disparou 5x no mesmo segundo, com event_id diferente cada
+    const { env, consultar } = cenario();
+    for (let i = 0; i < 5; i++) {
+      await registrarClique(env, 1, doGtm({ event_id: 'evt-' + i }));
+    }
+    expect(consultar('SELECT * FROM leads').length).toBe(1);
+  });
+});

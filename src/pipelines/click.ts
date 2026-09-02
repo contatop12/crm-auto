@@ -25,9 +25,18 @@ interface Resultado {
  */
 function ler(p: Record<string, unknown>, ...nomes: string[]): string | null {
   for (const n of nomes) {
-    const v = p[n];
-    if (typeof v === 'string' && v.trim()) return v.trim();
+    // `utm.source`: o modelo de tag manda as UTMs aninhadas num objeto, nao
+    // achatadas. Ler so' `utm_source` perdia as cinco de uma vez.
+    const v = n.includes('.')
+      ? n.split('.').reduce<unknown>((o, parte) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[parte] : undefined), p)
+      : p[n];
     if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+    if (typeof v !== 'string') continue;
+    const t = v.trim();
+    // O GTM serializa variavel nao preenchida como a PALAVRA "undefined".
+    // Guardar isso poluiria o banco com o texto no lugar de um campo vazio.
+    if (!t || t === 'undefined' || t === 'null') continue;
+    return t;
   }
   return null;
 }
@@ -73,18 +82,20 @@ export async function registrarClique(
     gclid: ler(p, 'gclid'),
     gbraid: ler(p, 'gbraid'),
     wbraid: ler(p, 'wbraid'),
-    utm_source: semMacro(ler(p, 'utm_source', 'utmSource')),
-    utm_medium: semMacro(ler(p, 'utm_medium', 'utmMedium')),
-    utm_campaign: semMacro(ler(p, 'utm_campaign', 'utmCampaign')),
-    utm_id: ler(p, 'utm_id', 'utmId'),
-    utm_term: semMacro(ler(p, 'utm_term', 'utmTerm')),
-    utm_content: semMacro(ler(p, 'utm_content', 'utmContent')),
+    utm_source: semMacro(ler(p, 'utm_source', 'utmSource', 'utm.source')),
+    utm_medium: semMacro(ler(p, 'utm_medium', 'utmMedium', 'utm.medium')),
+    utm_campaign: semMacro(ler(p, 'utm_campaign', 'utmCampaign', 'utm.campaign')),
+    utm_id: ler(p, 'utm_id', 'utmId', 'utm.id'),
+    utm_term: semMacro(ler(p, 'utm_term', 'utmTerm', 'utm.term')),
+    utm_content: semMacro(ler(p, 'utm_content', 'utmContent', 'utm.content')),
     fbp: ler(p, 'fbp'),
     fbc: ler(p, 'fbc'),
     client_id: ler(p, 'client_id', 'clientId'),
     origem: ler(p, 'origem', 'origin') ?? 'clique',
     evento: ler(p, 'event', 'evento') ?? 'whatsapp_click',
-    page_url: ler(p, 'page_url', 'pageUrl', 'url'),
+    // `landing_url` e' a pagina onde o lead entrou; `page_url` pode ser a do
+    // renderizador do GTM em modo de teste, que nao diz nada sobre o lead
+    page_url: ler(p, 'landing_url', 'landingUrl', 'page_url', 'pageUrl', 'url'),
     whatsapp_url: ler(p, 'whatsapp_url', 'whatsappUrl'),
     referrer: ler(p, 'referrer', 'referer'),
     user_agent: ler(p, 'user_agent', 'userAgent'),
