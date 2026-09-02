@@ -1035,22 +1035,56 @@
       async function carregarEtapas(id) {
         const alvo = document.getElementById('etapas');
         const estado = document.getElementById('etapas-estado');
-        const etapas = await api('/tenants/' + id + '/stages').catch(function () { return []; });
+        // as frases entram na coluna "como o card chega", entao vem junto: buscar
+        // em paralelo e renderizar depois evita a tabela desenhar sem elas
+        const [etapas, gatilhos] = await Promise.all([
+          api('/tenants/' + id + '/stages').catch(function () { return []; }),
+          api('/tenants/' + id + '/gatilhos').catch(function () { return []; }),
+        ]);
+        frasesPorEtapa = {};
+        gatilhos.forEach(function (g) {
+          frasesPorEtapa[g.stage_id] = (frasesPorEtapa[g.stage_id] || 0) + 1;
+        });
 
         alvo.innerHTML = etapas.length
-          ? '<table><thead><tr><th>#</th><th>Etapa</th><th>Final</th><th>Conversão</th></tr></thead><tbody>' +
-            etapas.map(function (e) {
+          ? '<table><thead><tr><th>#</th><th>Etapa</th><th>Como o card chega</th><th>Final</th><th>Conversão</th></tr></thead><tbody>' +
+            etapas.map(function (e, i) {
               return '<tr><td>' + e.posicao + '</td><td>' + esc(e.nome) + '</td>' +
+                '<td class="motivo">' + comoChega(e, i) + '</td>' +
                 '<td class="motivo">' + (e.is_final ? 'sim' : '') + '</td>' +
                 '<td class="' + (e.conversion_action_id ? 'st-ok' : 'st-recebido') + '">' +
-                (e.conversion_action_id ? esc(e.conversion_event) + ' · ' + esc(e.conversion_action_id) : '—') +
+                (e.conversion_action_id
+                  ? esc(e.conversion_event) + ' · ' + esc(e.conversion_action_id) +
+                    '<span class="sub">' + (e.conversion_value === null ? 'valor real da venda' : 'R$ ' + e.conversion_value) + '</span>'
+                  : '—') +
                 '</td></tr>';
             }).join('') + '</tbody></table>'
+            + '<p class="carregando" style="margin-top:10px">As etapas vêm do board do Chatwoot. ' +
+              'Automático = o card anda sozinho; as demais dependem de uma frase abaixo, ou da mão do vendedor.</p>'
           : '<div class="vazio"><p>Etapas ainda não sincronizadas.</p>' +
             '<p class="mono">Elas vêm do board do Chatwoot, não são digitadas aqui.</p></div>';
 
         estado.textContent = etapas.length ? etapas.length + ' etapas' : '';
       }
+
+      /**
+       * O que faz o card chegar nesta etapa — a coluna que a planilha de etapas
+       * do cliente chama de "Como o lead chega nesta etapa".
+       *
+       * Sem ela a tabela nao distingue etapa que anda sozinha de etapa que
+       * espera uma frase, e as duas regras "Automático" da planilha ficavam
+       * invisíveis no painel.
+       */
+      function comoChega(e, i) {
+        if (i === 0) return 'automático · primeira mensagem do lead';
+        if (e.auto_on_reply) return 'automático · primeira resposta do comercial';
+        if (e.is_final) return 'manual · o vendedor informa o valor antes';
+        const n = (frasesPorEtapa[e.id] || 0);
+        return n ? n + (n === 1 ? ' frase' : ' frases') : '<span class="nada">sem frase</span>';
+      }
+
+      /** Quantas frases movem para cada etapa, para a coluna acima. */
+      let frasesPorEtapa = {};
 
       async function sincronizarEtapas(id) {
         const estado = document.getElementById('etapas-estado');

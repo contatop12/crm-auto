@@ -139,6 +139,11 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
   const porNome = new Map(existentes.map((a) => [norm(a.name), a]));
   const ordenadas = [...stages].sort((a, b) => a.posicao - b.posicao);
   const uteis = etapasUteis(stages);
+  // A Conversa Iniciada dispara na primeira mensagem do lead — que e' o mesmo
+  // instante em que o card nasce na etapa de entrada. A planilha de etapas dos
+  // clientes registra assim ("Novo Lead" -> "CRM - Conversa Iniciada"), e a acao
+  // de conversao precisa de uma etapa onde morar para o funil saber o id dela.
+  const entrada = ordenadas[0] ?? null;
   const intermediarias = uteis.filter((s) => !s.isFinal);
   const ganha = ordenadas.find((s) => s.isFinal && ehGanho(s)) ?? null;
 
@@ -158,7 +163,7 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
 
   return CATALOGO.map((m) => {
     const sugerida =
-      m.evento === 'conversa' ? null
+      m.evento === 'conversa' ? entrada
       : m.evento === 'proposta_enviada' ? (intermediarias[0] ?? null)
       : m.evento === 'qualificado_1' ? (intermediarias[base] ?? null)
       : m.evento === 'qualificado_2' ? (intermediarias[base + 1] ?? null)
@@ -176,8 +181,12 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
       janelaClique: m.janelaClique,
       janelaView: 1,
       stageId: sugerida ? sugerida.id : null,
-      stageNome: m.evento === 'conversa' ? '(primeira mensagem)' : (sugerida?.nome ?? '(sem etapa)'),
-      etapasPossiveis: opcoes,
+      stageNome: sugerida?.nome ?? '(sem etapa)',
+      // so' a Conversa Iniciada pode apontar para a etapa de entrada
+      etapasPossiveis:
+        m.evento === 'conversa' && entrada
+          ? [{ id: entrada.id, nome: entrada.nome }, ...opcoes]
+          : opcoes,
       jaExiste: !!achada,
       idExistente: achada ? String(achada.id) : null,
       // marcar por padrao uma meta opcional criaria no Google Ads algo que o

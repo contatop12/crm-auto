@@ -85,10 +85,22 @@ describe('proporMetas', () => {
     expect(p).toEqual(l);
   });
 
-  test('Conversa Iniciada nao vem de etapa nenhuma', () => {
+  test('Conversa Iniciada mora na etapa de entrada', () => {
+    // dispara na primeira mensagem do lead, que e' quando o card nasce em
+    // "Novo Lead" — e' o que a planilha de etapas dos clientes registra, e a
+    // acao de conversao precisa de uma etapa onde morar
     const c = proporMetas(persianas, []).find((m) => m.evento === 'conversa')!;
-    expect(c.stageId).toBeNull();
+    expect(c.stageId).toBe(1);
+    expect(c.stageNome).toBe('Novo Lead');
     expect(c.categoria).toBe('CONTACT');
+  });
+
+  test('so a Conversa Iniciada pode apontar para a etapa de entrada', () => {
+    const m = proporMetas(persianas, []);
+    const conversa = m.find((x) => x.evento === 'conversa')!;
+    const q1 = m.find((x) => x.evento === 'qualificado_1')!;
+    expect(conversa.etapasPossiveis.map((e) => e.id)).toEqual([1, 3, 4, 5, 6, 7]);
+    expect(q1.etapasPossiveis.map((e) => e.id)).toEqual([3, 4, 5, 6, 7]);
   });
 
   test('proposta_enviada sugere a primeira etapa util', () => {
