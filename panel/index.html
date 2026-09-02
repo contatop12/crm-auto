@@ -807,6 +807,10 @@
         if (r.origem === 'anuncio') tags.push('<span class="tag tag-anuncio">anúncio</span>');
         else if (r.origem === 'organico') tags.push('<span class="tag">orgânico</span>');
 
+        // Marcada depois do webhook: o retrato guardado ainda mostra o card no
+        // Orgânico, então a tag diz o que a ferramenta fez desde então.
+        if (r.promovidoEm) tags.push('<span class="tag tag-novo">promovida ao funil</span>');
+
         const detalhe = [];
         if (r.conversaId) detalhe.push('conversa ' + r.conversaId);
         if (r.idadeConversa !== null && r.idadeConversa !== undefined) detalhe.push('aberta há ' + duracao(r.idadeConversa));
@@ -815,9 +819,14 @@
         const conversa = (tags.join(' ') || nada) +
           (detalhe.length ? '<span class="sub">' + esc(detalhe.join(' · ')) + '</span>' : '');
 
-        const card = r.board
-          ? esc(r.board) + (r.etapa ? '<span class="sub">' + esc(r.etapa) + '</span>' : '')
-          : nada;
+        // O card mostrado e' o do momento do webhook. Depois da promocao ele
+        // mudou de board, e dizer "Organico" ao lado de "promovida" seria mentira.
+        const card = r.promovidoEm
+          ? '<span class="tag tag-anuncio">movido</span>' +
+            (r.board ? '<span class="sub">estava em ' + esc(r.board) + '</span>' : '')
+          : r.board
+            ? esc(r.board) + (r.etapa ? '<span class="sub">' + esc(r.etapa) + '</span>' : '')
+            : nada;
 
         return `
           <tr class="clicavel" data-ev="${e.id}">

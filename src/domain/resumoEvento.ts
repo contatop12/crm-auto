@@ -34,6 +34,8 @@ export interface ResumoEvento {
   /** A conversao de "Conversa Iniciada" ja foi mandada para esta conversa. */
   conversaEnviada: boolean;
   etiquetas: string[];
+  /** Quando a ferramenta marcou o card para subir ao funil de Ads. */
+  promovidoEm?: string | null;
 }
 
 /** Board de entrada e board do funil, para dizer anuncio ou organico. */

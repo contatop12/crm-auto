@@ -115,15 +115,34 @@ export async function eventosDoTenant(
     .bind(...bind)
     .all<LinhaEvento & { payload: string | null }>();
 
+  // O payload e' o retrato de quando o webhook chegou. O que o pipeline
+  // descobriu depois vive em `conversations`, e sobrepoe.
+  const { results: sabidas } = await db
+    .prepare(
+      `SELECT cw_conversation_id AS id, origem, promovido_em
+       FROM conversations WHERE tenant_id = ? AND (origem IS NOT NULL OR promovido_em IS NOT NULL)`,
+    )
+    .bind(tenantId)
+    .all<{ id: number; origem: string | null; promovido_em: string | null }>();
+  const porConversa = new Map(sabidas.map((c) => [c.id, c]));
+
   return {
     total: total?.n ?? 0,
     limite,
     offset,
-    linhas: results.map(({ payload, ...linha }) => ({
-      ...linha,
-      pipeline: nomeDoPipeline(linha.source, linha.event_type),
-      resumo: resumirEvento(payload, boards),
-    })),
+    linhas: results.map(({ payload, ...linha }) => {
+      const resumo = resumirEvento(payload, boards);
+      const sabido = resumo.conversaId === null ? undefined : porConversa.get(resumo.conversaId);
+      return {
+        ...linha,
+        pipeline: nomeDoPipeline(linha.source, linha.event_type),
+        resumo: {
+          ...resumo,
+          origem: (sabido?.origem as typeof resumo.origem) ?? resumo.origem,
+          promovidoEm: sabido?.promovido_em ?? null,
+        },
+      };
+    }),
   };
 }
 

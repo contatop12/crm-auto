@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 // `node:sqlite` ainda nao esta na lista de builtins do Vite: o import estatico
@@ -20,10 +20,16 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
  * de banco de verdade: a UNIQUE de deduplicacao, o `INSERT OR IGNORE` e o
  * `meta.changes`. Mockar isso a mao testaria o mock, nao o SQL.
  *
- * Roda as mesmas migrations que vao para producao — schema divergente entre
- * teste e producao e' a forma mais cara de descobrir um erro.
+ * Roda TODAS as migrations que vao para producao, lidas da pasta em ordem —
+ * schema divergente entre teste e producao e' a forma mais cara de descobrir
+ * um erro.
+ *
+ * A lista era fixa e ficou para tras: a migration que adicionou colunas em
+ * `conversations` quebrou dez testes com "no such column", que nao era erro de
+ * codigo nenhum. Listar a pasta faz a migration nova valer no teste no mesmo
+ * instante em que vale em producao.
  */
-export function fakeD1(migrations = ['migrations/0001_init.sql', 'migrations/0002_notificacoes.sql']) {
+export function fakeD1(migrations = todasAsMigrations()) {
   const db = new DatabaseSync(':memory:');
   for (const m of migrations) db.exec(readFileSync(m, 'utf8'));
 
@@ -55,4 +61,12 @@ export function fakeD1(migrations = ['migrations/0001_init.sql', 'migrations/000
     exec: (sql: string) => db.exec(sql),
     consultar: <T>(sql: string): T[] => db.prepare(sql).all() as T[],
   };
+}
+
+/** Os arquivos de `migrations/`, em ordem — e' o prefixo numerico que manda. */
+function todasAsMigrations(): string[] {
+  return readdirSync('migrations')
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => `migrations/${f}`);
 }

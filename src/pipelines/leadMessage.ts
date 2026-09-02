@@ -216,13 +216,20 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   }
 
   await env.DB.prepare(
-    `INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, task_id, phone_key, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO conversations
+       (tenant_id, cw_conversation_id, protocol, task_id, phone_key, origem, promovido_em, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT (tenant_id, cw_conversation_id) DO UPDATE SET
        protocol = excluded.protocol, task_id = excluded.task_id,
-       phone_key = excluded.phone_key, updated_at = datetime('now')`,
+       phone_key = excluded.phone_key, origem = excluded.origem,
+       promovido_em = COALESCE(conversations.promovido_em, excluded.promovido_em),
+       updated_at = datetime('now')`,
   )
-    .bind(tenantId, conversaId, lead.protocol, taskId ?? null, chave || null)
+    .bind(
+      tenantId, conversaId, lead.protocol, taskId ?? null, chave || null,
+      daAds ? 'anuncio' : 'organico',
+      promover ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null,
+    )
     .run()
     .catch(() => undefined);
 
