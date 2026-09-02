@@ -131,6 +131,14 @@ ingest.post('/:slug/kanban', async (c) => {
   if (chave !== tenant.ingestKey) return c.json({ ok: false, error: 'chave invalida' }, 401);
 
   const raw = await c.req.text();
-  await aceitar(c.env, tenant.id, 'kanban', 'kanban_task', raw, null);
+
+  // O mesmo endereco serve dois propositos e eles NAO podem se confundir:
+  // `entrada` e' o card chegando no funil (avisa o grupo), `conversao` e' o
+  // card avancando de etapa (sobe conversao ao Google). Sem esta distincao, a
+  // regra de "Evento Compra" dispararia um aviso de "lead novo" para um lead
+  // que ja fechou.
+  const evento = c.req.query('evento') === 'conversao' ? 'kanban_conversao' : 'kanban_entrada';
+
+  await aceitar(c.env, tenant.id, 'kanban', evento, raw, null);
   return c.json({ ok: true });
 });

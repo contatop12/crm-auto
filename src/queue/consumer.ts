@@ -47,8 +47,14 @@ async function processar(msg: QueueMessage, env: Env, payload: string): Promise<
       }
 
     case 'kanban':
-      // Avisa o grupo do cliente. A conversao para o Google Ads a partir da
-      // mudanca de etapa ainda nao esta implementada (Fase 3).
+      // `conversao` vem das regras de etapa avancada (Qualificado, Compra).
+      // Avisar o grupo aqui anunciaria como "lead novo" quem ja fechou.
+      if (msg.eventType === 'kanban_conversao') {
+        return {
+          status: 'ignorado',
+          motivo: 'pipeline stageChanged ainda nao implementado (Fase 3)',
+        };
+      }
       return avisarLeadNoGrupo(env, msg.tenantId, payload);
 
     default:
