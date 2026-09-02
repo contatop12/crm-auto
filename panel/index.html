@@ -513,6 +513,15 @@
           </section>
 
           <section>
+            <h2>Reprocessar o que ficou para trás</h2>
+            <div class="linha-acoes">
+              <button id="btn-reproc">Conferir</button>
+              <button id="btn-reproc-aplicar" class="principal">Reprocessar</button>
+              <span class="carregando" id="reproc-estado">roda o pipeline atual sobre os webhooks já recebidos</span>
+            </div>
+          </section>
+
+          <section>
             <h2>Últimos webhooks recebidos</h2>
             ${
               eventos.length
@@ -550,6 +559,8 @@
         document.getElementById('btn-meta-nova').addEventListener('click', () => adicionarMeta(id));
         document.getElementById('btn-gatilho').addEventListener('click', () => adicionarGatilho(id));
         document.getElementById('btn-l-add').addEventListener('click', () => criarEtiqueta(id));
+        document.getElementById('btn-reproc').addEventListener('click', () => reprocessar(id, false));
+        document.getElementById('btn-reproc-aplicar').addEventListener('click', () => reprocessar(id, true));
         document.getElementById('btn-prov').addEventListener('click', () => provisionar(id, false));
         document.getElementById('btn-prov-criar').addEventListener('click', () => provisionar(id, true));
 
@@ -1428,6 +1439,36 @@
             sw.disabled = false;
           }
         });
+      }
+
+      /**
+       * Roda o pipeline de hoje sobre os webhooks já recebidos.
+       *
+       * Os eventos foram gravados enquanto o pipeline não existia e ficaram
+       * como `ignorado`. Reenfileirar corrige o passado usando o mesmo código
+       * que roda em produção — não um script paralelo que divergiria dele.
+       *
+       * Um evento por conversa, o mais antigo: é a mensagem que traz o
+       * protocolo. As outras 40 da mesma conversa dariam o mesmo resultado
+       * gastando 40 vezes mais chamadas.
+       */
+      async function reprocessar(id, aplicar) {
+        const estado = document.getElementById('reproc-estado');
+        if (aplicar && !confirm(
+          'Isto escreve no Chatwoot de verdade: protocolo, UTMs e etiquetas nas ' +
+          'conversas que ainda não têm.\n\nConversa que já tem protocolo é pulada.\n\nReprocessar?')) {
+          return;
+        }
+        estado.textContent = aplicar ? 'enfileirando…' : 'conferindo…';
+        try {
+          const r = await enviar(
+            '/tenants/' + id + '/reprocessar' + (aplicar ? '?aplicar=1' : ''), 'POST', {});
+          estado.textContent = r.previa
+            ? r.na_fila + ' conversa(s) entrariam na fila'
+            : r.na_fila + ' conversa(s) na fila · recarregue em alguns segundos para ver o resultado';
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
       }
 
       // ---------- etiquetas do cliente ----------
