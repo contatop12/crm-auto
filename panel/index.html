@@ -11,366 +11,474 @@
       rel="stylesheet"
     />
     <style>
-      :root {
-        --paper: #f2f4f6;
-        --panel: #ffffff;
-        --ink: #14181d;
-        --ink-2: #5a646e;
-        --ink-3: #98a2ac;
-        --rule: #dde3e8;
+      /* ---------------------------------------------------------------
+         P12 CRM Auto — painel de operação.
 
-        --pass: #1f7a5c;
-        --halt: #b23a2e;
-        --hold: #a9761b;
-        --idle: #c3cad1;
+         Lido muitas vezes por dia, procurando o que saiu do lugar. Por isso:
+
+         1. Cor só significa status. Nada é colorido por decoração.
+         2. Mono é identificador de máquina; sans é palavra escrita por gente.
+         3. Seção é régua e espaço, não caixa. Caixa só onde o agrupamento
+            é real — a linha de um cliente.
+         4. Um tratamento de carregamento só: barra fina sob o título.
+         5. Movimento responde a uma ação. Nada anima sozinho.
+         --------------------------------------------------------------- */
+
+      :root {
+        --papel: #fbfaf8;
+        --carta: #ffffff;
+        --tinta: #17191c;
+        --tinta-2: #5b646e;
+        --tinta-3: #98a1aa;
+        --linha: #e6e3de;
+        --linha-forte: #d4d0c9;
+
+        /* status — as únicas cores saturadas da tela */
+        --fluxo: #0b6e63;
+        --espera: #9a5b12;
+        --falha: #a32b20;
+        --parado: #c2bdb4;
 
         --ui: 'Archivo', ui-sans-serif, system-ui, sans-serif;
         --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+        --r: 5px;
+        --sombra: 0 1px 2px rgba(23, 25, 28, .04), 0 1px 1px rgba(23, 25, 28, .03);
       }
 
       * { box-sizing: border-box; }
 
       body {
         margin: 0;
-        background: var(--paper);
-        color: var(--ink);
-        font-family: var(--ui);
-        font-size: 15px;
-        line-height: 1.5;
+        background: var(--papel);
+        color: var(--tinta);
+        font: 14px/1.55 var(--ui);
         -webkit-font-smoothing: antialiased;
       }
 
-      /* ---------- estrutura ---------- */
-      .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px 80px; }
+      /* ---------- barra superior ---------- */
 
-      header {
-        display: flex;
-        align-items: baseline;
-        gap: 16px;
-        padding: 28px 0 20px;
-        border-bottom: 1px solid var(--rule);
-        margin-bottom: 28px;
-        flex-wrap: wrap;
+      .topo {
+        position: sticky; top: 0; z-index: 30;
+        display: flex; align-items: center; gap: 24px;
+        padding: 0 24px; height: 56px;
+        background: rgba(251, 250, 248, .92);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--linha);
       }
-      header h1 { font-size: 17px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-      header .meta { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-left: auto; }
-
-      button {
-        font-family: var(--mono);
-        font-size: 12px;
-        color: var(--ink-2);
-        background: var(--panel);
-        border: 1px solid var(--rule);
-        border-radius: 3px;
-        padding: 5px 10px;
-        cursor: pointer;
-      }
-      button:hover { color: var(--ink); border-color: var(--ink-3); }
-      button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-
-      /* ---------- trilha: a marca da tela ---------- */
-      .cliente {
-        display: block;
-        width: 100%;
-        text-align: left;
-        background: var(--panel);
-        border: 1px solid var(--rule);
-        border-radius: 4px;
-        padding: 18px 20px 16px;
-        margin-bottom: 10px;
-        cursor: pointer;
-        font: inherit;
-        color: inherit;
-      }
-      .cliente:hover { border-color: var(--ink-3); }
-      .cliente:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-
-      .cliente-topo { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
-      .cliente-nome { font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }
-      .cliente-slug { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
-      .cliente-sinal { margin-left: auto; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-      .sinal-ok { color: var(--pass); }
-      .sinal-erro { color: var(--halt); }
-      .sinal-silencio { color: var(--ink-3); }
-
-      /* cada traço é um evento; mais recente à direita */
-      .trilha { display: flex; gap: 2px; align-items: flex-end; height: 26px; margin-bottom: 12px; }
-      .tick { width: 5px; border-radius: 1px; background: var(--idle); }
-      .tick-ok { background: var(--pass); height: 16px; }
-      .tick-ignorado { background: var(--hold); height: 11px; }
-      .tick-erro { background: var(--halt); height: 26px; }
-      .tick-recebido { background: var(--idle); height: 8px; }
-      .trilha-vazia { font-family: var(--mono); font-size: 12px; color: var(--ink-3); align-self: center; }
-
-      @media (prefers-reduced-motion: no-preference) {
-        .tick { animation: surgir .18s ease-out backwards; }
-        @keyframes surgir { from { transform: scaleY(.2); opacity: 0; } }
-      }
-
-      .cliente-stats { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
-      .cliente-stats b { font-weight: 500; color: var(--ink); }
-      .cliente-erro { color: var(--halt); }
-
-      /* ---------- detalhe ---------- */
-      .voltar { margin-bottom: 20px; }
-
-      section { margin-bottom: 32px; }
-      section > h2 {
-        font-family: var(--mono);
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .1em;
-        color: var(--ink-3);
-        margin: 0 0 12px;
-      }
-
-      .checagem {
-        display: flex;
-        gap: 12px;
-        padding: 9px 14px;
-        background: var(--panel);
-        border: 1px solid var(--rule);
-        border-top: none;
-        font-size: 14px;
-      }
-      .checagem:first-of-type { border-top: 1px solid var(--rule); border-radius: 4px 4px 0 0; }
-      .checagem:last-of-type { border-radius: 0 0 4px 4px; }
-      .checagem-marca { font-family: var(--mono); font-size: 11px; width: 52px; flex: none; padding-top: 2px; text-transform: uppercase; letter-spacing: .06em; }
-      .marca-ok { color: var(--pass); }
-      .marca-erro { color: var(--halt); }
-      .marca-aviso { color: var(--hold); }
-      .marca-na { color: var(--ink-3); }
-      .checagem-titulo { font-weight: 500; flex: none; width: 200px; }
-      .checagem-detalhe { font-family: var(--mono); font-size: 12px; color: var(--ink-2); word-break: break-word; }
-
-      table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; }
-      th {
-        font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase;
-        letter-spacing: .08em; color: var(--ink-3); text-align: left;
-        padding: 9px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap;
-      }
-      td { padding: 9px 12px; border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 12px; vertical-align: top; }
-      tr:last-child td { border-bottom: none; }
-      tr.clicavel { cursor: pointer; }
-      tr.clicavel:hover td { background: var(--paper); }
-      .st-ok { color: var(--pass); }
-      .st-erro { color: var(--halt); }
-      .st-ignorado { color: var(--hold); }
-      .st-recebido { color: var(--ink-3); }
-      .motivo { color: var(--ink-2); }
-
-      /* segunda linha da célula: o dado técnico embaixo do dado legível */
-      .sub {
-        display: block;
-        font-size: 11px;
-        color: var(--ink-3);
-        font-family: var(--mono);
-        margin-top: 2px;
-      }
-      .tag {
-        display: inline-block;
-        padding: 0 5px;
-        border: 1px solid var(--rule);
-        border-radius: 3px;
-        font-size: 11px;
-        line-height: 16px;
-        color: var(--ink-2);
+      .marca {
+        display: flex; align-items: center; gap: 9px;
+        font-weight: 700; font-size: 15px; letter-spacing: -.015em;
         white-space: nowrap;
       }
-      .tag-novo { border-color: var(--pass); color: var(--pass); }
-      .tag-anuncio { border-color: var(--hold); color: var(--hold); }
-      .nada { color: var(--ink-3); }
+      .marca svg { color: var(--fluxo); }
 
-      .paginacao {
-        display: flex; align-items: center; gap: 12px;
-        margin-top: 12px; flex-wrap: wrap;
+      .menu { display: flex; gap: 2px; margin-right: auto; }
+      .menu button {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 7px 11px; border: 0; border-radius: var(--r);
+        background: none; color: var(--tinta-2);
+        font: inherit; font-size: 13px; cursor: pointer;
       }
-      .paginacao button[disabled] { opacity: .4; cursor: default; }
-      .paginacao label { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
-      .paginacao select { padding: 3px 6px; }
+      .menu button:hover { background: rgba(23, 25, 28, .05); color: var(--tinta); }
+      .menu button[aria-current='page'] { background: var(--tinta); color: #fff; }
+      .menu button[aria-current='page'] svg { color: #fff; }
 
-      .endereco { margin-bottom: 16px; }
-      .endereco .rotulo { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
-      .endereco .linha { display: flex; gap: 8px; align-items: stretch; }
-      .endereco .uso { margin-top: 4px; }
-      .tag-repetido { border-color: var(--hold); color: var(--hold); }
+      .relogio {
+        font-family: var(--mono); font-size: 12px; color: var(--tinta-3);
+        white-space: nowrap;
+      }
+
+      main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 96px; }
+
+      /* ---------- tipografia ---------- */
+
+      h1 { font-size: 26px; font-weight: 700; letter-spacing: -.025em; margin: 0 0 2px; }
+      h2 {
+        font-size: 15px; font-weight: 650; letter-spacing: -.01em;
+        margin: 0; color: var(--tinta);
+      }
+      .sub-titulo { color: var(--tinta-2); font-size: 13px; margin: 0; }
+      .id { font-family: var(--mono); font-size: 12px; color: var(--tinta-3); }
+      .dica { color: var(--tinta-2); font-size: 12.5px; margin: 5px 0 0; max-width: 62ch; }
+      .carregando { color: var(--tinta-3); font-size: 13px; }
+      .motivo { color: var(--tinta-2); }
+      .mono { font-family: var(--mono); font-size: 12px; }
+      .nada { color: var(--tinta-3); }
+      .sub {
+        display: block; font-family: var(--mono); font-size: 11px;
+        color: var(--tinta-3); margin-top: 2px;
+      }
+
+      /* ---------- seção sanfonada ---------- */
+
+      section { border-top: 1px solid var(--linha); }
+      section:first-of-type { border-top: 0; }
+
+      .cabeca {
+        display: flex; align-items: center; gap: 10px; width: 100%;
+        padding: 18px 0 16px; border: 0; background: none;
+        font: inherit; text-align: left; cursor: pointer; color: inherit;
+      }
+      .cabeca .seta { color: var(--tinta-3); transition: transform .18s ease; flex: none; }
+      .cabeca[aria-expanded='false'] .seta { transform: rotate(-90deg); }
+      .cabeca .conta {
+        margin-left: auto; font-family: var(--mono); font-size: 12px;
+        color: var(--tinta-3); flex: none;
+      }
+      .corpo-secao { padding-bottom: 26px; }
+      .corpo-secao[hidden] { display: none; }
+
+      /* Barra de carregamento: um tratamento só, em toda a tela. */
+      .barra { height: 2px; background: var(--linha); overflow: hidden; border-radius: 2px; }
+      .barra::after {
+        content: ''; display: block; height: 100%; width: 40%;
+        background: var(--fluxo); border-radius: 2px;
+        animation: corre 1.1s cubic-bezier(.6, 0, .4, 1) infinite;
+      }
+      @keyframes corre {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .barra::after { animation-duration: 3s; }
+      }
+
+      /* ---------- controles ---------- */
+
+      button, select, input {
+        font: inherit; color: var(--tinta);
+        border: 1px solid var(--linha-forte); border-radius: var(--r);
+        background: var(--carta); padding: 6px 11px;
+      }
+      button { cursor: pointer; box-shadow: var(--sombra); }
+      button:hover:not(:disabled) { border-color: var(--tinta-3); }
+      button:disabled { opacity: .45; cursor: default; box-shadow: none; }
+      button.principal { background: var(--tinta); border-color: var(--tinta); color: #fff; }
+      button.principal:hover:not(:disabled) { background: #000; }
+      button.perigo { color: var(--falha); border-color: var(--falha); background: var(--carta); }
+
+      input, select { box-shadow: none; }
+      input::placeholder { color: var(--tinta-3); }
+      :focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
+
+      .linha-acoes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .campo { margin-bottom: 14px; }
+      .campo label { display: block; font-size: 13px; font-weight: 550; margin-bottom: 5px; }
+      .campo input, .campo select { width: 100%; }
+      .grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0 18px; }
+
+      /* Ícone dentro de botão: alinhado à baseline visual do texto. */
+      button svg, .marca svg, .menu svg { flex: none; vertical-align: -2px; }
+
+      /* ---------- dica flutuante ---------- */
+
+      [data-dica] { position: relative; }
+      [data-dica]::after {
+        content: attr(data-dica);
+        position: absolute; bottom: calc(100% + 7px); left: 50%;
+        transform: translateX(-50%);
+        background: var(--tinta); color: #fff;
+        font: 12px/1.4 var(--ui); white-space: nowrap;
+        padding: 5px 9px; border-radius: 4px;
+        opacity: 0; pointer-events: none; transition: opacity .12s;
+        z-index: 40;
+      }
+      [data-dica]:hover::after, [data-dica]:focus-visible::after { opacity: 1; }
+
+      /* ---------- tabela ---------- */
+
+      table { width: 100%; border-collapse: collapse; }
+      th {
+        text-align: left; font-size: 11.5px; font-weight: 600;
+        color: var(--tinta-3); padding: 0 12px 8px 0;
+        border-bottom: 1px solid var(--linha);
+        white-space: nowrap;
+      }
+      td {
+        padding: 11px 12px 11px 0; border-bottom: 1px solid var(--linha);
+        vertical-align: top; font-size: 13px;
+      }
+      tr:last-child td { border-bottom: 0; }
+      tr.clicavel { cursor: pointer; }
+      tr.clicavel:hover td { background: rgba(23, 25, 28, .025); }
+
+      .st-ok, .st-enviado { color: var(--fluxo); }
+      .st-erro { color: var(--falha); }
+      .st-ignorado, .st-recebido { color: var(--espera); }
+
+      .tag {
+        display: inline-block; padding: 1px 6px; border-radius: 3px;
+        border: 1px solid var(--linha-forte); color: var(--tinta-2);
+        font-size: 11.5px; line-height: 16px; white-space: nowrap;
+      }
+      .tag-novo { border-color: var(--fluxo); color: var(--fluxo); }
+      .tag-anuncio, .tag-repetido { border-color: var(--espera); color: var(--espera); }
+
+      /* ---------- clientes ---------- */
+
+      .cliente {
+        display: block; width: 100%; text-align: left;
+        background: var(--carta); border: 1px solid var(--linha);
+        border-radius: 8px; padding: 16px 18px; margin-bottom: 10px;
+        box-shadow: var(--sombra); cursor: pointer;
+      }
+      .cliente:hover { border-color: var(--tinta-3); }
+      .cliente .topo-linha { display: flex; align-items: baseline; gap: 10px; }
+      .cliente .nome { font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
+      .cliente .sinal { margin-left: auto; font-size: 11.5px; font-weight: 600; }
+      .cliente .numeros {
+        margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--tinta-2);
+        display: flex; gap: 18px; flex-wrap: wrap;
+      }
+
+      /* A trilha é a assinatura da tela: um tick por webhook, do mais velho
+         ao mais novo. É o que se olha primeiro para saber se algo travou. */
+      .trilha { display: flex; gap: 2px; margin: 12px 0 0; height: 22px; align-items: flex-end; }
+      .tick { width: 5px; height: 100%; border-radius: 1px; background: var(--parado); }
+      .tick-ok { background: var(--fluxo); }
+      .tick-erro { background: var(--falha); height: 100%; }
+      .tick-ignorado, .tick-recebido { background: var(--espera); height: 62%; }
+
+      /* ---------- abas ---------- */
+
+      .abas {
+        display: flex; gap: 2px; border-bottom: 1px solid var(--linha);
+        margin: 20px 0 4px; overflow-x: auto;
+      }
+      .aba {
+        border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+        background: none; box-shadow: none;
+        padding: 9px 13px; color: var(--tinta-2); font-size: 13.5px; white-space: nowrap;
+      }
+      .aba:hover { color: var(--tinta); border-color: var(--linha-forte); }
+      .aba[aria-selected='true'] { color: var(--tinta); border-color: var(--tinta); font-weight: 600; }
+
+      /* ---------- avisos e vazios ---------- */
+
+      .aviso, .erro {
+        border-left: 3px solid var(--espera); background: rgba(154, 91, 18, .05);
+        padding: 11px 14px; border-radius: 0 var(--r) var(--r) 0;
+        font-size: 13px; color: var(--tinta-2); margin: 14px 0 0;
+      }
+      .erro { border-color: var(--falha); background: rgba(163, 43, 32, .05); color: var(--falha); }
+
+      .vazio {
+        text-align: center; padding: 40px 20px; color: var(--tinta-2);
+        border: 1px dashed var(--linha-forte); border-radius: 8px;
+      }
+      .vazio p { margin: 0 0 6px; }
+      .vazio .mono { color: var(--tinta-3); }
+
+      pre {
+        background: var(--carta); border: 1px solid var(--linha); border-radius: var(--r);
+        padding: 14px; overflow: auto; max-height: 460px;
+        font: 12px/1.6 var(--mono); margin: 12px 0 0;
+      }
+
+      /* ---------- paginação ---------- */
+
+      .paginacao { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+      .paginacao label { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; font-size: 12.5px; color: var(--tinta-3); }
+      .paginacao select { padding: 4px 7px; font-size: 12.5px; }
+
+      /* ---------- gaveta ---------- */
 
       .gaveta-fundo {
         position: fixed; inset: 0; z-index: 50;
-        background: rgba(20, 24, 29, .35);
+        background: rgba(23, 25, 28, .3);
         display: flex; justify-content: flex-end;
       }
       .gaveta {
-        width: min(620px, 94vw); height: 100%;
-        background: var(--panel); border-left: 1px solid var(--rule);
+        width: min(640px, 96vw); height: 100%; background: var(--papel);
+        border-left: 1px solid var(--linha-forte);
         display: flex; flex-direction: column;
-        box-shadow: -8px 0 32px rgba(0,0,0,.12);
+        box-shadow: -12px 0 40px rgba(0, 0, 0, .1);
+        animation: entra .2s cubic-bezier(.2, .8, .3, 1);
       }
+      @keyframes entra { from { transform: translateX(24px); opacity: .6; } }
+      @media (prefers-reduced-motion: reduce) { .gaveta { animation: none; } }
+
       .gaveta header {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--rule);
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 16px 20px; border-bottom: 1px solid var(--linha);
       }
-      .gaveta .fechar { border: 0; background: none; font-size: 16px; cursor: pointer; padding: 4px 8px; }
-      .gaveta .lista {
-        max-height: 34%; overflow-y: auto; border-bottom: 1px solid var(--rule);
-      }
+      .gaveta .fechar { border: 0; background: none; box-shadow: none; padding: 6px; color: var(--tinta-2); }
+      .gaveta .lista { max-height: 36%; overflow-y: auto; border-bottom: 1px solid var(--linha); }
       .gaveta .item {
         display: grid; gap: 2px 10px; width: 100%; text-align: left;
         grid-template-columns: max-content max-content 1fr;
-        padding: 9px 20px; border: 0; border-bottom: 1px solid var(--rule);
-        background: none; font: inherit; cursor: pointer;
+        padding: 10px 20px; border: 0; border-bottom: 1px solid var(--linha);
+        border-radius: 0; background: none; box-shadow: none;
       }
-      .gaveta .item:hover { background: var(--paper); }
-      .gaveta .item.ativo { background: var(--paper); box-shadow: inset 3px 0 0 var(--ink); }
+      .gaveta .item:hover { background: rgba(23, 25, 28, .03); }
+      .gaveta .item.ativo { background: var(--carta); box-shadow: inset 3px 0 0 var(--tinta); }
       .gaveta .item .quando { font-family: var(--mono); font-size: 12px; }
       .gaveta .item .sub { grid-column: 1 / -1; }
-      .gaveta .corpo { flex: 1; overflow-y: auto; padding: 16px 20px; }
-      .gaveta .corpo pre {
-        background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
-        padding: 12px; overflow-x: auto; font-size: 12px; max-height: none;
-      }
-      @media (max-width: 640px) { .gaveta { width: 100vw; } }
+      .gaveta .corpo { flex: 1; overflow-y: auto; padding: 18px 20px; }
+      .gaveta .corpo pre { max-height: none; }
 
-      a.botao-link {
-        display: inline-block; text-decoration: none;
-        font: inherit; padding: 7px 14px; border-radius: 4px;
-        background: var(--ink); color: #fff;
-      }
+      /* ---------- endereços e resumo ---------- */
+
+      .endereco { margin-bottom: 18px; }
+      .endereco .rotulo { font-weight: 600; font-size: 13px; margin-bottom: 5px; }
+      .endereco .linha { display: flex; gap: 8px; }
       .endereco code {
-        flex: 1; font-family: var(--mono); font-size: 12px;
-        background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
-        padding: 7px 9px; overflow-x: auto; white-space: nowrap; user-select: all;
+        flex: 1; font: 12px/1.5 var(--mono);
+        background: var(--carta); border: 1px solid var(--linha); border-radius: var(--r);
+        padding: 8px 10px; overflow-x: auto; white-space: nowrap; user-select: all;
       }
+      .endereco .uso { margin-top: 5px; }
 
-      /* Gira enquanto a fila trabalha. O reprocessamento e' assincrono: sem
-         sinal de atividade a tela parece travada. */
-      .girando {
-        display: inline-block; width: 12px; height: 12px;
-        border: 2px solid var(--rule); border-top-color: var(--ink-2);
-        border-radius: 50%; vertical-align: -2px; margin-right: 6px;
-        animation: gira .7s linear infinite;
+      dl.resumo {
+        display: grid; grid-template-columns: max-content 1fr; gap: 3px 16px;
+        margin: 0 0 14px; font-size: 12.5px;
       }
-      @keyframes gira { to { transform: rotate(360deg); } }
-      @media (prefers-reduced-motion: reduce) { .girando { animation-duration: 2.5s; } }
+      dl.resumo dt { color: var(--tinta-3); }
+      dl.resumo dd { margin: 0; font-family: var(--mono); }
 
-      /* Switch de envio ao Google. Estado ligado = conversao vai de verdade,
-         entao ele e' vermelho quando armado, nao verde. */
-      .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+      /* ---------- interruptor ---------- */
+
+      .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
       .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
       .switch .trilho {
-        width: 40px; height: 22px; border-radius: 11px;
-        background: var(--idle); border: 1px solid var(--rule);
+        width: 38px; height: 21px; border-radius: 11px;
+        background: var(--parado); border: 1px solid var(--linha-forte);
         position: relative; transition: background .15s;
       }
       .switch .trilho::after {
         content: ''; position: absolute; top: 2px; left: 2px;
-        width: 16px; height: 16px; border-radius: 50%;
-        background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s;
+        width: 15px; height: 15px; border-radius: 50%;
+        background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
+        transition: transform .15s;
       }
-      .switch input:checked + .trilho { background: var(--halt); border-color: var(--halt); }
-      .switch input:checked + .trilho::after { transform: translateX(18px); }
-      .switch input:focus-visible + .trilho { outline: 2px solid var(--ink); outline-offset: 2px; }
+      .switch input:checked + .trilho { background: var(--falha); border-color: var(--falha); }
+      .switch input:checked + .trilho::after { transform: translateX(17px); }
+      .switch input:focus-visible + .trilho { outline: 2px solid var(--tinta); outline-offset: 2px; }
       .switch .rotulo { font-size: 13px; }
 
-      dl.resumo {
-        display: grid;
-        grid-template-columns: max-content 1fr;
-        gap: 2px 14px;
-        margin: 0 0 12px;
-        font-size: 12px;
-      }
-      dl.resumo dt { color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
-      dl.resumo dd { margin: 0; font-family: var(--mono); }
-
-      pre {
-        font-family: var(--mono); font-size: 12px; line-height: 1.55;
-        background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
-        padding: 14px; overflow-x: auto; margin: 0; max-height: 460px;
+      a.botao-link {
+        display: inline-block; text-decoration: none; font: inherit;
+        padding: 6px 13px; border-radius: var(--r);
+        background: var(--tinta); color: #fff;
       }
 
-      .aviso {
-        font-family: var(--mono); font-size: 12px; color: var(--ink-2);
-        background: var(--panel); border: 1px solid var(--rule); border-left: 2px solid var(--hold);
-        border-radius: 3px; padding: 10px 14px; margin-bottom: 16px;
-      }
+      .voltar { margin-bottom: 16px; }
+      .cliente-slug { font-family: var(--mono); font-size: 12.5px; color: var(--tinta-3); }
 
-      .vazio {
-        background: var(--panel); border: 1px dashed var(--rule); border-radius: 4px;
-        padding: 40px 24px; text-align: center; color: var(--ink-2);
-      }
-      .vazio p { margin: 0 0 6px; }
-      .vazio .mono { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
-
-      .linha-acoes { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-      .carregando { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
-
-      /* ---------- abas ---------- */
-      .abas {
-        display: flex; gap: 2px; border-bottom: 1px solid var(--rule);
-        margin: 0 0 28px; overflow-x: auto;
-      }
-      .aba {
-        font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
-        color: var(--ink-3); background: none; border: none; border-radius: 0;
-        padding: 9px 14px; margin-bottom: -1px;
-        border-bottom: 2px solid transparent; white-space: nowrap;
-      }
-      .aba:hover { color: var(--ink-2); border-color: var(--rule); background: none; }
-      .aba[aria-selected="true"] {
-        color: var(--ink); border-bottom-color: var(--ink); font-weight: 700;
-      }
-      /* a contagem de pendências fica ao lado do nome, não numa cor de alerta */
-      .aba .conta { color: var(--halt); margin-left: 6px; }
-      .painel[hidden] { display: none; }
-      .painel > section:first-child { margin-top: 0; }
-
-      /* ---------- formulario ---------- */
-      .campo { margin-bottom: 14px; }
-      .campo label {
-        display: block; font-family: var(--mono); font-size: 11px;
-        text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); margin-bottom: 5px;
-      }
-      .campo .dica { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 4px; }
-      input, select {
-        width: 100%; font-family: var(--mono); font-size: 13px; color: var(--ink);
-        background: var(--panel); border: 1px solid var(--rule); border-radius: 3px; padding: 7px 9px;
-      }
-      input:focus, select:focus { outline: 2px solid var(--ink); outline-offset: -1px; border-color: var(--ink); }
-      input[type=checkbox] { width: auto; }
-      .grade { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-      .erro {
-        font-family: var(--mono); font-size: 12px; color: var(--halt);
-        background: var(--panel); border: 1px solid var(--rule); border-left: 2px solid var(--halt);
-        border-radius: 3px; padding: 10px 14px; margin-bottom: 14px;
-      }
-      .principal { color: var(--panel); background: var(--ink); border-color: var(--ink); }
-      .principal:hover { color: var(--panel); background: #000; }
-      td input, td select { padding: 4px 6px; font-size: 12px; }
-
-      @media (max-width: 700px) {
-        .grade { grid-template-columns: 1fr; }
-        .checagem { flex-wrap: wrap; }
-        .checagem-titulo { width: auto; }
+      @media (max-width: 720px) {
         .esconder-mobile { display: none; }
+        main { padding: 20px 16px 72px; }
+        .topo { gap: 12px; padding: 0 16px; }
+        .menu button span { display: none; }
       }
     </style>
   </head>
 
   <body>
     <div class="wrap">
-      <header>
-        <h1>P12 CRM Auto</h1>
-        <button id="btn-atualizar">Atualizar</button>
-        <button id="btn-novo">Adicionar cliente</button>
-        <button id="btn-padroes">Padronizações</button>
-        <button id="btn-google">Acesso Google</button>
-        <span class="meta" id="rodape"></span>
-      </header>
-      <main id="tela"><p class="carregando">Carregando…</p></main>
+      <nav class="topo" id="topo"></nav>
+      <main id="tela"><div class="barra"></div></main>
     </div>
 
     <script>
+      /**
+       * Ícones. Traço de 1,5 px, 16 px de caixa, sem preenchimento — na
+       * densidade desta tela um ícone cheio compete com o texto.
+       * `currentColor` para herdarem a cor de status de onde estiverem.
+       */
+      const ICONES = {
+        fluxo: 'M3 12h4l3-7 4 14 3-7h4',
+        clientes: 'M3 5h18M3 12h18M3 19h12',
+        padroes: 'M4 7h16M4 12h16M4 17h9M18.5 15.5l2 2 3-3.5',
+        google: 'M12 3a9 9 0 100 18 9 9 0 000-18zM3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 000 18M12 3a14 14 0 010 18',
+        mais: 'M12 5v14M5 12h14',
+        seta: 'M6 9l6 6 6-6',
+        editar: 'M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4',
+        conferir: 'M20 6L9 17l-5-5',
+        atualizar: 'M21 12a9 9 0 11-3-6.7M21 4v5h-5',
+        raio: 'M13 2L4 14h7l-1 8 9-12h-7l1-8z',
+        fechar: 'M6 6l12 12M18 6L6 18',
+        anterior: 'M15 18l-6-6 6-6',
+        proxima: 'M9 6l6 6-6 6',
+        alerta: 'M12 9v4M12 17h.01M10.3 4l-8 14a2 2 0 001.7 3h16a2 2 0 001.7-3l-8-14a2 2 0 00-3.4 0z',
+      };
+
+      function ic(nome, tam) {
+        const d = ICONES[nome];
+        if (!d) return '';
+        const t = tam || 16;
+        return '<svg width="' + t + '" height="' + t + '" viewBox="0 0 24 24" fill="none" ' +
+          'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" ' +
+          'aria-hidden="true"><path d="' + d + '"/></svg>';
+      }
+
+      /**
+       * Seção sanfonada.
+       *
+       * A tela do cliente empilha oito seções; abertas todas, a rolagem passa
+       * a esconder mais do que mostra. O estado de cada uma fica no navegador,
+       * porque quem abre "Etiquetas" toda vez quer ela aberta amanhã também.
+       */
+      /**
+       * Transforma `<section><h2>` em sanfona, depois de renderizado.
+       *
+       * Agir sobre o DOM em vez de reescrever os oito blocos de template deixa
+       * o conteúdo de cada seção onde estava. O estado de aberta fica no
+       * navegador: quem abre "Etiquetas" toda vez quer ela aberta amanhã.
+       */
+      function sanfonar(raiz) {
+        (raiz || document).querySelectorAll('section > h2').forEach(function (h) {
+          const sec = h.parentElement;
+          if (sec.dataset.sanfona) return;
+          sec.dataset.sanfona = '1';
+
+          const chave = (h.textContent || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+          let aberta = true;
+          try {
+            const v = localStorage.getItem('sec:' + chave);
+            if (v !== null) aberta = v === '1';
+          } catch { /* sem armazenamento: abre */ }
+
+          const corpo = document.createElement('div');
+          corpo.className = 'corpo-secao';
+          while (h.nextSibling) corpo.appendChild(h.nextSibling);
+
+          const cabeca = document.createElement('button');
+          cabeca.className = 'cabeca';
+          cabeca.setAttribute('aria-expanded', String(aberta));
+          cabeca.innerHTML = '<span class="seta">' + ic('seta') + '</span>' +
+            '<h2>' + esc(h.textContent || '') + '</h2>';
+
+          h.remove();
+          sec.appendChild(cabeca);
+          sec.appendChild(corpo);
+          corpo.hidden = !aberta;
+
+          cabeca.addEventListener('click', function () {
+            const abrir = cabeca.getAttribute('aria-expanded') !== 'true';
+            cabeca.setAttribute('aria-expanded', String(abrir));
+            corpo.hidden = !abrir;
+            try { localStorage.setItem('sec:' + chave, abrir ? '1' : '0'); }
+            catch { /* segue sem lembrar */ }
+          });
+        });
+      }
+
+      /** Um tratamento de carregamento só, em toda a tela. */
+      const CARREGANDO = '<div class="barra"></div>';
+
+      // A barra superior e' montada aqui porque usa os icones, que sao JS.
+      document.getElementById('topo').innerHTML =
+        '<span class="marca">' + ic('fluxo', 18) + ' P12 CRM Auto</span>' +
+        '<div class="menu">' +
+          '<button id="btn-atualizar" aria-current="page" data-dica="Voltar a lista de clientes">' + ic('clientes') + '<span>Clientes</span></button>' +
+          '<button id="btn-padroes" data-dica="Etiquetas e atributos que todo cliente recebe">' + ic('padroes') + '<span>Padroes</span></button>' +
+          '<button id="btn-google" data-dica="Consentimento do Tag Manager e Google Ads">' + ic('google') + '<span>Google</span></button>' +
+          '<button id="btn-novo" data-dica="Cadastrar um cliente novo">' + ic('mais') + '<span>Novo cliente</span></button>' +
+        '</div>' +
+        '<span class="relogio" id="rodape"></span>';
+
       const tela = document.getElementById('tela');
       const rodape = document.getElementById('rodape');
 
@@ -487,8 +595,16 @@
        * de uma vez dispararia sete chamadas — varias batendo em Chatwoot,
        * Google Ads e Evolution — so para mostrar a primeira.
        */
+      /** Qual item do menu está aceso. */
+      function menuAtivo(qual) {
+        document.querySelectorAll('.menu button').forEach(function (b) {
+          if (qual && b.id === qual) b.setAttribute('aria-current', 'page');
+          else b.removeAttribute('aria-current');
+        });
+      }
+
       async function verCliente(id) {
-        tela.innerHTML = '<p class="carregando">Carregando…</p>';
+        tela.innerHTML = CARREGANDO;
         const [cliente] = (await api('/overview')).filter((c) => String(c.tenant_id) === String(id));
 
         tela.innerHTML = `
@@ -498,8 +614,8 @@
           </h2>
           <p class="cliente-slug" style="margin:0 0 12px">${esc(cliente ? cliente.slug : '')}</p>
           <div class="linha-acoes" style="margin:0 0 20px">
-            <button id="btn-editar">Editar cliente</button>
-            <label class="switch" title="Ligado, a conversão é gravada no Google Ads">
+            <button id="btn-editar">' + ic('editar') + 'Editar cliente</button>
+            <label class="switch" data-dica="Ligado, a conversão é gravada no Google Ads de verdade">
               <input type="checkbox" id="sw-envio" />
               <span class="trilho"></span>
               <span class="rotulo" id="sw-rotulo">…</span>
@@ -574,7 +690,7 @@
           <section>
             <h2>Integrações</h2>
             <div class="linha-acoes">
-              <button id="btn-checar">Checar agora</button>
+              <button id="btn-checar">' + ic('conferir') + 'Checar agora</button>
               <span class="carregando" id="checagem-estado">consulta Chatwoot, Google Ads, etiquetas e WhatsApp ao vivo</span>
             </div>
             <div id="checagens"></div>
@@ -593,8 +709,8 @@
           <section>
             <h2>Etiquetas e atributos</h2>
             <div class="linha-acoes">
-              <button id="btn-prov">Conferir</button>
-              <button id="btn-prov-criar" class="principal">Gerar no Chatwoot</button>
+              <button id="btn-prov" data-dica="Lê a conta antes de escrever — não cria nada">' + ic('conferir') + 'Conferir</button>
+              <button id="btn-prov-criar" class="principal">' + ic('raio') + 'Gerar no Chatwoot</button>
               <span class="carregando" id="prov-estado">cria o que falta, conforme as Padronizacoes</span>
             </div>
             <div id="prov"></div>
@@ -619,8 +735,8 @@
           <section>
             <h2>Reprocessar o que ficou para trás</h2>
             <div class="linha-acoes">
-              <button id="btn-reproc">Conferir</button>
-              <button id="btn-reproc-aplicar" class="principal">Reprocessar</button>
+              <button id="btn-reproc" data-dica="Só conta quantas conversas entrariam na fila">Conferir</button>
+              <button id="btn-reproc-aplicar" class="principal">' + ic('atualizar') + 'Reprocessar</button>
               <span class="carregando" id="reproc-estado">roda o pipeline atual sobre os webhooks já recebidos</span>
             </div>
           </section>
@@ -690,7 +806,9 @@
         });
 
         abrirAba('fluxo');
+        sanfonar(tela);
         rodape.textContent = new Date().toLocaleTimeString('pt-BR');
+        menuAtivo(null);
       }
 
       // O Chatwoot posta sem seguir redirect. Se o Access ainda cobre /ingest,
@@ -713,7 +831,7 @@
       async function carregarEventos(id, offset) {
         const alvo = document.getElementById('eventos');
         if (!alvo) return;
-        alvo.innerHTML = '<p class="carregando"><span class="girando"></span>carregando…</p>';
+        alvo.innerHTML = CARREGANDO;
 
         let r;
         try {
@@ -782,7 +900,7 @@
         const alvo = document.getElementById('webhooks');
         const estado = document.getElementById('webhook-estado');
         const botao = document.getElementById('btn-webhook');
-        alvo.innerHTML = '<p class="carregando">carregando…</p>';
+        alvo.innerHTML = CARREGANDO;
 
         let r;
         try {
@@ -945,7 +1063,7 @@
             '<header>' +
               '<div><strong>' + grupo.itens.length + ' eventos seguidos</strong>' +
               '<span class="sub">' + esc(grupo.itens[0].pipeline || grupo.itens[0].event_type) + '</span></div>' +
-              '<button class="fechar" aria-label="Fechar">✕</button>' +
+              '<button class="fechar" aria-label="Fechar">' + ic('fechar') + '</button>' +
             '</header>' +
             '<div class="lista">' +
               grupo.itens.map(function (e, i) {
@@ -972,7 +1090,7 @@
             g.querySelectorAll('.item').forEach(function (x) { x.classList.remove('ativo'); });
             b.classList.add('ativo');
             const corpo = g.querySelector('.corpo');
-            corpo.innerHTML = '<p class="carregando"><span class="girando"></span>carregando…</p>';
+            corpo.innerHTML = '<p class="carregando">carregando…</p>';
             try {
               const r = await api('/tenants/' + tenantId + '/events/' + b.dataset.ev + '/payload');
               corpo.innerHTML =
@@ -1324,7 +1442,7 @@
       // ---------- etapas do funil ----------
       async function carregarFluxo(id) {
         const alvo = document.getElementById('fluxo');
-        alvo.innerHTML = '<p class="carregando">carregando…</p>';
+        alvo.innerHTML = CARREGANDO;
         let r;
         try {
           r = await api('/tenants/' + id + '/fluxo');
@@ -1746,7 +1864,7 @@
         const botoes = ['btn-reproc', 'btn-reproc-aplicar'].map(function (x) { return document.getElementById(x); });
         botoes.forEach(function (b) { if (b) b.disabled = true; });
         const girar = function (texto) {
-          estado.innerHTML = '<span class="girando"></span>' + esc(texto);
+          estado.innerHTML = '' + esc(texto);
         };
         girar(aplicar ? 'enfileirando…' : 'conferindo…');
 
@@ -1830,11 +1948,11 @@
         }
         return '<div class="paginacao">' +
           '<button class="pag" data-offset="' + Math.max(offset - limite, 0) + '"' +
-            (offset <= 0 ? ' disabled' : '') + '>← anterior</button>' +
+            (offset <= 0 ? ' disabled' : '') + '>' + ic('anterior') + ' anterior</button>' +
           '<span class="carregando">' + (offset + 1) + '–' + Math.min(offset + limite, total) +
             ' de ' + total + ' · página ' + (Math.floor(offset / limite) + 1) + ' de ' + paginas + '</span>' +
           '<button class="pag" data-offset="' + (offset + limite) + '"' +
-            (offset + limite >= total ? ' disabled' : '') + '>próxima →</button>' +
+            (offset + limite >= total ? ' disabled' : '') + '>próxima ' + ic('proxima') + '</button>' +
           seletor + '</div>';
       }
 
@@ -1866,7 +1984,7 @@
         const alvo = document.getElementById('etiquetas');
         const estado = document.getElementById('etiquetas-estado');
         if (!alvo) return;
-        alvo.innerHTML = '<p class="carregando">carregando…</p>';
+        alvo.innerHTML = CARREGANDO;
 
         let r;
         try {
@@ -1969,7 +2087,7 @@
       async function carregarEnderecos(id, slug) {
         const alvo = document.getElementById('enderecos');
         if (!alvo) return;
-        alvo.innerHTML = '<p class="carregando">carregando…</p>';
+        alvo.innerHTML = CARREGANDO;
 
         let cfg;
         try {
@@ -2008,7 +2126,7 @@
 
         alvo.innerHTML =
           '<div class="linha-acoes" style="margin-bottom:14px">' +
-            '<button id="btn-testar-chave">Testar a chave</button>' +
+            '<button id="btn-testar-chave">' + ic('conferir') + 'Testar a chave</button>' +
             '<span class="carregando" id="chave-estado">confere se o endereço abre, sem gravar nada</span>' +
           '</div>' +
           bloco('GTM · clique no anúncio', base + '/click' + k,
@@ -2025,7 +2143,7 @@
 
         document.getElementById('btn-testar-chave').addEventListener('click', async function () {
           const est = document.getElementById('chave-estado');
-          est.innerHTML = '<span class="girando"></span>testando…';
+          est.innerHTML = 'testando…';
           try {
             const r = await fetch('/ingest/' + encodeURIComponent(slug) + '/ping' + k);
             if (r.status === 200) {
@@ -2073,7 +2191,7 @@
       async function carregarGtm(id) {
         const alvo = document.getElementById('gtm');
         if (!alvo) return;
-        alvo.innerHTML = '<p class="carregando"><span class="girando"></span>carregando…</p>';
+        alvo.innerHTML = CARREGANDO;
 
         let cfg, containers;
         try {
@@ -2101,9 +2219,9 @@
           '</div>' +
           '<div class="linha-acoes">' +
             '<button id="btn-gtm-salvar">Salvar escolha</button>' +
-            '<button id="btn-gtm-conferir">Conferir o que falta</button>' +
-            '<button id="btn-gtm-aplicar" class="principal">Padronizar</button>' +
-            '<button id="btn-gtm-publicar">Publicar</button>' +
+            '<button id="btn-gtm-conferir" data-dica="Mostra o que falta no container, sem criar">Conferir o que falta</button>' +
+            '<button id="btn-gtm-aplicar" class="principal">' + ic('raio') + 'Padronizar</button>' +
+            '<button id="btn-gtm-publicar" data-dica="Coloca no ar, no site do cliente">Publicar</button>' +
             '<span class="carregando" id="gtm-estado"></span>' +
           '</div>' +
           '<div id="gtm-plano"></div>' +
@@ -2127,7 +2245,7 @@
         });
 
         const padronizar = async function (aplicar) {
-          est.innerHTML = '<span class="girando"></span>' + (aplicar ? 'criando no GTM…' : 'conferindo…');
+          est.innerHTML = '' + (aplicar ? 'criando no GTM…' : 'conferindo…');
           document.getElementById('gtm-plano').innerHTML = '';
           try {
             await salvar();
@@ -2172,7 +2290,7 @@
           if (!confirm(
             'Publicar cria uma versão do container e coloca no ar, no site do cliente.\n\n' +
             'Tudo que estiver pendente no workspace vai junto, não só o que a ferramenta criou.\n\nPublicar?')) return;
-          est.innerHTML = '<span class="girando"></span>publicando…';
+          est.innerHTML = 'publicando…';
           try {
             const r = await enviar('/tenants/' + id + '/gtm/publicar', 'POST', {});
             est.textContent = 'publicado · versão ' + r.versao;
@@ -2240,7 +2358,7 @@
        * você escolher na hora de gerar.
        */
       async function verPadroes() {
-        tela.innerHTML = '<p class="carregando">carregando…</p>';
+        tela.innerHTML = CARREGANDO;
         rodape.textContent = '';
         const r = await api('/padroes');
 
@@ -2297,6 +2415,8 @@
           }).join('') +
           '<div id="padroes-erro"></div>';
 
+        sanfonar(tela);
+        menuAtivo('btn-padroes');
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
 
         const falhar = function (e) {
@@ -2348,7 +2468,7 @@
        * do Google a alguém que já provou quem é. Link colado de fora não serve.
        */
       async function verGoogle() {
-        tela.innerHTML = '<p class="carregando">carregando…</p>';
+        tela.innerHTML = CARREGANDO;
         rodape.textContent = '';
 
         const st = await api('/oauth/google/status').catch(function () { return { autorizado: false }; });
@@ -2384,6 +2504,8 @@
             : '<div class="erro">não foi possível gerar o link: ' + esc(falha || 'sem detalhe') + '</div>') +
           '</section>';
 
+        sanfonar(tela);
+        menuAtivo('btn-google');
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
         tela.querySelectorAll('.copiar').forEach(function (b) {
           b.addEventListener('click', async function () {
