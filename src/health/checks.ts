@@ -247,9 +247,17 @@ async function checarEvolution(env: Env, t: TenantParaChecagem): Promise<Checage
       const rotulo = i.inbox ? `WhatsApp · inbox ${i.inbox}` : 'Instância do WhatsApp';
       try {
         const estado = await cli.estado(i.instancia);
-        return estado === 'open'
-          ? ok(`evo_${i.instancia}`, 'evolution', rotulo, `"${i.instancia}" conectada`)
-          : erro(`evo_${i.instancia}`, 'evolution', rotulo, `"${i.instancia}" está ${estado}`);
+        if (estado !== 'open') {
+          return erro(`evo_${i.instancia}`, 'evolution', rotulo, `"${i.instancia}" está ${estado}`);
+        }
+
+        // `open` nao basta: o Evolution guarda esse status e continua dizendo
+        // `open` depois que o aparelho foi desvinculado. A Persianas ficou
+        // assim, e o painel dava tudo certo enquanto nada saia.
+        const vida = await cli.viva(i.instancia);
+        return vida.viva
+          ? ok(`evo_${i.instancia}`, 'evolution', rotulo, `"${i.instancia}" conectada e respondendo`)
+          : erro(`evo_${i.instancia}`, 'evolution', rotulo, `"${i.instancia}" diz \`open\`, mas ${vida.detalhe}`);
       } catch (e) {
         return erro(`evo_${i.instancia}`, 'evolution', rotulo, (e as Error).message);
       }

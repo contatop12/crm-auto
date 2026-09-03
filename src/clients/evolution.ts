@@ -80,6 +80,43 @@ export class EvolutionClient {
     });
   }
 
+  /**
+   * A instancia responde de verdade?
+   *
+   * `connectionState` nao serve para isto: ele le' um status guardado e
+   * continua dizendo `open` depois que o aparelho foi desvinculado. A Persianas
+   * ficou assim — `open` nos dois endpoints, e qualquer operacao real voltando
+   * 428 "Connection Closed".
+   *
+   * `fetchProfile` e' o teste mais barato que exige o socket vivo: le' o perfil
+   * da propria instancia, nao manda mensagem nenhuma.
+   */
+  async viva(instancia: string): Promise<{ viva: boolean; detalhe: string }> {
+    try {
+      const r = await fetch(
+        `${this.baseUrl}/chat/fetchProfile/${encodeURIComponent(instancia)}`,
+        {
+          method: 'POST',
+          headers: { apikey: this.apiKey, 'content-type': 'application/json' },
+          body: '{}',
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      if (r.ok) return { viva: true, detalhe: 'responde' };
+      const txt = await r.text();
+      // 428 e' o "Connection Closed" do Baileys por baixo do Evolution
+      const desvinculada = r.status === 428 || txt.includes('428') || r.status === 500;
+      return {
+        viva: false,
+        detalhe: desvinculada
+          ? 'aparelho desvinculado — precisa ler o QR de novo'
+          : `respondeu ${r.status}`,
+      };
+    } catch {
+      return { viva: false, detalhe: 'nao respondeu no tempo' };
+    }
+  }
+
   /** `open` quando a instancia esta conectada ao WhatsApp. */
   async estado(instancia: string): Promise<string> {
     const r = await this.req<{ instance?: { state?: string }; state?: string }>(
