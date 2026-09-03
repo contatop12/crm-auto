@@ -181,6 +181,52 @@ export class GoogleAdsClient {
     return saida;
   }
 
+  /**
+   * Sobe conversoes pela Data Manager API.
+   *
+   * NAO e' a API do Google Ads: `UploadClickConversions` esta fechada para
+   * integracao nova e a conta responde CUSTOMER_NOT_ALLOWLISTED_FOR_THIS_FEATURE
+   * mandando usar esta. Outro host, outro escopo, outro formato.
+   *
+   * `validateOnly` e' o modo sombra: o Google confere tudo — destino existe,
+   * gclid dentro da janela, formato do hash — e NAO grava.
+   */
+  async ingestEvents(corpo: unknown): Promise<{ recebidos: number; erros: string[] }> {
+    const r = await fetch('https://datamanager.googleapis.com/v1/events:ingest', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${await this.accessToken()}`,
+        'login-customer-id': exigir(this.env, 'GOOGLE_ADS_MCC_ID'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(corpo),
+    });
+
+    const txt = await r.text();
+    if (!r.ok) {
+      let msg = txt.slice(0, 400);
+      try {
+        const j = JSON.parse(txt) as { error?: { message?: string } };
+        if (j.error?.message) msg = j.error.message;
+      } catch { /* resposta nao-json volta cortada */ }
+      throw new Error(`Data Manager ${r.status}: ${msg}`);
+    }
+
+    const j = JSON.parse(txt || '{}') as {
+      requestId?: string;
+      errorInfo?: { errorCounts?: Array<{ recordCount?: number; reason?: string }> };
+    };
+    const erros = (j.errorInfo?.errorCounts ?? [])
+      .map((e) => `${e.reason ?? 'sem motivo'} (${e.recordCount ?? 0})`);
+    const recusados = (j.errorInfo?.errorCounts ?? [])
+      .reduce((n, e) => n + (e.recordCount ?? 0), 0);
+
+    const enviados = Array.isArray((corpo as { events?: unknown[] }).events)
+      ? (corpo as { events: unknown[] }).events.length
+      : 0;
+    return { recebidos: Math.max(enviados - recusados, 0), erros };
+  }
+
   /** Contas nao-gerenciadoras sob o MCC. Alimenta o seletor do painel. */
   async contasDoMcc(): Promise<Array<{ id: string; nome: string }>> {
     const rows = await this.search<{

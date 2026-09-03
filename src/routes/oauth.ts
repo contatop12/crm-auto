@@ -24,6 +24,11 @@ const ESCOPOS = [
   // junto porque o refresh token novo substitui o antigo no mesmo cliente:
   // sem isto, autorizar o GTM poderia derrubar o acesso ao Google Ads
   'https://www.googleapis.com/auth/adwords',
+  // A conversao offline sobe pela Data Manager API, nao pela API do Google
+  // Ads: `UploadClickConversions` esta fechada para integracao nova
+  // ("Usage ... is limited to existing users"). Sem este escopo, a chamada
+  // volta 403 "insufficient authentication scopes".
+  'https://www.googleapis.com/auth/datamanager',
 ].join(' ');
 
 const TTL_STATE = 600; // 10 min: o consentimento e' um ato continuo
