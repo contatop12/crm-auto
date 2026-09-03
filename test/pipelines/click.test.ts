@@ -150,3 +150,41 @@ describe('formato real do GTM', () => {
     expect(consultar('SELECT * FROM leads').length).toBe(1);
   });
 });
+
+describe('modo de visualização do GTM', () => {
+  // o Tag Assistant executa as tags num renderizador proprio; o coletor dispara
+  // la' como se fosse o site, e cada sessao de teste virava um lead falso
+  const doPreview = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      protocol: 'VITA-TESTE',
+      page_url: 'https://gtm-msr.appspot.com/render?id=GTM-5867VHW5',
+      ...over,
+    });
+
+  test('nao vira lead', async () => {
+    const { env, consultar } = cenario();
+    const r = await registrarClique(env, 1, doPreview());
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toMatch(/modo de visualização/);
+    expect(consultar('SELECT * FROM leads').length).toBe(0);
+  });
+
+  test('tagassistant.google.com também', async () => {
+    const { env } = cenario();
+    const r = await registrarClique(env, 1, doPreview({ page_url: 'https://tagassistant.google.com/x' }));
+    expect(r.status).toBe('ignorado');
+  });
+
+  test('site de verdade continua entrando', async () => {
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, doPreview({ page_url: 'https://audicao.vitaaudio.com.br/aparelhos' }));
+    expect(consultar('SELECT * FROM leads').length).toBe(1);
+  });
+
+  test('landing_url manda: preview com landing real é clique real', async () => {
+    // no preview de um site de verdade a landing_url e' a pagina do cliente
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, doPreview({ landing_url: 'https://audicao.vitaaudio.com.br/x' }));
+    expect(consultar('SELECT * FROM leads').length).toBe(1);
+  });
+});

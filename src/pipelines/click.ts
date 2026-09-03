@@ -41,6 +41,9 @@ function ler(p: Record<string, unknown>, ...nomes: string[]): string | null {
   return null;
 }
 
+/** Renderizador do Tag Assistant. Tag roda la', mas nao ha visitante. */
+const PREVIEW_GTM = /(^|\/\/)(gtm-msr\.appspot\.com|tagassistant\.google\.com)/i;
+
 /** Macro do GTM que ficou sem resolver: `{campaignname}` nao e' nome de campanha. */
 const MACRO = /^\{[^}]*\}$/;
 
@@ -68,6 +71,15 @@ export async function registrarClique(
   if (!protocol) {
     // sem protocolo nao ha chave: a mensagem do lead nao teria como casar
     return { status: 'ignorado', motivo: 'clique sem protocolo' };
+  }
+
+  // O Tag Assistant executa as tags num renderizador proprio, e o coletor
+  // dispara la' como se fosse o site. Cada sessao de teste gerava um lead com
+  // `page_url` do renderizador, sem gclid e sem clique — 5 por container na
+  // primeira rodada de testes. Nao e' lead: e' o proprio teste.
+  const ondeRodou = ler(p, 'landing_url', 'landingUrl', 'page_url', 'pageUrl', 'url') ?? '';
+  if (PREVIEW_GTM.test(ondeRodou)) {
+    return { status: 'ignorado', motivo: 'clique do modo de visualização do GTM, não de um site' };
   }
 
   const fone = ler(p, 'phone_number', 'phone', 'telefone');
