@@ -165,6 +165,18 @@ export class ChatwootClient {
   }
 
   /**
+   * Move o card para outra etapa DO MESMO board.
+   *
+   * Entre boards a API recusa (ver docs/api-reference.md); aqui e' sempre
+   * dentro do funil, entao `/move` basta.
+   */
+  async moverCard(acc: number, taskId: number, boardStepId: number): Promise<void> {
+    await this.req('POST', `/api/v1/accounts/${acc}/kanban/tasks/${taskId}/move`, {
+      board_step_id: boardStepId,
+    });
+  }
+
+  /**
    * Grava atributos na conversa.
    *
    * O POST substitui o objeto inteiro, entao o merge e' aqui: sem ele, gravar

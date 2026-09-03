@@ -3,6 +3,7 @@ import { eventoPorId, marcarEvento } from '../db/queries';
 import { avisarLeadNoGrupo } from '../pipelines/kanbanTask';
 import { atribuirLead } from '../pipelines/leadMessage';
 import { registrarClique } from '../pipelines/click';
+import { moverPelaResposta } from '../pipelines/sellerMessage';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -38,10 +39,8 @@ async function processar(msg: QueueMessage, env: Env, payload: string): Promise<
           // clique e escreve origem, UTMs e etiquetas na conversa e no card.
           return atribuirLead(env, msg.tenantId, payload);
         case 'message_outgoing':
-          return {
-            status: 'ignorado',
-            motivo: 'pipeline sellerMessage ainda nao implementado (Fase 3)',
-          };
+          // move o card pela frase do vendedor e captura o valor da proposta
+          return moverPelaResposta(env, msg.tenantId, payload);
         default:
           return { status: 'ignorado', motivo: `evento sem pipeline: ${msg.eventType}` };
       }
