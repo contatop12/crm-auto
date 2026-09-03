@@ -194,6 +194,44 @@
       .endereco .rotulo { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
       .endereco .linha { display: flex; gap: 8px; align-items: stretch; }
       .endereco .uso { margin-top: 4px; }
+      .tag-repetido { border-color: var(--hold); color: var(--hold); }
+
+      .gaveta-fundo {
+        position: fixed; inset: 0; z-index: 50;
+        background: rgba(20, 24, 29, .35);
+        display: flex; justify-content: flex-end;
+      }
+      .gaveta {
+        width: min(620px, 94vw); height: 100%;
+        background: var(--panel); border-left: 1px solid var(--rule);
+        display: flex; flex-direction: column;
+        box-shadow: -8px 0 32px rgba(0,0,0,.12);
+      }
+      .gaveta header {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--rule);
+      }
+      .gaveta .fechar { border: 0; background: none; font-size: 16px; cursor: pointer; padding: 4px 8px; }
+      .gaveta .lista {
+        max-height: 34%; overflow-y: auto; border-bottom: 1px solid var(--rule);
+      }
+      .gaveta .item {
+        display: grid; gap: 2px 10px; width: 100%; text-align: left;
+        grid-template-columns: max-content max-content 1fr;
+        padding: 9px 20px; border: 0; border-bottom: 1px solid var(--rule);
+        background: none; font: inherit; cursor: pointer;
+      }
+      .gaveta .item:hover { background: var(--paper); }
+      .gaveta .item.ativo { background: var(--paper); box-shadow: inset 3px 0 0 var(--ink); }
+      .gaveta .item .quando { font-family: var(--mono); font-size: 12px; }
+      .gaveta .item .sub { grid-column: 1 / -1; }
+      .gaveta .corpo { flex: 1; overflow-y: auto; padding: 16px 20px; }
+      .gaveta .corpo pre {
+        background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
+        padding: 12px; overflow-x: auto; font-size: 12px; max-height: none;
+      }
+      @media (max-width: 640px) { .gaveta { width: 100vw; } }
+
       a.botao-link {
         display: inline-block; text-decoration: none;
         font: inherit; padding: 7px 14px; border-radius: 4px;
@@ -685,12 +723,13 @@
           return;
         }
 
+        const grupos = agrupar(r.linhas);
         alvo.innerHTML = r.linhas.length
           ? '<table><thead><tr>' +
               '<th>Quando</th><th>O que chegou</th><th>Lead</th><th>Conversa</th>' +
               '<th class="esconder-mobile">Card</th><th>Status</th>' +
               '<th class="esconder-mobile">Motivo</th><th>Assin.</th>' +
-            '</tr></thead><tbody>' + r.linhas.map(linhaEvento).join('') + '</tbody></table>' +
+            '</tr></thead><tbody>' + grupos.map(linhaGrupo).join('') + '</tbody></table>' +
             paginacao('eventos', r.total, r.limite, r.offset) +
             '<p class="carregando" style="margin-top:10px">Clique numa linha para ver o corpo do webhook. ' +
             'Telefone mascarado; o nome vem só com a inicial do sobrenome.</p>'
@@ -698,7 +737,10 @@
             '<p class="mono">Confira em Integrações se o webhook está registrado apontando para este Worker.</p></div>';
 
         alvo.querySelectorAll('tr.clicavel').forEach(function (tr) {
-          tr.addEventListener('click', function () { verPayload(id, tr.dataset.ev, false); });
+          tr.addEventListener('click', function () {
+            if (tr.dataset.grupo !== undefined) abrirGaveta(id, grupos[Number(tr.dataset.grupo)]);
+            else verPayload(id, tr.dataset.ev, false);
+          });
         });
         ligarPaginacao(alvo, function (o) { carregarEventos(id, o); });
       }
@@ -831,6 +873,135 @@
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         }
+      }
+
+      /**
+       * Junta linhas repetidas do mesmo evento.
+       *
+       * O coletor do GTM dispara várias vezes por clique e o Chatwoot manda um
+       * webhook por mensagem: uma conversa de 40 mensagens ocupava a lista
+       * inteira. Agrupado, cada assunto ocupa uma linha e o detalhe fica a um
+       * clique.
+       *
+       * Agrupa apenas linhas CONSECUTIVAS: a lista é cronológica, e juntar
+       * coisas separadas por horas esconderia que houve um intervalo.
+       */
+      function agrupar(linhas) {
+        const chave = function (e) {
+          const r = e.resumo || {};
+          // o que identifica "o mesmo assunto": o clique pelo protocolo, a
+          // conversa pelo id. Sem nenhum dos dois, a linha fica sozinha.
+          const alvo = e.source === 'click' ? r.protocolo : r.conversaId;
+          return alvo ? e.event_type + '|' + alvo + '|' + e.status : null;
+        };
+
+        const grupos = [];
+        for (const e of linhas) {
+          const k = chave(e);
+          const ultimo = grupos[grupos.length - 1];
+          if (k && ultimo && ultimo.chave === k) {
+            ultimo.itens.push(e);
+          } else {
+            grupos.push({ chave: k, itens: [e] });
+          }
+        }
+        return grupos;
+      }
+
+      function linhaGrupo(g, indice) {
+        if (g.itens.length === 1) return linhaEvento(g.itens[0]);
+
+        const e = g.itens[0];
+        const r = e.resumo || {};
+        const nada = '<span class="nada">—</span>';
+        const alvo = e.source === 'click' ? r.protocolo : 'conversa ' + r.conversaId;
+
+        return '<tr class="clicavel grupo" data-grupo="' + indice + '">' +
+          '<td title="' + esc(hora(e.received_at)) + '">' + haQuanto(e.received_at) +
+            '<span class="sub">' + g.itens.length + ' seguidos</span></td>' +
+          '<td>' + esc(e.pipeline || e.event_type) +
+            '<span class="sub">' + esc(e.source) + ' · ' + esc(e.event_type) + '</span></td>' +
+          '<td>' + (r.quem ? esc(r.quem) : nada) + '</td>' +
+          '<td><span class="tag tag-repetido">' + g.itens.length + '×</span>' +
+            '<span class="sub">' + esc(String(alvo || '')) + '</span></td>' +
+          '<td class="esconder-mobile">' + (r.board ? esc(r.board) : nada) + '</td>' +
+          '<td class="st-' + esc(e.status) + '">' + esc(e.status) + '</td>' +
+          '<td class="motivo esconder-mobile">' + esc(e.motivo || '') + '</td>' +
+          '<td>' + (e.signature_ok === null ? '—' : e.signature_ok ? 'ok' : 'falhou') + '</td>' +
+          '</tr>';
+      }
+
+      // ---------- gaveta lateral ----------
+
+      let gavetaAberta = null;
+
+      function abrirGaveta(tenantId, grupo) {
+        fecharGaveta();
+
+        const g = document.createElement('div');
+        g.className = 'gaveta-fundo';
+        g.innerHTML =
+          '<aside class="gaveta" role="dialog" aria-modal="true" aria-label="Eventos do grupo">' +
+            '<header>' +
+              '<div><strong>' + grupo.itens.length + ' eventos seguidos</strong>' +
+              '<span class="sub">' + esc(grupo.itens[0].pipeline || grupo.itens[0].event_type) + '</span></div>' +
+              '<button class="fechar" aria-label="Fechar">✕</button>' +
+            '</header>' +
+            '<div class="lista">' +
+              grupo.itens.map(function (e, i) {
+                return '<button class="item" data-ev="' + e.id + '">' +
+                  '<span class="quando">' + esc(hora(e.received_at)) + '</span>' +
+                  '<span class="st-' + esc(e.status) + '">' + esc(e.status) + '</span>' +
+                  '<span class="motivo">' + esc(e.motivo || '') + '</span>' +
+                  '<span class="sub">evento ' + e.id + ' · ' + (i + 1) + ' de ' + grupo.itens.length + '</span>' +
+                  '</button>';
+              }).join('') +
+            '</div>' +
+            '<div class="corpo"><p class="carregando">Clique num evento para ver o corpo do webhook.</p></div>' +
+          '</aside>';
+
+        document.body.appendChild(g);
+        gavetaAberta = g;
+
+        g.querySelector('.fechar').addEventListener('click', fecharGaveta);
+        // clicar no fundo fecha; dentro da gaveta, não
+        g.addEventListener('click', function (ev) { if (ev.target === g) fecharGaveta(); });
+
+        g.querySelectorAll('.item').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            g.querySelectorAll('.item').forEach(function (x) { x.classList.remove('ativo'); });
+            b.classList.add('ativo');
+            const corpo = g.querySelector('.corpo');
+            corpo.innerHTML = '<p class="carregando"><span class="girando"></span>carregando…</p>';
+            try {
+              const r = await api('/tenants/' + tenantId + '/events/' + b.dataset.ev + '/payload');
+              corpo.innerHTML =
+                cabecalhoResumo(r.resumo) +
+                '<p class="carregando">Telefone, e-mail e texto das mensagens estão mascarados.</p>' +
+                '<pre>' + esc(r.payload || '(vazio)') + '</pre>';
+            } catch (e) {
+              corpo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+            }
+          });
+        });
+
+        // abre já no primeiro: a gaveta vazia não diz nada
+        const primeiro = g.querySelector('.item');
+        if (primeiro) primeiro.click();
+
+        document.addEventListener('keydown', aoTeclar);
+        g.querySelector('.fechar').focus();
+      }
+
+      function aoTeclar(ev) {
+        if (ev.key === 'Escape') fecharGaveta();
+      }
+
+      function fecharGaveta() {
+        if (!gavetaAberta) return;
+        gavetaAberta.remove();
+        gavetaAberta = null;
+        document.removeEventListener('keydown', aoTeclar);
       }
 
       /**
