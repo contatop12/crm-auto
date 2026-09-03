@@ -5,6 +5,10 @@ import { ChatwootClient } from '../clients/chatwoot';
 import { GoogleAdsClient, criarConversionActions } from '../clients/googleAds';
 import { EvolutionClient } from '../clients/evolution';
 import { urlDeConsentimento, CAMINHO_CALLBACK } from './oauth';
+import { TagManagerClient } from '../clients/tagManager';
+import {
+  lerModelo, planejarGtm, limparParaCriar, remapearGatilhos, indiceDeGatilhos,
+} from '../domain/gtm';
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
@@ -54,6 +58,9 @@ const CAMPOS_CONFIG = [
   'evo_instancia',
   'pulseboard_codi_id',
   'pulseboard_url',
+  'gtm_account_id',
+  'gtm_container_id',
+  'gtm_prefixo',
   'validate_only',
   'janela_match_dias',
 ] as const;
@@ -62,7 +69,7 @@ admin.get('/tenants/:id/config', async (c) => {
   const t = await c.env.DB.prepare(
     `SELECT t.id, t.slug, t.nome, t.ativo, c.cw_account_id, c.cw_board_funil_id,
             c.cw_board_organico_id, c.ga_customer_id, c.evo_instancia,
-            c.pulseboard_codi_id, c.pulseboard_url, c.validate_only, c.janela_match_dias, c.ingest_key,
+            c.pulseboard_codi_id, c.pulseboard_url, c.gtm_account_id, c.gtm_container_id, c.gtm_prefixo, c.validate_only, c.janela_match_dias, c.ingest_key,
             CASE WHEN c.cw_webhook_secret IS NULL THEN 0 ELSE 1 END AS tem_segredo_webhook
      FROM tenants t LEFT JOIN tenant_config c ON c.tenant_id = t.id WHERE t.id = ?`,
   )
@@ -981,4 +988,149 @@ admin.get('/oauth/google/status', async (c) => {
     em: l.atualizado_em,
     tag_manager: (l.escopos ?? '').includes('tagmanager'),
   });
+});
+
+// ---------------------------------------------------------------------------
+// Google Tag Manager
+// ---------------------------------------------------------------------------
+
+/** Containers visiveis com a credencial autorizada, para o seletor da tela. */
+admin.get('/gtm/containers', async (c) => {
+  const gtm = await TagManagerClient.deD1(c.env);
+  if (!gtm) return c.json({ error: 'nenhuma credencial do Google autorizada' }, 400);
+  return c.json(await gtm.containers());
+});
+
+/**
+ * O que falta no container deste cliente. Com `?aplicar=1`, cria.
+ *
+ * Cria no workspace que ja existe, nao num novo: workspace novo vira uma
+ * segunda fila de alteracoes pendentes na tela do cliente, e quem publicar sem
+ * ver perde o que estava no outro.
+ */
+admin.post('/tenants/:id/gtm/padronizar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const cfg = await c.env.DB.prepare(
+    `SELECT t.slug, c.gtm_account_id, c.gtm_container_id, c.gtm_prefixo, c.ingest_key
+     FROM tenants t JOIN tenant_config c ON c.tenant_id = t.id WHERE t.id = ?`,
+  )
+    .bind(id)
+    .first<{ slug: string; gtm_account_id: string | null; gtm_container_id: string | null; gtm_prefixo: string | null; ingest_key: string }>();
+
+  if (!cfg?.gtm_account_id || !cfg.gtm_container_id) {
+    return c.json({ error: 'escolha o container do GTM na configuração do cliente' }, 400);
+  }
+  if (!cfg.gtm_prefixo) {
+    return c.json({ error: 'informe o prefixo do protocolo na configuração do cliente' }, 400);
+  }
+
+  const gtm = await TagManagerClient.deD1(c.env);
+  if (!gtm) return c.json({ error: 'nenhuma credencial do Google autorizada' }, 400);
+
+  const linha = await c.env.DB.prepare('SELECT json FROM padrao_gtm WHERE id = 1').first<{ json: string }>();
+  if (!linha) return c.json({ error: 'modelo do GTM nao cadastrado' }, 400);
+
+  const modelo = lerModelo(linha.json);
+  const acc = cfg.gtm_account_id;
+  const cont = cfg.gtm_container_id;
+  const ws = await gtm.workspacePadrao(acc, cont);
+  const inv = await gtm.inventario(acc, cont, ws.workspaceId);
+
+  const valores = {
+    prefixo: cfg.gtm_prefixo,
+    clientId: `p12-${cfg.slug}`,
+    collectUrl: `${new URL(c.req.url).origin}/ingest/${cfg.slug}/click?k=${encodeURIComponent(cfg.ingest_key)}`,
+  };
+  const plano = planejarGtm(modelo, inv, valores);
+
+  const resumo = {
+    workspace: ws.name,
+    a_criar: {
+      templates: plano.templatesACriar.map((x) => x.name),
+      variaveis: plano.variaveisACriar.map((x) => x.name),
+      gatilhos: plano.gatilhosACriar.map((x) => x.name),
+      tags: plano.tagsACriar.map((x) => x.name),
+      built_in: plano.builtInACriar,
+    },
+    ja_existem: plano.jaExistem,
+    sem_valor: plano.semValor,
+  };
+
+  if (c.req.query('aplicar') !== '1') return c.json({ previa: true, ...resumo });
+  if (plano.semValor.length) {
+    // subir uma constante com o exemplo do modelo faria o container postar para
+    // o n8n antigo, sem erro visivel
+    return c.json({ error: `constantes sem valor real: ${plano.semValor.join(', ')}` }, 400);
+  }
+
+  const falhas: string[] = [];
+  let criados = 0;
+  const tentar = async (rotulo: string, f: () => Promise<unknown>) => {
+    try { await f(); criados++; }
+    catch (e) { falhas.push(`${rotulo}: ${(e as Error).message.slice(0, 160)}`); }
+  };
+
+  // Ordem obrigatoria: template antes da tag que o usa, gatilho antes da tag
+  // que dispara nele.
+  for (const t of plano.templatesACriar) {
+    await tentar(`template/${t.name}`, () => gtm.criarTemplate(acc, cont, ws.workspaceId, limparParaCriar(t)));
+  }
+  for (const b of plano.builtInACriar) {
+    await tentar(`builtin/${b}`, () => gtm.criarBuiltIn(acc, cont, ws.workspaceId, b));
+  }
+  for (const v of plano.variaveisACriar) {
+    await tentar(`variável/${v.name}`, () => gtm.criarVariavel(acc, cont, ws.workspaceId, limparParaCriar(v)));
+  }
+
+  const gatilhoPorNome = new Map(inv.gatilhosPorNome);
+  for (const g of plano.gatilhosACriar) {
+    await tentar(`gatilho/${g.name}`, async () => {
+      const criado = await gtm.criarGatilho(acc, cont, ws.workspaceId, limparParaCriar(g));
+      gatilhoPorNome.set(String(g.name).trim().toLowerCase(), criado.triggerId);
+    });
+  }
+
+  const idx = indiceDeGatilhos(modelo);
+  for (const t of plano.tagsACriar) {
+    await tentar(`tag/${t.name}`, () =>
+      gtm.criarTag(acc, cont, ws.workspaceId, limparParaCriar(remapearGatilhos(t, gatilhoPorNome, idx))),
+    );
+  }
+
+  console.log(JSON.stringify({ acao: 'gtm_padronizar', por: c.get('identity').email, tenant_id: id, criados }));
+  return c.json({ previa: false, criados, falhas, ...resumo });
+});
+
+/**
+ * Cria a versao e publica.
+ *
+ * Separado da padronizacao de proposito: publicar mexe no rastreamento do site
+ * em producao. Quem padroniza pode conferir no GTM antes de mandar para o ar.
+ */
+admin.post('/tenants/:id/gtm/publicar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const cfg = await c.env.DB.prepare(
+    'SELECT gtm_account_id, gtm_container_id FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ gtm_account_id: string | null; gtm_container_id: string | null }>();
+  if (!cfg?.gtm_account_id || !cfg.gtm_container_id) {
+    return c.json({ error: 'cliente sem container do GTM' }, 400);
+  }
+
+  const gtm = await TagManagerClient.deD1(c.env);
+  if (!gtm) return c.json({ error: 'nenhuma credencial do Google autorizada' }, 400);
+
+  const ws = await gtm.workspacePadrao(cfg.gtm_account_id, cfg.gtm_container_id);
+  const versao = await gtm.criarVersao(
+    cfg.gtm_account_id, cfg.gtm_container_id, ws.workspaceId,
+    `P12 CRM Auto — ${new Date().toISOString().slice(0, 10)}`,
+    'Rastreio de protocolo e persistência de UTM, publicado pelo painel.',
+  );
+  const vid = versao.containerVersion?.containerVersionId;
+  if (!vid) return c.json({ error: 'o GTM criou a versão mas não devolveu o id' }, 502);
+
+  await gtm.publicar(cfg.gtm_account_id, cfg.gtm_container_id, vid);
+  console.log(JSON.stringify({ acao: 'gtm_publicar', por: c.get('identity').email, tenant_id: id, versao: vid }));
+  return c.json({ ok: true, versao: vid });
 });

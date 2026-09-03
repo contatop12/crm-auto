@@ -543,6 +543,11 @@
           </section>
 
           <section>
+            <h2>Google Tag Manager</h2>
+            <div id="gtm"></div>
+          </section>
+
+          <section>
             <h2>Endereços para colar</h2>
             <div id="enderecos"></div>
           </section>
@@ -636,6 +641,7 @@
           if (nome === 'integracoes') {
             carregarWebhooks(id, slug);
             carregarEnderecos(id, slug);
+            carregarGtm(id);
             provisionar(id, false);
           }
           if (nome === 'atividade') { carregarAvisos(id, 0); carregarEventos(id, 0); }
@@ -1881,6 +1887,127 @@
             }
             setTimeout(function () { b.textContent = 'copiar'; }, 2000);
           });
+        });
+      }
+
+      // ---------- google tag manager ----------
+
+      /**
+       * Container do cliente e o que falta nele.
+       *
+       * Padronizar só ACRESCENTA: o container tem o rastreamento do cliente —
+       * Analytics, pixel, remarketing — e nada disso é tocado. O que já existe
+       * com o mesmo nome fica como está.
+       */
+      async function carregarGtm(id) {
+        const alvo = document.getElementById('gtm');
+        if (!alvo) return;
+        alvo.innerHTML = '<p class="carregando"><span class="girando"></span>carregando…</p>';
+
+        let cfg, containers;
+        try {
+          cfg = await api('/tenants/' + id + '/config');
+          containers = await api('/gtm/containers');
+        } catch (e) {
+          alvo.innerHTML = '<div class="vazio"><p>Sem acesso ao Tag Manager.</p>' +
+            '<p class="mono">' + esc(e.message) + '</p>' +
+            '<p class="mono">Autorize em <strong>Acesso Google</strong>, no topo.</p></div>';
+          return;
+        }
+
+        alvo.innerHTML =
+          '<div class="grade">' +
+            '<div class="campo"><label for="g-cont">Container</label>' +
+            '<select id="g-cont"><option value="">selecione…</option>' +
+            containers.map(function (k) {
+              const v = k.accountId + '|' + k.containerId;
+              const sel = (cfg.gtm_account_id + '|' + cfg.gtm_container_id) === v ? ' selected' : '';
+              return '<option value="' + esc(v) + '"' + sel + '>' + esc(k.publicId) + ' — ' + esc(k.name) + '</option>';
+            }).join('') + '</select></div>' +
+            '<div class="campo"><label for="g-prefixo">Prefixo do protocolo</label>' +
+            '<input id="g-prefixo" placeholder="VITA" value="' + esc(cfg.gtm_prefixo || '') + '" />' +
+            '<p class="dica">vira o começo do protocolo: <span class="mono">VITA-MRIAP9IN8WNQ</span></p></div>' +
+          '</div>' +
+          '<div class="linha-acoes">' +
+            '<button id="btn-gtm-salvar">Salvar escolha</button>' +
+            '<button id="btn-gtm-conferir">Conferir o que falta</button>' +
+            '<button id="btn-gtm-aplicar" class="principal">Padronizar</button>' +
+            '<button id="btn-gtm-publicar">Publicar</button>' +
+            '<span class="carregando" id="gtm-estado"></span>' +
+          '</div>' +
+          '<div id="gtm-plano"></div>' +
+          '<div class="aviso">Padronizar só <strong>acrescenta</strong>: o que já existe no container com o mesmo nome não é tocado. ' +
+          'Publicar é passo separado, porque coloca a mudança no ar no site do cliente.</div>';
+
+        const est = document.getElementById('gtm-estado');
+        const salvar = async function () {
+          const v = document.getElementById('g-cont').value.split('|');
+          await enviar('/tenants/' + id, 'PATCH', {
+            gtm_account_id: v[0] || '',
+            gtm_container_id: v[1] || '',
+            gtm_prefixo: document.getElementById('g-prefixo').value.trim().toUpperCase(),
+          });
+        };
+
+        document.getElementById('btn-gtm-salvar').addEventListener('click', async function () {
+          est.textContent = 'salvando…';
+          try { await salvar(); est.textContent = 'salvo'; }
+          catch (e) { est.textContent = 'falhou: ' + e.message; }
+        });
+
+        const padronizar = async function (aplicar) {
+          est.innerHTML = '<span class="girando"></span>' + (aplicar ? 'criando no GTM…' : 'conferindo…');
+          document.getElementById('gtm-plano').innerHTML = '';
+          try {
+            await salvar();
+            const r = await enviar(
+              '/tenants/' + id + '/gtm/padronizar' + (aplicar ? '?aplicar=1' : ''), 'POST', {});
+
+            const bloco = function (t, itens) {
+              if (!itens || !itens.length) return '';
+              return '<p style="margin:10px 0 4px"><strong>' + esc(t) + '</strong></p>' +
+                '<p class="mono">' + itens.map(esc).join(' · ') + '</p>';
+            };
+            const c = r.a_criar;
+            const total = c.templates.length + c.variaveis.length + c.gatilhos.length +
+              c.tags.length + c.built_in.length;
+
+            est.textContent = r.previa
+              ? 'workspace "' + r.workspace + '" · ' + (total ? total + ' a criar' : 'já está padronizado')
+              : r.criados + ' criados' + (r.falhas.length ? ' · ' + r.falhas.length + ' falharam' : '');
+
+            document.getElementById('gtm-plano').innerHTML =
+              bloco('Templates', c.templates) + bloco('Variáveis', c.variaveis) +
+              bloco('Gatilhos', c.gatilhos) + bloco('Tags', c.tags) +
+              bloco('Variáveis integradas', c.built_in) +
+              (r.falhas && r.falhas.length ? '<p class="st-erro">' + r.falhas.map(esc).join('<br>') + '</p>' : '') +
+              (r.sem_valor && r.sem_valor.length
+                ? '<div class="erro">Constantes sem valor real: ' + esc(r.sem_valor.join(', ')) +
+                  '. O container postaria para lugar nenhum.</div>'
+                : '') +
+              (r.ja_existem.length
+                ? '<p class="carregando" style="margin-top:10px">' + r.ja_existem.length +
+                  ' já existem no container e não foram tocados.</p>'
+                : '');
+          } catch (e) {
+            est.textContent = 'falhou: ' + e.message;
+          }
+        };
+
+        document.getElementById('btn-gtm-conferir').addEventListener('click', () => padronizar(false));
+        document.getElementById('btn-gtm-aplicar').addEventListener('click', () => padronizar(true));
+
+        document.getElementById('btn-gtm-publicar').addEventListener('click', async function () {
+          if (!confirm(
+            'Publicar cria uma versão do container e coloca no ar, no site do cliente.\n\n' +
+            'Tudo que estiver pendente no workspace vai junto, não só o que a ferramenta criou.\n\nPublicar?')) return;
+          est.innerHTML = '<span class="girando"></span>publicando…';
+          try {
+            const r = await enviar('/tenants/' + id + '/gtm/publicar', 'POST', {});
+            est.textContent = 'publicado · versão ' + r.versao;
+          } catch (e) {
+            est.textContent = 'falhou: ' + e.message;
+          }
         });
       }
 
