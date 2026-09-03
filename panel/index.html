@@ -366,6 +366,46 @@
       .voltar { margin-bottom: 16px; }
       .cliente-slug { font-family: var(--mono); font-size: 12.5px; color: var(--tinta-3); }
 
+      /* ---------------------------------------------------------------
+         Nomes que o JS já usava. Renomeei no CSS e esqueci de acompanhar no
+         código — a tela do cliente ficou sem layout nenhum. Ficam com os
+         nomes originais, no sistema novo.
+         --------------------------------------------------------------- */
+
+      .wrap { min-height: 100%; }
+      .painel[hidden] { display: none; }
+
+      .cliente-topo { display: flex; align-items: baseline; gap: 10px; }
+      .cliente-nome { font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
+      .cliente-sinal { margin-left: auto; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+      .sinal-ok { color: var(--fluxo); }
+      .sinal-erro { color: var(--falha); }
+      .sinal-silencio { color: var(--tinta-3); }
+      .cliente-stats {
+        margin-top: 10px; font-family: var(--mono); font-size: 12px;
+        color: var(--tinta-2); display: flex; gap: 18px; flex-wrap: wrap;
+      }
+      .cliente-erro { margin-top: 6px; font-size: 12.5px; color: var(--falha); }
+      .trilha-vazia { color: var(--tinta-3); font-size: 12.5px; margin: 12px 0 0; }
+
+      /* Fluxo do lead: as cinco etapas que interessam monitorar. Cada linha é
+         estado + o que a etapa é + como ela funciona. */
+      .checagem {
+        display: flex; gap: 14px; align-items: baseline;
+        padding: 11px 0; border-bottom: 1px solid var(--linha);
+      }
+      .checagem:last-child { border-bottom: 0; }
+      .checagem-marca {
+        flex: none; width: 62px; font-size: 11.5px; font-weight: 650;
+        text-transform: lowercase;
+      }
+      .checagem-titulo { flex: none; font-weight: 550; font-size: 13.5px; }
+      .checagem-detalhe { color: var(--tinta-2); font-size: 12.5px; line-height: 1.5; }
+      .marca-ok { color: var(--fluxo); }
+      .marca-erro { color: var(--falha); }
+      .marca-aviso { color: var(--espera); }
+      .marca-na { color: var(--tinta-3); }
+
       @media (max-width: 720px) {
         .esconder-mobile { display: none; }
         main { padding: 20px 16px 72px; }
@@ -614,7 +654,7 @@
           </h2>
           <p class="cliente-slug" style="margin:0 0 12px">${esc(cliente ? cliente.slug : '')}</p>
           <div class="linha-acoes" style="margin:0 0 20px">
-            <button id="btn-editar">' + ic('editar') + 'Editar cliente</button>
+            <button id="btn-editar">${ic('editar')} Editar cliente</button>
             <label class="switch" data-dica="Ligado, a conversão é gravada no Google Ads de verdade">
               <input type="checkbox" id="sw-envio" />
               <span class="trilho"></span>
@@ -690,7 +730,7 @@
           <section>
             <h2>Integrações</h2>
             <div class="linha-acoes">
-              <button id="btn-checar">' + ic('conferir') + 'Checar agora</button>
+              <button id="btn-checar">${ic('conferir')} Checar agora</button>
               <span class="carregando" id="checagem-estado">consulta Chatwoot, Google Ads, etiquetas e WhatsApp ao vivo</span>
             </div>
             <div id="checagens"></div>
@@ -709,8 +749,8 @@
           <section>
             <h2>Etiquetas e atributos</h2>
             <div class="linha-acoes">
-              <button id="btn-prov" data-dica="Lê a conta antes de escrever — não cria nada">' + ic('conferir') + 'Conferir</button>
-              <button id="btn-prov-criar" class="principal">' + ic('raio') + 'Gerar no Chatwoot</button>
+              <button id="btn-prov" data-dica="Lê a conta antes de escrever — não cria nada">${ic('conferir')} Conferir</button>
+              <button id="btn-prov-criar" class="principal">${ic('raio')} Gerar no Chatwoot</button>
               <span class="carregando" id="prov-estado">cria o que falta, conforme as Padronizacoes</span>
             </div>
             <div id="prov"></div>
@@ -736,7 +776,7 @@
             <h2>Reprocessar o que ficou para trás</h2>
             <div class="linha-acoes">
               <button id="btn-reproc" data-dica="Só conta quantas conversas entrariam na fila">Conferir</button>
-              <button id="btn-reproc-aplicar" class="principal">' + ic('atualizar') + 'Reprocessar</button>
+              <button id="btn-reproc-aplicar" class="principal">${ic('atualizar')} Reprocessar</button>
               <span class="carregando" id="reproc-estado">roda o pipeline atual sobre os webhooks já recebidos</span>
             </div>
           </section>
@@ -1461,9 +1501,9 @@
           r.etapas.map(function (e) {
             return '<div class="checagem">' +
               '<span class="checagem-marca ' + marca[e.estado] + '">' + rotulo[e.estado] + '</span>' +
-              '<span class="checagem-titulo" style="width:260px">' + esc(e.titulo) + '</span>' +
+              '<span class="checagem-titulo" style="min-width:210px">' + esc(e.titulo) + '</span>' +
               '<span class="checagem-detalhe">' + esc(e.detalhe) +
-              '<br><span style="color:var(--ink-3)">' + esc(e.comoFunciona) + '</span></span>' +
+              '<br><span style="color:var(--tinta-3)">' + esc(e.comoFunciona) + '</span></span>' +
               '</div>';
           }).join('');
       }
