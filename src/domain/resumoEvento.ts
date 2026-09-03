@@ -72,6 +72,14 @@ export function resumirEvento(
     return vazio;
   }
 
+  // O clique do GTM nao tem conversa nenhuma: e' um corpo plano com protocolo
+  // e UTMs. Sem tratar isso, a linha do clique vinha sem protocolo, e sem
+  // protocolo o agrupamento nao tem chave — cinco disparos do mesmo clique
+  // ocupavam cinco linhas.
+  if (!obj(p.conversation) && (str(p.protocol) ?? str(p.protocolo))) {
+    return { ...vazio, ...resumoDoClique(p) };
+  }
+
   // A regra de automacao do Chatwoot manda a conversa na raiz; o webhook de
   // mensagem manda dentro de `conversation`. Mesmo objeto, dois envelopes.
   const conv = obj(p.conversation) ?? p;
@@ -105,6 +113,28 @@ export function resumirEvento(
     idadeConversa: idade,
     conversaEnviada: attrs.conversa_enviada === true,
     etiquetas,
+  };
+}
+
+/**
+ * O que da' para dizer sobre um clique.
+ *
+ * Nao ha lead nem conversa ainda — o clique acontece antes de qualquer
+ * mensagem. O que existe e' de onde a pessoa veio e para onde vai o protocolo.
+ */
+function resumoDoClique(p: Rec): Partial<ResumoEvento> {
+  const utm = obj(p.utm) ?? {};
+  const fonte = str(p.utm_source) ?? str(utm.source);
+  const temClickId = !!(str(p.gclid) ?? str(p.gbraid) ?? str(p.wbraid));
+
+  return {
+    protocolo: str(p.protocol) ?? str(p.protocolo),
+    autor: 'visitante',
+    inbox: str(p.landing_url) ?? str(p.page_url),
+    // clique com id do Google ou utm de plataforma veio de anuncio; o resto
+    // pode ser trafego direto que passou pelo mesmo botao
+    origem: temClickId || /google|meta|facebook/i.test(fonte ?? '') ? 'anuncio' : null,
+    etiquetas: [fonte, str(p.utm_medium) ?? str(utm.medium)].filter((x): x is string => !!x),
   };
 }
 

@@ -204,3 +204,48 @@ describe('nome que na verdade e telefone', () => {
     expect(resumirEvento(semNome('Loja 24 Horas Ltda')).quem).toBe('Loja 2.');
   });
 });
+
+describe('clique do GTM', () => {
+  // corpo plano, sem conversa: e' o que o coletor manda
+  const clique = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      protocol: 'PERSI-MTKSXZ98MZS8',
+      event: 'whatsapp_click',
+      gclid: 'Cj0abc',
+      landing_url: 'https://persianaspaulista.com.br/persianas',
+      utm: { source: 'google', medium: 'cpc' },
+      ...over,
+    });
+
+  test('o protocolo aparece — sem ele o agrupamento não tem chave', () => {
+    // cinco disparos do mesmo clique ocupavam cinco linhas da lista
+    const r = resumirEvento(clique());
+    expect(r.protocolo).toBe('PERSI-MTKSXZ98MZS8');
+    expect(r.autor).toBe('visitante');
+  });
+
+  test('clique com gclid é anúncio', () => {
+    expect(resumirEvento(clique()).origem).toBe('anuncio');
+  });
+
+  test('clique sem click id e sem utm de plataforma não vira anúncio', () => {
+    // pode ser tráfego direto que passou pelo mesmo botão
+    const r = resumirEvento(clique({ gclid: '', utm: { source: '', medium: '' } }));
+    expect(r.origem).toBeNull();
+  });
+
+  test('utm achatada também é lida', () => {
+    const r = resumirEvento(clique({ utm: undefined, utm_source: 'google' }));
+    expect(r.origem).toBe('anuncio');
+    expect(r.etiquetas).toContain('google');
+  });
+
+  test('conversa continua sendo lida como antes', () => {
+    // o desvio do clique não pode capturar o webhook do Chatwoot
+    const r = resumirEvento(JSON.stringify({
+      protocol: 'X', conversation: { id: 9, meta: { sender: { name: 'Ana Souza' } } },
+    }));
+    expect(r.conversaId).toBe(9);
+    expect(r.quem).toBe('Ana S.');
+  });
+});
