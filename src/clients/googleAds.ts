@@ -226,10 +226,10 @@ export class GoogleAdsClient {
    * `validateOnly` e' o modo sombra: o Google confere tudo — destino existe,
    * gclid dentro da janela, formato do hash — e NAO grava.
    */
-  async ingestEvents(corpo: unknown): Promise<{ recebidos: number; erros: string[] }> {
+  async ingestEvents(corpo: unknown): Promise<{ recebidos: number; erros: string[]; requestId?: string }> {
     const r = await fetch('https://datamanager.googleapis.com/v1/events:ingest', {
       method: 'POST',
-      // O MCC vai no CORPO, em , nao em header: e' assim que a
+      // O MCC vai no CORPO, em `loginAccount`, nao em header: e' assim que a
       // Data Manager entende que o acesso vem da conta gerenciadora.
       headers: {
         authorization: `Bearer ${await this.tokenDataManager()}`,
@@ -260,7 +260,7 @@ export class GoogleAdsClient {
     const enviados = Array.isArray((corpo as { events?: unknown[] }).events)
       ? (corpo as { events: unknown[] }).events.length
       : 0;
-    return { recebidos: Math.max(enviados - recusados, 0), erros };
+    return { recebidos: Math.max(enviados - recusados, 0), erros, requestId: j.requestId };
   }
 
   /** Contas nao-gerenciadoras sob o MCC. Alimenta o seletor do painel. */

@@ -4,6 +4,7 @@ import { avisarLeadNoGrupo } from '../pipelines/kanbanTask';
 import { atribuirLead } from '../pipelines/leadMessage';
 import { registrarClique } from '../pipelines/click';
 import { moverPelaResposta } from '../pipelines/sellerMessage';
+import { enviarConversao } from '../pipelines/stageChanged';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -12,9 +13,9 @@ import { moverPelaResposta } from '../pipelines/sellerMessage';
  * existe, a mensagem e' devolvida a fila com `retry()` e o backoff cuida do
  * resto, em vez de dormir um tempo fixo torcendo para dar certo.
  *
- * ESTADO: o aviso de lead novo no grupo do cliente ja funciona. Os demais
- * pipelines (Fase 3) ainda registram o evento como `ignorado` com o motivo
- * explicito, para a tela de Eventos mostrar o que chegou e o que falta.
+ * ESTADO: falta so' `conversationCreated`, que registra o evento como
+ * `ignorado` com o motivo explicito — a tela de Eventos mostra o que chegou e
+ * o que ainda nao tem tratamento.
  */
 
 type Resultado = { status: 'ok' | 'ignorado' | 'erro'; motivo: string };
@@ -49,10 +50,7 @@ async function processar(msg: QueueMessage, env: Env, payload: string): Promise<
       // `conversao` vem das regras de etapa avancada (Qualificado, Compra).
       // Avisar o grupo aqui anunciaria como "lead novo" quem ja fechou.
       if (msg.eventType === 'kanban_conversao') {
-        return {
-          status: 'ignorado',
-          motivo: 'pipeline stageChanged ainda nao implementado (Fase 3)',
-        };
+        return enviarConversao(env, msg.tenantId, payload);
       }
       return avisarLeadNoGrupo(env, msg.tenantId, payload);
 
