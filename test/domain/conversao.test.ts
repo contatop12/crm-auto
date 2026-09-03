@@ -26,6 +26,8 @@ describe('montarEvento', () => {
     expect(ev.conversionValue).toBe(10);
     expect(ev.currency).toBe('BRL');
     expect(ev.eventTimestamp).toBe('2026-09-02T17:53:38.000Z');
+    // obrigatorio: sem ele a API responde REQUIRED_FIELD_MISSING
+    expect(ev.eventSource).toBe('WEB');
   });
 
   test('e-mail e telefone sobem com hash, nunca em claro', async () => {
@@ -83,9 +85,12 @@ describe('montarEvento', () => {
 describe('montarCorpo', () => {
   test('a conta e a ação viram destino, não campo do evento', async () => {
     const ev = (await montarEvento({ ...BASE, gclid: 'Cj0' }))!;
-    const c = montarCorpo(BASE.accountId, BASE.conversionActionId, [ev], true);
+    const c = montarCorpo(BASE.accountId, BASE.conversionActionId, [ev], true, '3780611396');
 
     expect(c.destinations[0]).toEqual({
+      // sem loginAccount a API responde 403: o consentimento vale no MCC,
+      // nao diretamente em cada conta filha
+      loginAccount: { product: 'GOOGLE_ADS', accountId: '3780611396' },
       operatingAccount: { product: 'GOOGLE_ADS', accountId: '6973821129' },
       productDestinationId: '7698886680',
     });

@@ -182,6 +182,41 @@ export class GoogleAdsClient {
   }
 
   /**
+   * A Data Manager usa credencial PROPRIA, guardada no D1.
+   *
+   * O consentimento do Google entregou `datamanager` num refresh token
+   * separado, sem `adwords` nem `tagmanager` — e um token novo substitui o
+   * antigo no mesmo cliente OAuth. Juntar as duas coisas num token so' faria
+   * cada reautorizacao derrubar a API que nao foi mencionada.
+   *
+   * Uma credencial por API: reconsentir a Data Manager nao mexe no Google Ads.
+   */
+  private async tokenDataManager(): Promise<string> {
+    const l = await this.env.DB.prepare(
+      "SELECT valor FROM credenciais WHERE chave = 'datamanager_refresh_token'",
+    ).first<{ valor: string }>();
+    if (!l?.valor) {
+      throw new Error('Data Manager sem credencial — autorize em Acesso Google');
+    }
+
+    const r = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: exigir(this.env, 'GOOGLE_ADS_CLIENT_ID'),
+        client_secret: exigir(this.env, 'GOOGLE_ADS_CLIENT_SECRET'),
+        refresh_token: l.valor,
+        grant_type: 'refresh_token',
+      }),
+    });
+    const j = (await r.json()) as { access_token?: string; error_description?: string };
+    if (!j.access_token) {
+      throw new Error(`OAuth da Data Manager falhou: ${j.error_description ?? 'sem access_token'}`);
+    }
+    return j.access_token;
+  }
+
+  /**
    * Sobe conversoes pela Data Manager API.
    *
    * NAO e' a API do Google Ads: `UploadClickConversions` esta fechada para
@@ -194,9 +229,10 @@ export class GoogleAdsClient {
   async ingestEvents(corpo: unknown): Promise<{ recebidos: number; erros: string[] }> {
     const r = await fetch('https://datamanager.googleapis.com/v1/events:ingest', {
       method: 'POST',
+      // O MCC vai no CORPO, em , nao em header: e' assim que a
+      // Data Manager entende que o acesso vem da conta gerenciadora.
       headers: {
-        authorization: `Bearer ${await this.accessToken()}`,
-        'login-customer-id': exigir(this.env, 'GOOGLE_ADS_MCC_ID'),
+        authorization: `Bearer ${await this.tokenDataManager()}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify(corpo),

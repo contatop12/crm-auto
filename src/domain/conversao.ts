@@ -47,6 +47,8 @@ export interface EntradaConversao {
 /** Um evento no formato da Data Manager API. */
 export interface EventoDataManager {
   transactionId: string;
+  /** Obrigatorio. `WEB` porque o clique aconteceu no site do cliente. */
+  eventSource: 'WEB';
   eventTimestamp: string;
   lastUpdatedTimestamp: string;
   adIdentifiers?: { gclid?: string; gbraid?: string; wbraid?: string };
@@ -57,6 +59,13 @@ export interface EventoDataManager {
 
 export interface CorpoIngest {
   destinations: Array<{
+    /**
+     * A conta pela qual o acesso e' concedido — o MCC.
+     *
+     * Sem ela a API responde 403 "The caller does not have permission": o
+     * consentimento vale no MCC, nao diretamente em cada conta filha.
+     */
+    loginAccount: { product: 'GOOGLE_ADS'; accountId: string };
     operatingAccount: { product: 'GOOGLE_ADS'; accountId: string };
     productDestinationId: string;
   }>;
@@ -88,6 +97,9 @@ export async function hash(v: string): Promise<string> {
 export async function montarEvento(e: EntradaConversao): Promise<EventoDataManager | null> {
   const ev: EventoDataManager = {
     transactionId: e.transactionId,
+    // Obrigatório — a API recusa com REQUIRED_FIELD_MISSING sem ele. `WEB`
+    // porque o clique aconteceu no site, antes de virar conversa no WhatsApp.
+    eventSource: 'WEB',
     // ISO 8601 com fuso, que é o que a Data Manager aceita
     eventTimestamp: new Date(e.quando).toISOString(),
     lastUpdatedTimestamp: new Date().toISOString(),
@@ -120,9 +132,11 @@ export function montarCorpo(
   conversionActionId: string,
   eventos: EventoDataManager[],
   validateOnly: boolean,
+  mccId: string,
 ): CorpoIngest {
   return {
     destinations: [{
+      loginAccount: { product: 'GOOGLE_ADS', accountId: mccId },
       operatingAccount: { product: 'GOOGLE_ADS', accountId },
       productDestinationId: conversionActionId,
     }],
