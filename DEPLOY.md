@@ -230,3 +230,33 @@ recebê-los.
 A ordem do plano continua valendo: implementar os pipelines → importar o
 histórico das abas `Cliques` e `Conversoes` → shadow mode com
 `validate_only = 1` → só então virar cliente a cliente.
+
+## Regras de automação do Chatwoot, por cliente
+
+Todas apontam para o painel. As legadas (`LeadsGoogle` / `Lead do Google`)
+foram desativadas: promoviam por "tem protocolo", e o fluxo carimbava `ORG-<id>`
+também no lead orgânico — foi assim que 12 orgânicos foram parar no funil de
+Ads da Vita.
+
+| Regra | Evento | Condição | Faz |
+|---|---|---|---|
+| `[PAINEL] Promover ao funil de Ads` | `conversation_updated` | `funil = PROMOVER` **e** `protocolo` presente | transfere para o funil e carimba `funil = Lead` |
+| `[PAINEL] Lead novo no funil` | `kanban_task_updated` | board do funil **e** etapa de entrada | avisa `/ingest/<slug>/kanban` → aviso no grupo |
+| `Evento Qualificado 1 / 2 / Compra` | `kanban_task_updated` | board do funil **e** etapa da meta | avisa `/ingest/<slug>/kanban?…&evento=conversao` |
+
+O `&evento=conversao` é o que separa os dois propósitos do mesmo endereço.
+Sem ele, a regra de "Evento Compra" faria o pipeline anunciar como **lead novo**
+alguém que acabou de fechar a venda.
+
+A regra de promoção existe porque a API do Chatwoot **não move card entre
+boards** (ver `docs/api-reference.md`). Ela não decide nada — só executa o que o
+painel gravou.
+
+Ids em 03/09/2026:
+
+```
+vita       38 promover · 42 entrada · 23/24/25 conversão
+persianas  44 promover · 40 entrada · 31/32/33/35 conversão
+locadora   43 promover · 39 entrada · 19/20/21 conversão
+taina      45 promover · 41 entrada · 10/11/12 conversão
+```
