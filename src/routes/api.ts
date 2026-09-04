@@ -54,13 +54,30 @@ api.get('/overview', async (c) => {
       ...l,
       // um cliente ativo sem nenhum evento em 24h e' suspeito, mas nao e' erro:
       // pode ser fim de semana. A tela mostra, quem julga e' voce.
+      //
+      // Erro so' conta enquanto for a ULTIMA palavra. A Vita ficou "com erro"
+      // por um Pulseboard que falhou as 22h de ontem, com o roteamento antigo
+      // por codi_id — e processou mais de cem eventos sem falha depois disso.
+      // Contar erro da janela de 24h sem olhar o que veio DEPOIS deixa o
+      // cliente vermelho por um problema que ja' foi resolvido, e treina quem
+      // olha a tela a ignorar o vermelho.
       sinal:
-        l.erros_24h > 0 ? 'erro'
+        l.erros_24h > 0 && !maisRecente(l.ultimo_ok_em, l.ultimo_erro_em) ? 'erro'
         : l.recebidos_24h === 0 ? 'silencio'
         : 'ok',
+      // o erro continua visivel, mas datado: sem a data, um erro de ontem se
+      // parece com um de agora
+      erro_superado: l.erros_24h > 0 && maisRecente(l.ultimo_ok_em, l.ultimo_erro_em),
     })),
   );
 });
+
+/** `a` aconteceu depois de `b`? Sem `a`, nao. Sem `b`, sim. */
+function maisRecente(a: string | null, b: string | null): boolean {
+  if (!a) return false;
+  if (!b) return true;
+  return a > b;
+}
 
 async function tenantParaChecagem(
   db: D1Database,

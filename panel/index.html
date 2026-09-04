@@ -429,6 +429,9 @@
         flex-basis: 100%; margin-top: var(--e1); font-size: 12.5px;
         color: var(--falha); line-height: 1.5;
       }
+      /* Erro que ja' passou continua legível, mas para de gritar: houve
+         sucesso depois dele, e vermelho aqui treina a ignorar vermelho. */
+      .cliente-erro.superado { color: var(--tinta-2); }
       .trilha-vazia { color: var(--tinta-3); font-size: 12.5px; margin: 16px 0 0; }
 
       /* Fluxo do lead: as cinco etapas que interessam monitorar. Cada linha é
@@ -614,7 +617,11 @@
                   c.erros_24h === 1 ? 'erro' : 'erros'
                 } · <b>${c.leads}</b> leads · <b>${c.conversoes_enviadas}</b> conversões
                 · último evento ${haQuanto(c.ultimo_evento_em)}
-                ${c.ultimo_erro_motivo ? `<span class="cliente-erro">último erro: ${esc(c.ultimo_erro_motivo)}</span>` : ''}
+                ${c.ultimo_erro_motivo
+                  ? `<span class="cliente-erro${c.erro_superado ? ' superado' : ''}">${
+                      c.erro_superado ? 'último erro (já superado, ' : 'último erro ('
+                    }${esc(haQuanto(c.ultimo_erro_em))}): ${esc(c.ultimo_erro_motivo)}</span>`
+                  : ''}
               </div>
             </button>`;
           })

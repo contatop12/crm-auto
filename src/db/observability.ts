@@ -13,6 +13,8 @@ export interface ResumoTenant {
   erros_24h: number;
   /** Ultimo evento de qualquer tipo, e o ultimo que deu erro. */
   ultimo_evento_em: string | null;
+  /** Ultimo evento que NAO deu erro — e' o que diz se o erro ja' passou. */
+  ultimo_ok_em: string | null;
   ultimo_erro_em: string | null;
   ultimo_erro_motivo: string | null;
   conversoes_enviadas: number;
@@ -40,6 +42,8 @@ export async function resumoPorTenant(db: D1Database): Promise<ResumoTenant[]> {
          (SELECT COUNT(*) FROM events e WHERE e.tenant_id = t.id AND e.status = 'erro'
             AND e.received_at >= datetime('now','-1 day')) AS erros_24h,
          (SELECT MAX(received_at) FROM events e WHERE e.tenant_id = t.id) AS ultimo_evento_em,
+         (SELECT MAX(received_at) FROM events e WHERE e.tenant_id = t.id
+            AND e.status != 'erro') AS ultimo_ok_em,
          (SELECT MAX(received_at) FROM events e WHERE e.tenant_id = t.id AND e.status = 'erro') AS ultimo_erro_em,
          (SELECT e.motivo FROM events e WHERE e.tenant_id = t.id AND e.status = 'erro'
             ORDER BY e.received_at DESC LIMIT 1) AS ultimo_erro_motivo,
