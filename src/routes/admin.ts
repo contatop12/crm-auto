@@ -4,6 +4,7 @@ import { requireAccess, type AccessIdentity } from '../middleware/access';
 import { ChatwootClient } from '../clients/chatwoot';
 import { GoogleAdsClient, criarConversionActions } from '../clients/googleAds';
 import { EvolutionClient } from '../clients/evolution';
+import { PulseboardClient, ErroPulseboard } from '../clients/pulseboard';
 import { urlDeConsentimento, CAMINHO_CALLBACK } from './oauth';
 import { TagManagerClient } from '../clients/tagManager';
 import {
@@ -58,6 +59,7 @@ const CAMPOS_CONFIG = [
   'evo_instancia',
   'pulseboard_codi_id',
   'pulseboard_url',
+  'pulseboard_ativo',
   'gtm_account_id',
   'gtm_container_id',
   'gtm_prefixo',
@@ -69,7 +71,7 @@ admin.get('/tenants/:id/config', async (c) => {
   const t = await c.env.DB.prepare(
     `SELECT t.id, t.slug, t.nome, t.ativo, c.cw_account_id, c.cw_board_funil_id,
             c.cw_board_organico_id, c.ga_customer_id, c.evo_instancia,
-            c.pulseboard_codi_id, c.pulseboard_url, c.gtm_account_id, c.gtm_container_id, c.gtm_prefixo, c.validate_only, c.janela_match_dias, c.ingest_key,
+            c.pulseboard_codi_id, c.pulseboard_url, c.pulseboard_ativo, c.gtm_account_id, c.gtm_container_id, c.gtm_prefixo, c.validate_only, c.janela_match_dias, c.ingest_key,
             CASE WHEN c.cw_webhook_secret IS NULL THEN 0 ELSE 1 END AS tem_segredo_webhook
      FROM tenants t LEFT JOIN tenant_config c ON c.tenant_id = t.id WHERE t.id = ?`,
   )
@@ -152,6 +154,51 @@ admin.patch('/tenants/:id', async (c) => {
   console.log(
     JSON.stringify({ acao: 'editar_cliente', por: c.get('identity').email, tenant_id: id }),
   );
+  return c.json({ ok: true });
+});
+
+/**
+ * Prova o aviso no grupo, mandando um de verdade.
+ *
+ * Nao ha como conferir a rota sem enviar: o Pulseboard so' revela que o
+ * `codi_id` esta' mapeado quando a mensagem sai. Entao isto MANDA MENSAGEM no
+ * grupo do cliente, e o painel avisa isso antes de deixar clicar.
+ *
+ * O ganho e' separar "esta' errado" de "nao sabemos": um `codi_id` sem rota
+ * volta com o motivo exato em vez de esperar o proximo lead real para descobrir.
+ */
+admin.post('/tenants/:id/pulseboard/testar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const cfg = await c.env.DB.prepare(
+    'SELECT pulseboard_codi_id, pulseboard_url FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ pulseboard_codi_id: string | null; pulseboard_url: string | null }>();
+
+  if (!cfg) return c.json({ error: 'cliente nao encontrado' }, 404);
+  if (!cfg.pulseboard_codi_id) {
+    return c.json({ error: 'preencha o codi_id antes de testar' }, 400);
+  }
+
+  try {
+    await new PulseboardClient(cfg.pulseboard_url || undefined).avisarLeadNovo({
+      codiId: cfg.pulseboard_codi_id,
+      canal: 'Teste do painel P12',
+      nome: 'Teste do painel',
+      telefone: '5519999999999',
+      url: 'https://crm.sitespdoze.com.br',
+    });
+  } catch (e) {
+    const erro = e as Error;
+    return c.json({
+      ok: false,
+      erro: erro.message,
+      // cadastro errado nao melhora tentando de novo; o painel diz isso
+      permanente: erro instanceof ErroPulseboard && erro.permanente,
+    });
+  }
+
+  console.log(JSON.stringify({ acao: 'pulseboard_teste', por: c.get('identity').email, tenant_id: id }));
   return c.json({ ok: true });
 });
 

@@ -18,7 +18,12 @@ import { enviarConversao } from '../pipelines/stageChanged';
  * o que ainda nao tem tratamento.
  */
 
-type Resultado = { status: 'ok' | 'ignorado' | 'erro'; motivo: string };
+type Resultado = {
+  status: 'ok' | 'ignorado' | 'erro';
+  motivo: string;
+  /** `false` = erro que nao melhora sozinho; fica visivel, mas sai da fila. */
+  retentar?: boolean;
+};
 
 async function processar(msg: QueueMessage, env: Env, payload: string): Promise<Resultado> {
   switch (msg.source) {
@@ -75,7 +80,12 @@ export async function consumir(batch: MessageBatch<QueueMessage>, env: Env): Pro
       // 'erro' e' falha possivelmente transitoria (Pulseboard fora do ar, por
       // exemplo): devolve a fila para o backoff tentar de novo. 'ok' e
       // 'ignorado' sao definitivos.
-      if (r.status === 'erro') m.retry();
+      //
+      // `retentar: false` e' o meio-termo que faltava: erro de CADASTRO, que
+      // continua visivel no painel mas nao volta para a fila. Um codi_id sem
+      // rota nao se cadastra sozinho — retentar so' gastava tentativa e mantinha
+      // o cliente vermelho sem caminho de saida.
+      if (r.status === 'erro' && r.retentar !== false) m.retry();
       else m.ack();
     } catch (e) {
       // Erro transitorio (Chatwoot fora do ar, card ainda nao criado): devolve a

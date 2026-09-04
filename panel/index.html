@@ -1376,13 +1376,25 @@
               '<div class="campo"><label for="f-evo">Instância do WhatsApp</label>' +
               '<input id="f-evo" placeholder="nome exato no Evolution" /></div>' +
             '</div>' +
+          '</section>' +
+          '<section><h2>Aviso de lead novo no grupo</h2>' +
+            '<div class="campo"><label><input type="checkbox" id="f-pulse-ativo" ' +
+            (!atual || atual.pulseboard_ativo ? 'checked' : '') + ' /> Avisar o grupo pelo Pulseboard</label>' +
+            '<p class="dica">desmarcado, o lead entra no funil normalmente e nenhuma mensagem é enviada. ' +
+            'Desligue para o cliente que não usa o grupo — assim ele para de aparecer como erro.</p></div>' +
             '<div class="grade">' +
               '<div class="campo"><label for="f-pulse">codi_id do Pulseboard</label>' +
-              '<input id="f-pulse" placeholder="usado para avisar o grupo do cliente" /></div>' +
+              '<input id="f-pulse" placeholder="é ele que amarra o aviso ao grupo certo" />' +
+              '<p class="dica">se o Pulseboard responder <em>rota não mapeada</em>, é este número que não tem rota cadastrada lá</p></div>' +
               '<div class="campo"><label for="f-pulse-url">Webhook do Pulseboard</label>' +
               '<input id="f-pulse-url" placeholder="https://pulseboard.sitespdoze.com.br/meta-new-lead" />' +
               '<p class="dica">em branco usa o padrão; preencha quando o cliente tiver o dele</p></div>' +
             '</div>' +
+            (atual
+              ? '<div class="linha-acoes"><button id="btn-pulse-testar">' + ic('conferir') +
+                ' Testar o aviso</button>' +
+                '<span class="dica" id="pulse-estado">o teste manda uma mensagem de verdade no grupo</span></div>'
+              : '') +
           '</section>' +
           (atual
             ? '<section><h2>Envio ao Google Ads</h2>' +
@@ -1447,6 +1459,37 @@
           await carregarBoards(acc, null, null);
         });
 
+        /**
+         * Testar o aviso manda uma mensagem DE VERDADE no grupo do cliente.
+         *
+         * Nao ha jeito de conferir sem enviar: o Pulseboard so' revela que o
+         * codi_id esta' mapeado quando a mensagem sai. Por isso a confirmacao
+         * explicita — e por isso o botao diz o que vai acontecer.
+         */
+        const btnPulse = document.getElementById('btn-pulse-testar');
+        if (btnPulse) {
+          btnPulse.addEventListener('click', async function () {
+            const estado = document.getElementById('pulse-estado');
+            if (!confirm('O teste envia uma mensagem real no grupo do cliente. Continuar?')) return;
+            btnPulse.disabled = true;
+            estado.textContent = 'enviando…';
+            try {
+              const r = await enviar('/tenants/' + id + '/pulseboard/testar', 'POST', {});
+              if (r.ok) {
+                estado.innerHTML = '<span class="st-ok">aviso entregue — confira o grupo</span>';
+              } else {
+                estado.innerHTML = '<span class="st-erro">' + esc(r.erro) + '</span>' +
+                  (r.permanente
+                    ? '<br>é cadastro: corrija o codi_id aqui ou peça a rota no Pulseboard. Tentar de novo dá o mesmo.'
+                    : '<br>pode ser passageiro — tente de novo em instantes');
+              }
+            } catch (e) {
+              estado.innerHTML = '<span class="st-erro">' + esc(e.message) + '</span>';
+            }
+            btnPulse.disabled = false;
+          });
+        }
+
         document.getElementById('btn-salvar').addEventListener('click', async function () {
           const alvo = document.getElementById('form-erro');
           const estado = document.getElementById('form-estado');
@@ -1461,6 +1504,7 @@
             evo_instancia: document.getElementById('f-evo').value,
             pulseboard_codi_id: document.getElementById('f-pulse').value,
             pulseboard_url: document.getElementById('f-pulse-url').value,
+            pulseboard_ativo: document.getElementById('f-pulse-ativo').checked ? 1 : 0,
           };
           try {
             if (atual) {

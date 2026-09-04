@@ -3,7 +3,7 @@ import { parseKanbanTask } from '../domain/kanbanTask';
 import { montarCanal } from '../domain/canal';
 import { detectOrigin, detectPlatform } from '../domain/platform';
 import { normFone } from '../domain/phone';
-import { PulseboardClient } from '../clients/pulseboard';
+import { PulseboardClient, ErroPulseboard } from '../clients/pulseboard';
 
 /**
  * Avisa o grupo do cliente quando um lead entra no funil de Ads.
@@ -19,12 +19,15 @@ import { PulseboardClient } from '../clients/pulseboard';
 export interface Resultado {
   status: 'ok' | 'ignorado' | 'erro';
   motivo: string;
+  /** `false` = erro de cadastro; fica visivel no painel, mas sai da fila. */
+  retentar?: boolean;
 }
 
 interface ConfigTenant {
   cw_board_funil_id: number | null;
   pulseboard_codi_id: string | null;
   pulseboard_url: string | null;
+  pulseboard_ativo: number;
 }
 
 interface LinhaLead {
@@ -49,7 +52,8 @@ export async function avisarLeadNoGrupo(
   payload: string,
 ): Promise<Resultado> {
   const cfg = await env.DB.prepare(
-    'SELECT cw_board_funil_id, pulseboard_codi_id, pulseboard_url FROM tenant_config WHERE tenant_id = ?',
+    `SELECT cw_board_funil_id, pulseboard_codi_id, pulseboard_url, pulseboard_ativo
+     FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(tenantId)
     .first<ConfigTenant>();
@@ -144,9 +148,18 @@ export async function avisarLeadNoGrupo(
       .bind(status, erro ?? null, canal, nome, telefone, tenantId, t.chaveDedupe)
       .run();
 
+  // Cliente que nao usa o aviso no grupo. Sem isto, cada lead novo virava um
+  // erro e a fila retentava um cadastro inexistente.
+  if (cfg.pulseboard_ativo !== 1) {
+    await marcar('ignorado', 'aviso no grupo desligado para este cliente');
+    return { status: 'ignorado', motivo: `aviso no grupo desligado · ${nome} · ${canal}` };
+  }
+
   if (!cfg.pulseboard_codi_id) {
-    await marcar('erro', 'cliente sem codi_id do Pulseboard');
-    return { status: 'erro', motivo: 'cliente sem codi_id do Pulseboard' };
+    const msg = 'cliente sem codi_id do Pulseboard — preencha no perfil ou desligue o aviso';
+    await marcar('erro', msg);
+    // cadastro faltando nao melhora com retentativa
+    return { status: 'erro', motivo: msg, retentar: false };
   }
 
   try {
@@ -160,8 +173,10 @@ export async function avisarLeadNoGrupo(
   } catch (e) {
     const msg = (e as Error).message;
     await marcar('erro', msg);
-    // devolve 'erro' para a fila retentar: grupo sem aviso e' perda de lead
-    return { status: 'erro', motivo: `Pulseboard falhou: ${msg}` };
+    // Grupo sem aviso e' perda de lead, entao a falha transitoria volta para a
+    // fila. A de cadastro nao: fica visivel e para de tentar.
+    const permanente = e instanceof ErroPulseboard && e.permanente;
+    return { status: 'erro', motivo: `Pulseboard falhou: ${msg}`, retentar: !permanente };
   }
 
   await marcar('enviado');

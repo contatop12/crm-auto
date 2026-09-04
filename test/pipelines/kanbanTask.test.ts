@@ -155,3 +155,43 @@ describe('avisarLeadNoGrupo', () => {
     expect(linha!.canal).toContain('Campanha de');
   });
 });
+
+describe('aviso desligado por cliente', () => {
+  test('cliente com o aviso desligado nao chama o Pulseboard', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET pulseboard_ativo = 0 WHERE tenant_id = 1`);
+    const r = await avisarLeadNoGrupo(env, 1, task());
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('desligado');
+    expect(enviados).toHaveLength(0);
+  });
+
+  test('sem codi_id e erro de cadastro: visivel, mas fora da fila', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET pulseboard_codi_id = NULL WHERE tenant_id = 1`);
+    const r = await avisarLeadNoGrupo(env, 1, task());
+    expect(r.status).toBe('erro');
+    expect(r.retentar).toBe(false);
+    expect(enviados).toHaveLength(0);
+  });
+
+  test('rota nao mapeada nao volta para a fila', async () => {
+    const { env } = cenario();
+    vi.stubGlobal('fetch', async () => new Response(
+      '{"ok":true,"sent":0,"skipped":["lead_index_0: rota_nao_mapeada (page_id=vazio; codi_id=000)"]}',
+      { status: 200 },
+    ));
+    const r = await avisarLeadNoGrupo(env, 1, task());
+    expect(r.status).toBe('erro');
+    expect(r.retentar).toBe(false);
+    expect(r.motivo).toContain('nao tem rota');
+  });
+
+  test('Pulseboard fora do ar volta para a fila', async () => {
+    const { env } = cenario();
+    vi.stubGlobal('fetch', async () => new Response('bad gateway', { status: 502 }));
+    const r = await avisarLeadNoGrupo(env, 1, task());
+    expect(r.status).toBe('erro');
+    expect(r.retentar).not.toBe(false);
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { conferirEnvio, PulseboardClient } from '../../src/clients/pulseboard';
+import { conferirEnvio, PulseboardClient, ErroPulseboard } from '../../src/clients/pulseboard';
 
 /**
  * Corpos capturados do endpoint de producao, nao inventados.
@@ -9,8 +9,30 @@ describe('conferirEnvio', () => {
   test('rota nao mapeada vem com 200 e sent=0', () => {
     // e' o que o codi_id errado devolve: status de sucesso, mensagem nao enviada
     const corpo = '{"ok":true,"sent":0,"skipped":["lead_index_0: rota_nao_mapeada (page_id=vazio; codi_id=000)"]}';
-    expect(() => conferirEnvio(corpo)).toThrow(/nao enviou \(sent=0\)/);
+    expect(() => conferirEnvio(corpo)).toThrow(/codi_id nao tem rota/);
     expect(() => conferirEnvio(corpo)).toThrow(/rota_nao_mapeada/);
+  });
+
+  test('rota nao mapeada e permanente: nao adianta retentar', () => {
+    // sondado contra producao: um codi_id inventado devolve este mesmo corpo,
+    // entao o erro e' de cadastro, nao intermitencia
+    const corpo = '{"ok":true,"sent":0,"skipped":["lead_index_0: rota_nao_mapeada (page_id=vazio; codi_id=000)"]}';
+    try {
+      conferirEnvio(corpo);
+      expect.unreachable('deveria ter lancado');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ErroPulseboard);
+      expect((e as ErroPulseboard).permanente).toBe(true);
+    }
+  });
+
+  test('sent=0 por outro motivo pode ser passageiro: retenta', () => {
+    try {
+      conferirEnvio('{"ok":true,"sent":0,"skipped":["lead_index_0: fila_cheia"]}');
+      expect.unreachable('deveria ter lancado');
+    } catch (e) {
+      expect((e as ErroPulseboard).permanente).toBe(false);
+    }
   });
 
   test('corpo vazio e ignorado, tambem com 200', () => {

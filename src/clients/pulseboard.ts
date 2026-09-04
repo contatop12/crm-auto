@@ -23,6 +23,21 @@ export interface NovoLead {
   */
 const ENDPOINT = 'https://pulseboard.sitespdoze.com.br/meta-new-lead';
 
+/**
+ * Falha do Pulseboard, separada em duas naturezas.
+ *
+ * `permanente` distingue "o Pulseboard esta fora do ar" de "esse codi_id nao
+ * tem rota cadastrada". A primeira melhora sozinha e merece retentativa; a
+ * segunda so' melhora quando alguem mexe no cadastro, e retentar so' gasta a
+ * fila e mantem o painel vermelho sem caminho de saida.
+ */
+export class ErroPulseboard extends Error {
+  constructor(mensagem: string, readonly permanente: boolean) {
+    super(mensagem);
+    this.name = 'ErroPulseboard';
+  }
+}
+
 export class PulseboardClient {
   constructor(private readonly endpoint: string = ENDPOINT) {}
 
@@ -43,7 +58,12 @@ export class PulseboardClient {
 
     const texto = await r.text();
     if (!r.ok) {
-      throw new Error(`Pulseboard respondeu ${r.status}: ${texto.slice(0, 200)}`);
+      // 4xx e' corpo ou credencial errada da nossa parte: retentar repete o
+      // mesmo erro. 5xx e' do lado deles e pode passar.
+      throw new ErroPulseboard(
+        `Pulseboard respondeu ${r.status}: ${texto.slice(0, 200)}`,
+        r.status >= 400 && r.status < 500,
+      );
     }
     conferirEnvio(texto);
   }
@@ -73,15 +93,25 @@ export function conferirEnvio(corpo: string): void {
   }
 
   if (j.ignored === true) {
-    throw new Error(`Pulseboard ignorou o aviso: ${j.reason ?? 'sem motivo'}`);
+    throw new ErroPulseboard(`Pulseboard ignorou o aviso: ${j.reason ?? 'sem motivo'}`, true);
   }
   if (j.ok === false) {
-    throw new Error(`Pulseboard recusou: ${corpo.slice(0, 200)}`);
+    throw new ErroPulseboard(`Pulseboard recusou: ${corpo.slice(0, 200)}`, true);
   }
   if (typeof j.sent === 'number' && j.sent < 1) {
     const motivo = Array.isArray(j.skipped) && j.skipped.length
       ? j.skipped.map(String).join(' · ')
       : 'sem motivo declarado';
-    throw new Error(`Pulseboard nao enviou (sent=${j.sent}): ${motivo.slice(0, 200)}`);
+
+    // Sondado contra producao: um `codi_id` inventado devolve exatamente este
+    // erro. Ou seja, `rota_nao_mapeada` significa que aquele codi_id nao tem
+    // rota do lado do Pulseboard — cadastro, nao intermitencia.
+    const semRota = /rota_nao_mapeada/.test(motivo);
+    throw new ErroPulseboard(
+      semRota
+        ? `o codi_id nao tem rota no Pulseboard — confira o cadastro (${motivo.slice(0, 160)})`
+        : `Pulseboard nao enviou (sent=${j.sent}): ${motivo.slice(0, 200)}`,
+      semRota,
+    );
   }
 }
