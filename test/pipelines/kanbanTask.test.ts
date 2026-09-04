@@ -13,7 +13,7 @@ function cenario() {
   exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, cw_board_organico_id,
           pulseboard_url, ingest_key)
         VALUES (1, 7, ${BOARD_ADS}, ${BOARD_ORGANICO}, 'https://pulseboard.teste/persianas', 'k')`);
-  return { env: { DB: d1 } as unknown as Env, consultar, exec };
+  return { env: { DB: d1, CHATWOOT_BASE_URL: 'https://cw.teste' } as unknown as Env, consultar, exec };
 }
 
 function task(over: Record<string, unknown> = {}) {
@@ -175,6 +175,54 @@ describe('avisarLeadNoGrupo', () => {
     expect(linha!.status).toBe('enviado');
     expect(linha!.lead_nome).toBe('Carol Nunes');
     expect(linha!.canal).toContain('Campanha de');
+  });
+});
+
+describe('o que vai na mensagem do grupo', () => {
+  test('manda a etapa e o link da conversa', async () => {
+    const { env } = cenario();
+    await avisarLeadNoGrupo(env, 1, task({
+      board_step: { id: 50, name: 'Novo Lead' },
+      conversations: [{ id: 1609, display_id: 28 }],
+    }));
+    expect(enviados[0]!.Etapa).toBe('Novo Lead');
+    expect(enviados[0]!.Conversa).toBe('https://cw.teste/app/accounts/7/conversations/28');
+  });
+
+  test('campo sem valor nao vai, para nao virar linha vazia no grupo', async () => {
+    // o primeiro aviso da Amanda saiu com `*URL:*` e nada depois
+    const { env } = cenario();
+    await avisarLeadNoGrupo(env, 1, task({ board_step: null, conversations: [] }));
+    expect(enviados[0]).not.toHaveProperty('Etapa');
+    expect(enviados[0]).not.toHaveProperty('Conversa');
+  });
+});
+
+describe('a mesma task nao avisa duas vezes', () => {
+  test('o card que dispara antes e depois do protocolo avisa uma vez so', async () => {
+    // O `kanban_task_updated` chega antes de `leadMessage` carimbar o
+    // protocolo, e de novo depois. A chave de dedupe muda de `task:<id>` para
+    // o protocolo no meio — a identidade do lead troca, e sem olhar o task_id
+    // as duas passam. Foi o que aconteceu com a Amanda da Persianas: dois
+    // avisos no grupo, o primeiro sem URL porque o clique ainda nao casara.
+    const { env, consultar } = cenario();
+
+    const semProtocolo = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }));
+    expect(semProtocolo.status).toBe('ok');
+
+    const comProtocolo = await avisarLeadNoGrupo(env, 1, task());
+    expect(comProtocolo.status).toBe('ignorado');
+    expect(comProtocolo.motivo).toMatch(/ja avisado/);
+
+    expect(enviados).toHaveLength(1);
+    expect(consultar('SELECT * FROM group_notifications')).toHaveLength(1);
+  });
+
+  test('tasks diferentes continuam avisando cada uma', async () => {
+    const { env } = cenario();
+    await avisarLeadNoGrupo(env, 1, task());
+    await avisarLeadNoGrupo(env, 1, task({ id: 720, custom_attributes: { protocolo: 'PERS-OUTRO' } }));
+    expect(enviados).toHaveLength(2);
   });
 });
 

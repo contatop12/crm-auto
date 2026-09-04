@@ -10,6 +10,10 @@
  */
 
 export interface NovoLead {
+  /** Etapa do funil onde o card esta'. */
+  etapa?: string | null;
+  /** Link da conversa no Chatwoot, para o vendedor abrir direto do grupo. */
+  conversa?: string | null;
   /** 'Campanha de Quiz - Google' */
   canal: string;
   nome: string;
@@ -46,11 +50,15 @@ export class PulseboardClient {
     const r = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      // Campo vazio vira uma linha vazia na mensagem do grupo, como aconteceu
+      // com o `*URL:*` do primeiro aviso da Amanda. So' vai o que tem valor.
       body: JSON.stringify({
         Canal: l.canal,
         nome: l.nome,
         telefone: l.telefone,
         URL: l.url,
+        ...(l.etapa ? { Etapa: l.etapa } : {}),
+        ...(l.conversa ? { Conversa: l.conversa } : {}),
       }),
     });
 

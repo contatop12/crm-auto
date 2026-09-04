@@ -12,6 +12,7 @@ interface TaskCrua {
   id?: number | string;
   board_id?: number | string;
   board_step_id?: number | string;
+  board_step?: { id?: number; name?: string } | null;
   title?: string;
   step_changed_at?: string;
   updated_at?: string;
@@ -35,6 +36,10 @@ export interface TaskDoKanban {
   telefone: string;
   /** Id INTERNO da conversa. `conversation_ids` guarda display_id, nao serve. */
   conversationId: number;
+  /** O "#386" da tela — e' por ele que se abre a conversa no Chatwoot. */
+  conversaDisplay: number;
+  /** Nome da etapa onde o card esta', para o aviso dizer o estagio do lead. */
+  etapa: string;
   valor: number;
   labels: string[];
   ocorridoEm: string;
@@ -71,6 +76,8 @@ export function parseKanbanTask(raw: unknown): TaskDoKanban {
     nome: String(contato.name ?? '') || String(t.title ?? ''),
     telefone: String(contato.phone_number ?? ''),
     conversationId: num(t.conversations?.[0]?.id),
+    conversaDisplay: num(t.conversations?.[0]?.display_id ?? t.conversation_ids?.[0]),
+    etapa: String(t.board_step?.name ?? ''),
     valor: num(t.value),
     labels: Array.isArray(t.labels) ? t.labels : [],
     ocorridoEm: String(t.step_changed_at ?? t.updated_at ?? new Date().toISOString()),

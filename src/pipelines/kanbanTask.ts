@@ -24,6 +24,7 @@ export interface Resultado {
 }
 
 interface ConfigTenant {
+  cw_account_id: number | null;
   cw_board_funil_id: number | null;
   pulseboard_url: string | null;
   pulseboard_ativo: number;
@@ -51,7 +52,7 @@ export async function avisarLeadNoGrupo(
   payload: string,
 ): Promise<Resultado> {
   const cfg = await env.DB.prepare(
-    `SELECT cw_board_funil_id, pulseboard_url, pulseboard_ativo
+    `SELECT cw_account_id, cw_board_funil_id, pulseboard_url, pulseboard_ativo
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(tenantId)
@@ -77,6 +78,33 @@ export async function avisarLeadNoGrupo(
       status: 'ignorado',
       motivo: `card no board ${t.boardId}, nao no de Ads (${cfg.cw_board_funil_id})`,
     };
+  }
+
+  /**
+   * O MESMO card avisa uma vez, mesmo trocando de nome no meio.
+   *
+   * `chaveDedupe` e' o protocolo quando existe e `task:<id>` quando nao. So'
+   * que o webhook chega ANTES de `leadMessage` carimbar o protocolo, e de novo
+   * depois: a chave muda de `task:1555` para `PERSI-...` entre um e outro, a
+   * UNIQUE nao ve conflito, e o grupo recebe dois avisos do mesmo lead — o
+   * primeiro sem URL, porque o clique ainda nao tinha casado.
+   *
+   * O card e' a identidade estavel. Se ja' avisamos por ele, acabou.
+   */
+  if (t.taskId) {
+    const mesmaTask = await env.DB.prepare(
+      `SELECT chave, status FROM group_notifications
+       WHERE tenant_id = ? AND task_id = ? AND chave != ?`,
+    )
+      .bind(tenantId, t.taskId, t.chaveDedupe)
+      .first<{ chave: string; status: string }>();
+
+    if (mesmaTask && mesmaTask.status !== 'erro') {
+      return {
+        status: 'ignorado',
+        motivo: `grupo ja avisado sobre o card ${t.taskId} (como ${mesmaTask.chave})`,
+      };
+    }
   }
 
   // Trava de duplicata: a UNIQUE decide, sem leitura antes da escrita.
@@ -169,6 +197,10 @@ export async function avisarLeadNoGrupo(
       nome,
       telefone,
       url,
+      etapa: t.etapa || null,
+      conversa: t.conversaDisplay && cfg.cw_account_id
+        ? `${env.CHATWOOT_BASE_URL}/app/accounts/${cfg.cw_account_id}/conversations/${t.conversaDisplay}`
+        : null,
     });
   } catch (e) {
     const msg = (e as Error).message;
