@@ -8,6 +8,7 @@ import { matchLead } from '../domain/matching';
 import { detectPlatform, detectOrigin, classifyCampaign } from '../domain/platform';
 import { buildLabels } from '../domain/labels';
 import { utmsDoCard, precisaResolverNome } from '../domain/padroes';
+import { enviarConversao } from './stageChanged';
 import type { LabelVocabulary, LeadCandidate } from '../domain/types';
 
 /**
@@ -178,6 +179,20 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
     ...(promover ? { funil: SENTINELA_PROMOVER } : {}),
   });
 
+  // A promocao e' feita por uma regra do Chatwoot, e o Chatwoot NAO dispara
+  // automacao a partir de automacao: o `transfer_to_board` dela nao emite
+  // `kanban_task_updated`. Resultado — a conversao de entrada nunca subia. Foi
+  // medido: `kanban_conversao` tinha ZERO eventos nos quatro clientes desde
+  // sempre, e um card movido pela API disparou na hora.
+  //
+  // Entao quem dispara a conversao de entrada somos nos, aqui, em vez de
+  // esperar por um webhook que nao vem. O dedup de `conversions` continua
+  // sendo a unica guarda contra duplicata: se o webhook um dia vier, ele
+  // encontra a linha e para.
+  if (promover) {
+    await dispararConversaoDeEntrada(env, tenantId, lead.protocol, conversaId);
+  }
+
   const vocab = await vocabulario(env, tenantId);
   const etiquetas = buildLabels(
     {
@@ -306,4 +321,45 @@ function str(v: unknown): string | null {
 }
 function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Sobe a conversao da etapa de entrada assim que o lead e' promovido.
+ *
+ * Monta o mesmo corpo que o webhook do Kanban mandaria. Reaproveitar
+ * `enviarConversao` mantem UMA regra de dedup, de valor e de montagem do
+ * evento — duplicar isso aqui seria repetir o erro do n8n, que tinha a mesma
+ * decisao escrita em tres lugares que precisavam concordar.
+ */
+async function dispararConversaoDeEntrada(
+  env: Env,
+  tenantId: number,
+  protocolo: string,
+  conversaId: number,
+): Promise<void> {
+  const etapa = await env.DB.prepare(
+    `SELECT cw_step_id FROM funnel_stages
+     WHERE tenant_id = ? AND conversion_event IS NOT NULL AND conversion_action_id IS NOT NULL
+     ORDER BY posicao LIMIT 1`,
+  )
+    .bind(tenantId)
+    .first<{ cw_step_id: number }>()
+    .catch(() => null);
+
+  if (!etapa) return; // cliente sem meta na etapa de entrada: nada a subir
+
+  const corpo = JSON.stringify({
+    board_step_id: etapa.cw_step_id,
+    custom_attributes: { protocolo },
+    conversation_ids: [conversaId],
+    step_changed_at: new Date().toISOString(),
+  });
+
+  try {
+    const r = await enviarConversao(env, tenantId, corpo);
+    console.log(JSON.stringify({ acao: 'conversao_de_entrada', protocolo, status: r.status, motivo: r.motivo }));
+  } catch (e) {
+    // a conversao nao pode derrubar a atribuicao: o lead ja' esta' no funil
+    console.log(JSON.stringify({ acao: 'conversao_de_entrada_falhou', protocolo, erro: (e as Error).message }));
+  }
 }

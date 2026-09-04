@@ -12,6 +12,9 @@ function cenario() {
     exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
           VALUES (1, '${slug}', '${slug}', ${zap ? `'${zap}'` : 'NULL'})`);
   }
+  exec(`INSERT INTO funnel_stages (tenant_id, posicao, nome, cw_step_id, conversion_event, conversion_action_id, conversion_value)
+        VALUES (1, 1, 'Novo Lead', 27, 'conversa', '7698886680', 10)`);
+  exec(`INSERT INTO credenciais (chave, valor) VALUES ('datamanager_refresh_token', 'rt')`);
   exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_key, gclid, utm_source, utm_medium, utm_campaign, utm_id, utm_term, origem, evento, created_at)
         VALUES (1, 'VITA-MRIAP9IN8WNQ', 'Ryan', '7191065853', 'Cj0abc', 'google', 'cpc', '{campaignname}', '23920679510', 'aparelho auditivo', 'clique', 'whatsapp_click', datetime('now','-2 day'))`);
   const env = {
@@ -122,6 +125,28 @@ describe('atribuirLead', () => {
     const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
     expect(attrs.funil).toBe('PROMOVER');
     expect(r.motivo).toMatch(/marcada para promover/);
+  });
+
+  test('promover ja sobe a conversao de entrada, sem esperar webhook', async () => {
+    // O Chatwoot nao dispara automacao a partir de automacao: o
+    // `transfer_to_board` da regra nao emite `kanban_task_updated`, entao a
+    // conversao de entrada nunca chegava por webhook.
+    const { env, consultar } = cenario();
+    await atribuirLead(env, 1, webhook());
+
+    const cs = consultar<{ dedupe_key: string; status: string; conversion_value: number }>(
+      'SELECT * FROM conversions',
+    );
+    expect(cs).toHaveLength(1);
+    expect(cs[0]!.dedupe_key).toBe('VITA-MRIAP9IN8WNQ-conversa');
+    expect(cs[0]!.conversion_value).toBe(10);
+  });
+
+  test('lead que nao promove nao sobe conversao', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`UPDATE leads SET gclid = NULL, utm_source = 'organico' WHERE tenant_id = 1`);
+    await atribuirLead(env, 1, webhook());
+    expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
   });
 
   test('clique sem plataforma de anuncio nao promove', async () => {
