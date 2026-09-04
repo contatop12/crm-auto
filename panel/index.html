@@ -111,6 +111,15 @@
       .id { font-family: var(--mono); font-size: 12px; color: var(--tinta-3); }
       .dica { color: var(--tinta-2); font-size: 12.5px; margin: 8px 0 0; max-width: 62ch; }
       .carregando { color: var(--tinta-3); font-size: 13px; }
+
+      /* Placar do Google Ads: quatro números que respondem "e daí?" antes da
+         tabela. Ensaio separado do envio real — somar daria um total que não
+         existe na conta do cliente. */
+      .placar { display: flex; flex-wrap: wrap; gap: var(--e3); margin-bottom: var(--e3); }
+      .placar-item { display: flex; flex-direction: column; min-width: 128px; }
+      .placar-item strong { font-size: 24px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
+      .placar-item > span { font-size: 13px; color: var(--tinta-2); }
+      .placar-item .sub { margin-top: var(--e0); }
       /* Veredito da conferência, sob cada endereço. Vazio até alguém pedir:
          a leitura vai às contas dos clientes, então não roda sozinha. */
       .conferencia:not(:empty) { margin-top: var(--e1); font-size: 12.5px; line-height: 1.5; }
@@ -234,6 +243,7 @@
       }
       .tag-novo { border-color: var(--fluxo); color: var(--fluxo); }
       .tag-anuncio, .tag-repetido { border-color: var(--espera); color: var(--espera); }
+      .tag-falha { border-color: var(--falha); color: var(--falha); }
 
       /* ---------- clientes ---------- */
 
@@ -646,6 +656,7 @@
             <button class="aba" role="tab" data-aba="config" aria-selected="false">Configuração</button>
             <button class="aba" role="tab" data-aba="integracoes" aria-selected="false">Integrações</button>
             <button class="aba" role="tab" data-aba="atividade" aria-selected="false">Atividade</button>
+            <button class="aba" role="tab" data-aba="google" aria-selected="false">Google Ads</button>
           </div>
 
           <div class="painel" data-painel="fluxo">
@@ -772,6 +783,14 @@
             <div class="linha-acoes"><button id="btn-revelar">Revelar dados originais</button></div>
             <pre id="payload"></pre>
           </section>
+          </div>
+
+          <div class="painel" data-painel="google" hidden>
+          <section>
+            <h2>Conversões enviadas ao Google Ads</h2>
+            <div id="conv-resumo"></div>
+            <div id="conversoes"><p class="carregando">carregando…</p></div>
+          </section>
           </div>`;
 
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
@@ -818,6 +837,7 @@
             provisionar(id, false);
           }
           if (nome === 'atividade') { carregarAvisos(id, 0); carregarEventos(id, 0); }
+          if (nome === 'google') carregarConversoes(id, 0);
         }
 
         tela.querySelectorAll('.aba').forEach((b) => {
@@ -862,9 +882,8 @@
         const grupos = agrupar(r.linhas);
         alvo.innerHTML = r.linhas.length
           ? '<table><thead><tr>' +
-              '<th>Quando</th><th>O que chegou</th><th>Lead</th><th>Conversa</th>' +
-              '<th class="esconder-mobile">Card</th><th>Status</th>' +
-              '<th class="esconder-mobile">Motivo</th><th>Assin.</th>' +
+              '<th>Quando</th><th>O que chegou</th><th>Lead</th>' +
+              '<th>Conversa e card</th><th>Resultado</th>' +
             '</tr></thead><tbody>' + grupos.map(linhaGrupo).join('') + '</tbody></table>' +
             paginacao('eventos', r.total, r.limite, r.offset) +
             '<p class="carregando" style="margin-top:8px">Clique numa linha para ver o corpo do webhook. ' +
@@ -879,6 +898,90 @@
           });
         });
         ligarPaginacao(alvo, function (o) { carregarEventos(id, o); });
+      }
+
+      /**
+       * O que saiu para o Google Ads.
+       *
+       * A lista de webhooks responde o que CHEGOU; esta responde o que SAIU —
+       * o único ponto onde o trabalho todo vira resultado na conta do cliente.
+       * O ensaio do modo sombra aparece separado do envio que conta, porque
+       * somar os dois daria um número que não existe no Google.
+       */
+      async function carregarConversoes(id, offset) {
+        const alvo = document.getElementById('conversoes');
+        const resumo = document.getElementById('conv-resumo');
+        if (!alvo) return;
+        alvo.innerHTML = CARREGANDO;
+
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/conversoes?limit=' + porPagina('conversoes') + '&offset=' + (offset || 0));
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+
+        const q = r.resumo;
+        resumo.innerHTML =
+          '<div class="placar">' +
+            placar('contabilizadas', q.contabilizadas, 'chegaram na conta do cliente') +
+            placar('em ensaio', q.ensaios, 'modo sombra: validadas, não contadas') +
+            placar('recusadas', q.erros, q.erros ? 'o Google não aceitou' : '') +
+            placar('sem atribuir', q.ignoradas, 'faltou gclid e dados do lead') +
+          '</div>' +
+          (q.contabilizadas
+            ? '<p class="dica">Somando o valor das contabilizadas: <strong>BRL ' + esc(String(q.valor)) + '</strong>.</p>'
+            : '');
+
+        alvo.innerHTML = r.linhas.length
+          ? '<table><thead><tr>' +
+              '<th>Quando</th><th>Lead</th><th>Etapa e meta</th>' +
+              '<th>Valor</th><th>Atribuição</th><th>Resultado</th>' +
+            '</tr></thead><tbody>' + r.linhas.map(linhaConversao).join('') + '</tbody></table>' +
+            paginacao('conversoes', r.total, r.limite, r.offset)
+          : '<div class="vazio"><p>Nenhuma conversão enviada ainda.</p>' +
+            '<p class="mono">Sobe quando um card entra numa etapa marcada como conversão. ' +
+            'Confira em Fluxo se as etapas têm meta ligada.</p></div>';
+
+        ligarPaginacao(alvo, function (o) { carregarConversoes(id, o); });
+      }
+
+      function placar(rotulo, valor, dica) {
+        return '<div class="placar-item"><strong>' + valor + '</strong>' +
+          '<span>' + esc(rotulo) + '</span>' +
+          (dica ? '<span class="sub">' + esc(dica) + '</span>' : '') + '</div>';
+      }
+
+      /** Como o Google conseguiu casar esta conversão, em português. */
+      const ATRIBUICAO = {
+        'click_id+user_data': ['completa', 'gclid mais e-mail/telefone'],
+        click_id: ['só o clique', 'sem e-mail nem telefone: se o gclid vencer, perde'],
+        user_data_only: ['só o lead', 'sem gclid: depende do e-mail/telefone casarem'],
+      };
+
+      function linhaConversao(v) {
+        const nada = '<span class="nada">—</span>';
+        const a = ATRIBUICAO[v.match_type] || null;
+
+        const situacao = v.status === 'enviado' && v.validate_only
+          ? '<span class="st-ignorado">ensaio</span><span class="sub">modo sombra: não contou</span>'
+          : v.status === 'enviado'
+            ? '<span class="st-ok">contabilizada</span>' +
+              (v.request_id ? '<span class="sub mono">' + esc(String(v.request_id).slice(0, 16)) + '</span>' : '')
+            : '<span class="st-' + esc(v.status) + '">' + esc(v.status) + '</span>' +
+              (v.erro ? '<span class="sub motivo">' + esc(v.erro) + '</span>' : '');
+
+        return '<tr>' +
+          '<td title="' + esc(hora(v.created_at)) + '">' + haQuanto(v.created_at) +
+            (v.event_at ? '<span class="sub">evento ' + esc(String(v.event_at).slice(0, 16).replace('T', ' ')) + '</span>' : '') + '</td>' +
+          '<td class="mono">' + esc(v.protocol) + '</td>' +
+          '<td>' + esc(v.etapa || v.conversion_event) +
+            '<span class="sub">' + esc(v.meta || ('meta ' + v.conversion_action)) + '</span></td>' +
+          '<td>' + (v.conversion_value !== null ? esc(v.currency + ' ' + v.conversion_value) : nada) + '</td>' +
+          '<td>' + (a ? esc(a[0]) + '<span class="sub">' + esc(a[1]) + '</span>' : nada) + '</td>' +
+          '<td>' + situacao + '</td>' +
+          '</tr>';
       }
 
       async function carregarAvisos(id, offset) {
@@ -1059,11 +1162,9 @@
             '<span class="sub">' + esc(e.source) + ' · ' + esc(e.event_type) + '</span></td>' +
           '<td>' + (r.quem ? esc(r.quem) : nada) + '</td>' +
           '<td><span class="tag tag-repetido">' + g.itens.length + '×</span>' +
-            '<span class="sub">' + esc(String(alvo || '')) + '</span></td>' +
-          '<td class="esconder-mobile">' + (r.board ? esc(r.board) : nada) + '</td>' +
-          '<td class="st-' + esc(e.status) + '">' + esc(e.status) + '</td>' +
-          '<td class="motivo esconder-mobile">' + esc(e.motivo || '') + '</td>' +
-          '<td>' + (e.signature_ok === null ? '—' : e.signature_ok ? 'ok' : 'falhou') + '</td>' +
+            '<span class="sub">' + esc(String(alvo || '')) + (r.board ? ' · ' + esc(r.board) : '') + '</span></td>' +
+          '<td class="st-' + esc(e.status) + '">' + esc(e.status) +
+            (e.motivo ? '<span class="sub motivo">' + esc(e.motivo) + '</span>' : '') + '</td>' +
           '</tr>';
       }
 
@@ -1182,16 +1283,21 @@
             ? esc(r.board) + (r.etapa ? '<span class="sub">' + esc(r.etapa) + '</span>' : '')
             : nada;
 
+        // Assinatura válida é o esperado: mostrar "ok" em toda linha só gastava
+        // uma coluna para dizer que nada aconteceu. Falha aparece, e em vermelho.
+        const assinatura = e.signature_ok === false
+          ? '<span class="tag tag-falha">assinatura inválida</span>'
+          : '';
+
         return `
           <tr class="clicavel" data-ev="${e.id}">
             <td title="${esc(hora(e.received_at))}">${haQuanto(e.received_at)}</td>
             <td>${esc(e.pipeline || e.event_type)}<span class="sub">${esc(e.source)} · ${esc(e.event_type)}${r.autor ? ' · ' + esc(r.autor) : ''}</span></td>
-            <td>${lead}</td>
-            <td>${conversa}</td>
-            <td class="esconder-mobile">${card}</td>
-            <td class="st-${esc(e.status)}">${esc(e.status)}</td>
-            <td class="motivo esconder-mobile">${esc(e.motivo || '')}</td>
-            <td>${e.signature_ok === null ? '—' : e.signature_ok ? 'ok' : 'falhou'}</td>
+            <td>${lead}${assinatura}</td>
+            <td>${conversa}<span class="sub">${card === nada ? '' : 'card: '}</span>${card === nada ? '' : card}</td>
+            <td class="st-${esc(e.status)}">${esc(e.status)}${
+              e.motivo ? '<span class="sub motivo">' + esc(e.motivo) + '</span>' : ''
+            }</td>
           </tr>`;
       }
 

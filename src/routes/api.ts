@@ -128,6 +128,60 @@ api.get('/tenants/:id/events', async (c) => {
 });
 
 /**
+ * O que subiu para o Google Ads, e o que nao subiu.
+ *
+ * A tela de webhooks responde o que CHEGOU; esta responde o que SAIU. Sao
+ * perguntas diferentes e ate' agora so' a primeira tinha resposta — dava para
+ * ver o evento entrar e nao dava para ver a conversao sair, que e' o unico
+ * ponto onde o trabalho todo vira resultado na conta do cliente.
+ */
+api.get('/tenants/:id/conversoes', async (c) => {
+  const id = Number(c.req.param('id'));
+  const limite = Math.min(Math.max(Number(c.req.query('limit') ?? 25), 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0), 0);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT v.id, v.dedupe_key, v.protocol, v.conversion_event, v.conversion_action,
+            v.conversion_value, v.currency, v.match_type, v.status, v.validate_only,
+            v.request_id, v.erro, v.event_at, v.sent_at, v.created_at,
+            f.nome AS etapa, f.ca_nome AS meta
+     FROM conversions v
+     LEFT JOIN funnel_stages f
+       ON f.tenant_id = v.tenant_id AND f.conversion_action_id = v.conversion_action
+     WHERE v.tenant_id = ?
+     ORDER BY v.id DESC LIMIT ? OFFSET ?`,
+  )
+    .bind(id, limite, offset)
+    .all();
+
+  const t = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN status = 'enviado' AND validate_only = 0 THEN 1 ELSE 0 END) AS contabilizadas,
+            SUM(CASE WHEN status = 'enviado' AND validate_only = 1 THEN 1 ELSE 0 END) AS ensaios,
+            SUM(CASE WHEN status = 'erro' THEN 1 ELSE 0 END) AS erros,
+            SUM(CASE WHEN status = 'ignorado' THEN 1 ELSE 0 END) AS ignoradas,
+            SUM(CASE WHEN status = 'enviado' AND validate_only = 0 THEN conversion_value ELSE 0 END) AS valor
+     FROM conversions WHERE tenant_id = ?`,
+  )
+    .bind(id)
+    .first<Record<string, number | null>>();
+
+  return c.json({
+    linhas: results,
+    total: Number(t?.total ?? 0),
+    limite,
+    offset,
+    resumo: {
+      contabilizadas: Number(t?.contabilizadas ?? 0),
+      ensaios: Number(t?.ensaios ?? 0),
+      erros: Number(t?.erros ?? 0),
+      ignoradas: Number(t?.ignoradas ?? 0),
+      valor: Number(t?.valor ?? 0),
+    },
+  });
+});
+
+/**
  * Se cada endereco de ingestao ja recebeu alguma coisa.
  *
  * Chave valida prova que o endereco ABRE; isto prova que ele E' USADO. Sao
