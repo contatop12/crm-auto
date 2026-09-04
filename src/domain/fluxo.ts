@@ -3,7 +3,7 @@
  *
  * Responde "onde o lead para" — diferente da tela de Integracoes, que responde
  * "as credenciais funcionam". Uma conta pode estar perfeitamente conectada e o
- * lead ainda assim nao andar, porque falta o webhook, a meta ou o codi_id.
+ * lead ainda assim nao andar, porque falta o webhook, a meta ou a URL do grupo.
  */
 
 export type EstadoEtapa = 'ok' | 'erro' | 'aguardando' | 'pendente';

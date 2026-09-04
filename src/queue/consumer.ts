@@ -82,7 +82,7 @@ export async function consumir(batch: MessageBatch<QueueMessage>, env: Env): Pro
       // 'ignorado' sao definitivos.
       //
       // `retentar: false` e' o meio-termo que faltava: erro de CADASTRO, que
-      // continua visivel no painel mas nao volta para a fila. Um codi_id sem
+      // continua visivel no painel mas nao volta para a fila. Um webhook sem
       // rota nao se cadastra sozinho — retentar so' gastava tentativa e mantinha
       // o cliente vermelho sem caminho de saida.
       if (r.status === 'erro' && r.retentar !== false) m.retry();

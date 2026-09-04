@@ -57,7 +57,6 @@ const CAMPOS_CONFIG = [
   'cw_board_organico_id',
   'ga_customer_id',
   'evo_instancia',
-  'pulseboard_codi_id',
   'pulseboard_url',
   'pulseboard_ativo',
   'gtm_account_id',
@@ -71,7 +70,7 @@ admin.get('/tenants/:id/config', async (c) => {
   const t = await c.env.DB.prepare(
     `SELECT t.id, t.slug, t.nome, t.ativo, c.cw_account_id, c.cw_board_funil_id,
             c.cw_board_organico_id, c.ga_customer_id, c.evo_instancia,
-            c.pulseboard_codi_id, c.pulseboard_url, c.pulseboard_ativo, c.gtm_account_id, c.gtm_container_id, c.gtm_prefixo, c.validate_only, c.janela_match_dias, c.ingest_key,
+            c.pulseboard_url, c.pulseboard_ativo, c.gtm_account_id, c.gtm_container_id, c.gtm_prefixo, c.validate_only, c.janela_match_dias, c.ingest_key,
             CASE WHEN c.cw_webhook_secret IS NULL THEN 0 ELSE 1 END AS tem_segredo_webhook
      FROM tenants t LEFT JOIN tenant_config c ON c.tenant_id = t.id WHERE t.id = ?`,
   )
@@ -107,9 +106,10 @@ admin.post('/tenants', async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO tenant_config
        (tenant_id, cw_account_id, cw_board_funil_id, cw_board_organico_id,
-        ga_customer_id, ga_login_customer_id, evo_instancia, pulseboard_codi_id,
-        ingest_key, validate_only)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        ga_customer_id, ga_login_customer_id, evo_instancia, pulseboard_url,
+        ingest_key, validate_only, pulseboard_ativo)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1,
+             CASE WHEN ? IS NULL THEN 0 ELSE 1 END)`,
   )
     .bind(
       t!.id,
@@ -119,8 +119,12 @@ admin.post('/tenants', async (c) => {
       String(body.ga_customer_id ?? '') || null,
       c.env.GOOGLE_ADS_MCC_ID,
       String(body.evo_instancia ?? '') || null,
-      String(body.pulseboard_codi_id ?? '') || null,
+      String(body.pulseboard_url ?? '') || null,
       gerarIngestKey(),
+      // o aviso nasce desligado enquanto nao ha URL do grupo: sem ela o
+      // primeiro lead do cliente novo vira erro, e erro de cadastro na
+      // estreia e' o pior momento para descobrir que falta preencher algo
+      String(body.pulseboard_url ?? '') || null,
     )
     .run();
 
@@ -434,7 +438,7 @@ admin.get('/tenants/:id/fluxo', async (c) => {
 
   const cfg = await c.env.DB.prepare(
     `SELECT c.cw_account_id, c.cw_board_funil_id, c.ga_customer_id,
-            c.pulseboard_codi_id, c.pulseboard_url, c.pulseboard_ativo, c.sheets_doc_id, c.validate_only,
+            c.pulseboard_url, c.pulseboard_ativo, c.sheets_doc_id, c.validate_only,
             CASE WHEN c.cw_webhook_secret IS NULL THEN 0 ELSE 1 END AS tem_segredo,
             (SELECT COUNT(*) FROM funnel_stages f WHERE f.tenant_id = c.tenant_id) AS etapas,
             (SELECT COUNT(*) FROM funnel_stages f WHERE f.tenant_id = c.tenant_id
