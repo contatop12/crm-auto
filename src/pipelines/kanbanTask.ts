@@ -25,7 +25,6 @@ export interface Resultado {
 
 interface ConfigTenant {
   cw_board_funil_id: number | null;
-  pulseboard_codi_id: string | null;
   pulseboard_url: string | null;
   pulseboard_ativo: number;
 }
@@ -52,7 +51,7 @@ export async function avisarLeadNoGrupo(
   payload: string,
 ): Promise<Resultado> {
   const cfg = await env.DB.prepare(
-    `SELECT cw_board_funil_id, pulseboard_codi_id, pulseboard_url, pulseboard_ativo
+    `SELECT cw_board_funil_id, pulseboard_url, pulseboard_ativo
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(tenantId)
@@ -155,16 +154,17 @@ export async function avisarLeadNoGrupo(
     return { status: 'ignorado', motivo: `aviso no grupo desligado · ${nome} · ${canal}` };
   }
 
-  if (!cfg.pulseboard_codi_id) {
-    const msg = 'cliente sem codi_id do Pulseboard — preencha no perfil ou desligue o aviso';
+  // Quem identifica o cliente agora e' a URL. Sem uma propria, o aviso cairia no
+  // webhook padrao e o Pulseboard nao teria como saber de que grupo se trata.
+  if (!cfg.pulseboard_url) {
+    const msg = 'cliente sem webhook do Pulseboard — preencha no perfil ou desligue o aviso';
     await marcar('erro', msg);
     // cadastro faltando nao melhora com retentativa
     return { status: 'erro', motivo: msg, retentar: false };
   }
 
   try {
-    await new PulseboardClient(cfg.pulseboard_url || undefined).avisarLeadNovo({
-      codiId: cfg.pulseboard_codi_id,
+    await new PulseboardClient(cfg.pulseboard_url).avisarLeadNovo({
       canal,
       nome,
       telefone,

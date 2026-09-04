@@ -170,19 +170,18 @@ admin.patch('/tenants/:id', async (c) => {
 admin.post('/tenants/:id/pulseboard/testar', async (c) => {
   const id = Number(c.req.param('id'));
   const cfg = await c.env.DB.prepare(
-    'SELECT pulseboard_codi_id, pulseboard_url FROM tenant_config WHERE tenant_id = ?',
+    'SELECT pulseboard_url FROM tenant_config WHERE tenant_id = ?',
   )
     .bind(id)
-    .first<{ pulseboard_codi_id: string | null; pulseboard_url: string | null }>();
+    .first<{ pulseboard_url: string | null }>();
 
   if (!cfg) return c.json({ error: 'cliente nao encontrado' }, 404);
-  if (!cfg.pulseboard_codi_id) {
-    return c.json({ error: 'preencha o codi_id antes de testar' }, 400);
+  if (!cfg.pulseboard_url) {
+    return c.json({ error: 'preencha o webhook do Pulseboard antes de testar' }, 400);
   }
 
   try {
-    await new PulseboardClient(cfg.pulseboard_url || undefined).avisarLeadNovo({
-      codiId: cfg.pulseboard_codi_id,
+    await new PulseboardClient(cfg.pulseboard_url).avisarLeadNovo({
       canal: 'Teste do painel P12',
       nome: 'Teste do painel',
       telefone: '5519999999999',
@@ -435,7 +434,7 @@ admin.get('/tenants/:id/fluxo', async (c) => {
 
   const cfg = await c.env.DB.prepare(
     `SELECT c.cw_account_id, c.cw_board_funil_id, c.ga_customer_id,
-            c.pulseboard_codi_id, c.sheets_doc_id, c.validate_only,
+            c.pulseboard_codi_id, c.pulseboard_url, c.pulseboard_ativo, c.sheets_doc_id, c.validate_only,
             CASE WHEN c.cw_webhook_secret IS NULL THEN 0 ELSE 1 END AS tem_segredo,
             (SELECT COUNT(*) FROM funnel_stages f WHERE f.tenant_id = c.tenant_id) AS etapas,
             (SELECT COUNT(*) FROM funnel_stages f WHERE f.tenant_id = c.tenant_id
@@ -530,26 +529,26 @@ admin.get('/tenants/:id/fluxo', async (c) => {
     {
       id: 'chegada',
       titulo: 'Chegada do lead no CRM',
-      comoFunciona: 'conversa criada e primeira mensagem do lead no Chatwoot',
+      comoFunciona: 'a primeira mensagem do lead casa o protocolo com o clique e promove o card',
       sinais: {
         ...(await porEvento(
-          "source = 'chatwoot' AND event_type IN ('conversation_created','message_incoming')",
+          "source = 'chatwoot' AND event_type IN ('conversation_created','message_incoming','message_created')",
         )),
-        implementado: false,
+        implementado: true,
         pendencia: semWebhook,
       },
     },
     {
       id: 'dados',
       titulo: 'Dados do lead registrados',
-      comoFunciona: 'protocolo, telefone, e-mail e campanha gravados e espelhados na planilha',
+      comoFunciona: 'protocolo, telefone, e-mail e campanha do clique gravados no banco',
       sinais: {
         total24h: Number(leads?.t24 ?? 0),
         total7d: Number(leads?.t7 ?? 0),
         ultimoEm: leads?.ultimo ?? null,
         ultimoErroEm: null,
         ultimoErroMotivo: null,
-        implementado: false,
+        implementado: true,
         pendencia: null,
       },
     },
@@ -560,7 +559,12 @@ admin.get('/tenants/:id/fluxo', async (c) => {
       sinais: {
         ...(await porTabela('group_notifications')),
         implementado: true,
-        pendencia: cfg.pulseboard_codi_id ? null : 'falta o codi_id do Pulseboard no cadastro',
+        pendencia:
+          Number(cfg.pulseboard_ativo) === 0
+            ? 'aviso no grupo desligado para este cliente'
+            : cfg.pulseboard_url
+              ? null
+              : 'falta o webhook do Pulseboard deste cliente no cadastro',
       },
     },
     {
@@ -573,7 +577,7 @@ admin.get('/tenants/:id/fluxo', async (c) => {
         ultimoEm: moves?.ultimo ?? null,
         ultimoErroEm: null,
         ultimoErroMotivo: null,
-        implementado: false,
+        implementado: true,
         pendencia:
           Number(cfg.etapas) === 0
             ? 'etapas do funil ainda não sincronizadas'
@@ -588,7 +592,7 @@ admin.get('/tenants/:id/fluxo', async (c) => {
       comoFunciona: 'qualquer etapa marcada como conversão sobe pela Data Manager API',
       sinais: {
         ...(await porTabela('conversions')),
-        implementado: false,
+        implementado: true,
         pendencia: !cfg.ga_customer_id
           ? 'cliente sem conta do Google Ads'
           : Number(cfg.etapas) === 0

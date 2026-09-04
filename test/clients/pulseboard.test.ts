@@ -9,7 +9,7 @@ describe('conferirEnvio', () => {
   test('rota nao mapeada vem com 200 e sent=0', () => {
     // e' o que o codi_id errado devolve: status de sucesso, mensagem nao enviada
     const corpo = '{"ok":true,"sent":0,"skipped":["lead_index_0: rota_nao_mapeada (page_id=vazio; codi_id=000)"]}';
-    expect(() => conferirEnvio(corpo)).toThrow(/codi_id nao tem rota/);
+    expect(() => conferirEnvio(corpo)).toThrow(/nao tem rota para este webhook/);
     expect(() => conferirEnvio(corpo)).toThrow(/rota_nao_mapeada/);
   });
 
@@ -72,10 +72,10 @@ describe('endpoint', () => {
     }) as typeof fetch;
     try {
       await new PulseboardClient().avisarLeadNovo({
-        codiId: 'X', canal: 'c', nome: 'n', telefone: '5511999999999', url: '',
+        canal: 'c', nome: 'n', telefone: '5511999999999', url: '',
       });
       await new PulseboardClient('https://pulseboard.sitespdoze.com.br/cliente-x').avisarLeadNovo({
-        codiId: 'X', canal: 'c', nome: 'n', telefone: '5511999999999', url: '',
+        canal: 'c', nome: 'n', telefone: '5511999999999', url: '',
       });
     } finally {
       globalThis.fetch = original;

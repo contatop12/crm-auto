@@ -9,8 +9,10 @@ const BOARD_ORGANICO = 14;
 function cenario() {
   const { d1, exec, consultar } = fakeD1();
   exec(`INSERT INTO tenants (id, slug, nome, ativo) VALUES (1, 'persianas', 'Persianas', 1)`);
-  exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, cw_board_organico_id, pulseboard_codi_id, ingest_key)
-        VALUES (1, 7, ${BOARD_ADS}, ${BOARD_ORGANICO}, 'CODI-123', 'k')`);
+  // quem identifica o cliente e' a URL; o codi_id ficou opcional
+  exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, cw_board_organico_id,
+          pulseboard_url, ingest_key)
+        VALUES (1, 7, ${BOARD_ADS}, ${BOARD_ORGANICO}, 'https://pulseboard.teste/persianas', 'k')`);
   return { env: { DB: d1 } as unknown as Env, consultar, exec };
 }
 
@@ -28,10 +30,13 @@ function task(over: Record<string, unknown> = {}) {
 }
 
 let enviados: Array<Record<string, unknown>>;
+let urls: string[];
 
 beforeEach(() => {
   enviados = [];
-  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+  urls = [];
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    urls.push(String(url));
     enviados.push(JSON.parse(String(init.body)));
     return new Response('ok', { status: 200 });
   });
@@ -45,8 +50,25 @@ describe('avisarLeadNoGrupo', () => {
 
     expect(r.status).toBe('ok');
     expect(enviados).toHaveLength(1);
-    expect(enviados[0]!.codi_id).toBe('CODI-123');
     expect(enviados[0]!.nome).toBe('Carol Nunes');
+    // sem codi_id no cadastro, o campo nao vai no corpo: mandar vazio faria o
+    // Pulseboard tentar rotear por um campo em branco em vez de pela URL
+    expect(enviados[0]).not.toHaveProperty('codi_id');
+  });
+
+  test('vai para o webhook do cliente, nao para o padrao', async () => {
+    const { env } = cenario();
+    await avisarLeadNoGrupo(env, 1, task());
+    expect(urls[0]).toBe('https://pulseboard.teste/persianas');
+  });
+
+  test('codi_id nao sobe nem quando sobrou um no cadastro', async () => {
+    // o roteamento por codi_id saiu de uso; mandar um antigo faria o Pulseboard
+    // rotear por ele e devolver `rota_nao_mapeada` de novo
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET pulseboard_codi_id = 'CODI-123' WHERE tenant_id = 1`);
+    await avisarLeadNoGrupo(env, 1, task());
+    expect(enviados[0]).not.toHaveProperty('codi_id');
   });
 
   test('manda o telefone so com digitos, com DDI e sem mais', async () => {
@@ -119,16 +141,16 @@ describe('avisarLeadNoGrupo', () => {
     expect(enviados[0]!.Canal).toBe('Campanha de Mensagem - Direto');
   });
 
-  test('cliente sem codi_id registra erro em vez de avisar errado', async () => {
+  test('cliente sem webhook proprio registra erro em vez de avisar errado', async () => {
     const { env, exec, consultar } = cenario();
-    exec('UPDATE tenant_config SET pulseboard_codi_id = NULL WHERE tenant_id = 1');
+    exec('UPDATE tenant_config SET pulseboard_url = NULL WHERE tenant_id = 1');
 
     const r = await avisarLeadNoGrupo(env, 1, task());
 
     expect(r.status).toBe('erro');
     expect(enviados).toHaveLength(0);
     expect(consultar<{ erro: string }>('SELECT erro FROM group_notifications')[0]!.erro).toContain(
-      'codi_id',
+      'webhook',
     );
   });
 
@@ -166,9 +188,9 @@ describe('aviso desligado por cliente', () => {
     expect(enviados).toHaveLength(0);
   });
 
-  test('sem codi_id e erro de cadastro: visivel, mas fora da fila', async () => {
+  test('sem webhook proprio e erro de cadastro: visivel, mas fora da fila', async () => {
     const { env, exec } = cenario();
-    exec(`UPDATE tenant_config SET pulseboard_codi_id = NULL WHERE tenant_id = 1`);
+    exec(`UPDATE tenant_config SET pulseboard_url = NULL WHERE tenant_id = 1`);
     const r = await avisarLeadNoGrupo(env, 1, task());
     expect(r.status).toBe('erro');
     expect(r.retentar).toBe(false);

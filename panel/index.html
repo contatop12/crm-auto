@@ -1382,14 +1382,11 @@
             (!atual || atual.pulseboard_ativo ? 'checked' : '') + ' /> Avisar o grupo pelo Pulseboard</label>' +
             '<p class="dica">desmarcado, o lead entra no funil normalmente e nenhuma mensagem é enviada. ' +
             'Desligue para o cliente que não usa o grupo — assim ele para de aparecer como erro.</p></div>' +
-            '<div class="grade">' +
-              '<div class="campo"><label for="f-pulse">codi_id do Pulseboard</label>' +
-              '<input id="f-pulse" placeholder="é ele que amarra o aviso ao grupo certo" />' +
-              '<p class="dica">se o Pulseboard responder <em>rota não mapeada</em>, é este número que não tem rota cadastrada lá</p></div>' +
-              '<div class="campo"><label for="f-pulse-url">Webhook do Pulseboard</label>' +
-              '<input id="f-pulse-url" placeholder="https://pulseboard.sitespdoze.com.br/meta-new-lead" />' +
-              '<p class="dica">em branco usa o padrão; preencha quando o cliente tiver o dele</p></div>' +
-            '</div>' +
+            '<div class="campo"><label for="f-pulse-url">Webhook do Pulseboard deste cliente</label>' +
+            '<input id="f-pulse-url" placeholder="https://pulseboard.sitespdoze.com.br/…" />' +
+            '<p class="dica">é a URL que diz ao Pulseboard de qual grupo se trata — cada cliente tem a sua. ' +
+            'Se o Pulseboard responder <em>rota não mapeada</em>, é esta URL que não tem rota cadastrada lá.</p></div>' +
+
             (atual
               ? '<div class="linha-acoes"><button id="btn-pulse-testar">' + ic('conferir') +
                 ' Testar o aviso</button>' +
@@ -1427,7 +1424,6 @@
           document.getElementById('f-cw').value = atual.cw_account_id || '';
           document.getElementById('f-ga').value = atual.ga_customer_id || '';
           document.getElementById('f-evo').value = atual.evo_instancia || '';
-          document.getElementById('f-pulse').value = atual.pulseboard_codi_id || '';
           document.getElementById('f-pulse-url').value = atual.pulseboard_url || '';
           if (atual.cw_account_id) {
             await carregarBoards(atual.cw_account_id, atual.cw_board_funil_id, atual.cw_board_organico_id);
@@ -1502,7 +1498,6 @@
             cw_board_organico_id: document.getElementById('f-organico').value,
             ga_customer_id: document.getElementById('f-ga').value,
             evo_instancia: document.getElementById('f-evo').value,
-            pulseboard_codi_id: document.getElementById('f-pulse').value,
             pulseboard_url: document.getElementById('f-pulse-url').value,
             pulseboard_ativo: document.getElementById('f-pulse-ativo').checked ? 1 : 0,
           };

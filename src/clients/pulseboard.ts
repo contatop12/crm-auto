@@ -1,14 +1,15 @@
-import { exigir } from '../domain/config';
-
 /**
  * Pulseboard — avisa o grupo de WhatsApp do cliente que chegou lead novo.
  *
- * Cada cliente tem seu `codi_id`, que e' o que amarra a mensagem ao grupo certo.
+ * Quem amarra a mensagem ao grupo certo e' a URL do webhook: cada cliente tem a
+ * dele. O `codi_id` fazia esse papel antes e saiu de cena — o roteamento por
+ * codi_id era justamente o que respondia `rota_nao_mapeada` quando o numero nao
+ * tinha rota cadastrada do outro lado.
+ *
  * O texto quem monta e' o Pulseboard; daqui vao os campos.
  */
 
 export interface NovoLead {
-  codiId: string;
   /** 'Campanha de Quiz - Google' */
   canal: string;
   nome: string;
@@ -42,13 +43,10 @@ export class PulseboardClient {
   constructor(private readonly endpoint: string = ENDPOINT) {}
 
   async avisarLeadNovo(l: NovoLead): Promise<void> {
-    exigir(l, 'codiId');
-
     const r = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        codi_id: l.codiId,
         Canal: l.canal,
         nome: l.nome,
         telefone: l.telefone,
@@ -109,7 +107,7 @@ export function conferirEnvio(corpo: string): void {
     const semRota = /rota_nao_mapeada/.test(motivo);
     throw new ErroPulseboard(
       semRota
-        ? `o codi_id nao tem rota no Pulseboard — confira o cadastro (${motivo.slice(0, 160)})`
+        ? `o Pulseboard nao tem rota para este webhook — confira a URL do cliente (${motivo.slice(0, 150)})`
         : `Pulseboard nao enviou (sent=${j.sent}): ${motivo.slice(0, 200)}`,
       semRota,
     );
