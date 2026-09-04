@@ -137,6 +137,21 @@ describe('enviarConversao', () => {
     expect(corpoEnviado().events[0].transactionId).toBe('VITA-123-qualificado_1');
   });
 
+  test('acha o protocolo pelo display id, que e o que gravamos', async () => {
+    // o card traz id interno (1609) e display (78); o webhook de mensagem manda
+    // o display como `conversation.id`, entao e' o display que esta' na tabela
+    const { env, exec } = cenario();
+    exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol)
+          VALUES (1, 78, 'VITA-123')`);
+    const r = await enviarConversao(env, 1, card({
+      custom_attributes: {},
+      conversation_ids: [78],
+      conversations: [{ id: 1609, display_id: 78 }],
+    }));
+    expect(r.status).toBe('ok');
+    expect(corpoEnviado().events[0].transactionId).toBe('VITA-123-qualificado_1');
+  });
+
   test('protocolo sem clique registrado nao sobe', async () => {
     const { env } = cenario();
     const r = await enviarConversao(env, 1, card({ custom_attributes: { protocolo: 'VITA-999' } }));

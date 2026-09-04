@@ -238,8 +238,23 @@ async function acharProtocolo(
   const doCard = str(obj(p.custom_attributes)?.protocolo);
   if (doCard) return doCard;
 
+  /**
+   * O card traz os dois números da conversa, e eles NÃO são o mesmo:
+   *
+   *   conversations[].id         1609   id interno
+   *   conversations[].display_id  386   o "#386" que aparece na tela
+   *   conversation_ids           [386]  os display, apesar do nome
+   *
+   * O webhook de mensagem manda `conversation.id` já como display, então é o
+   * display que `leadMessage` grava em `cw_conversation_id`. Procurar só pelo
+   * id interno não achava nada, e o resgate do protocolo — a rede de segurança
+   * para o card sem o atributo — nunca pegava.
+   */
   const ids = [
-    ...(Array.isArray(p.conversations) ? p.conversations.map((c) => num(obj(c)?.id)) : []),
+    ...(Array.isArray(p.conversation_ids) ? p.conversation_ids.map(num) : []),
+    ...(Array.isArray(p.conversations)
+      ? p.conversations.flatMap((c) => [num(obj(c)?.id), num(obj(c)?.display_id)])
+      : []),
   ].filter((n): n is number => n !== null);
 
   if (ids.length) {
