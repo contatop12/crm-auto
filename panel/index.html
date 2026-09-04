@@ -112,14 +112,24 @@
       .dica { color: var(--tinta-2); font-size: 12.5px; margin: 8px 0 0; max-width: 62ch; }
       .carregando { color: var(--tinta-3); font-size: 13px; }
 
-      /* Placar do Google Ads: quatro números que respondem "e daí?" antes da
-         tabela. Ensaio separado do envio real — somar daria um total que não
-         existe na conta do cliente. */
-      .placar { display: flex; flex-wrap: wrap; gap: var(--e3); margin-bottom: var(--e3); }
-      .placar-item { display: flex; flex-direction: column; min-width: 128px; }
-      .placar-item strong { font-size: 24px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
-      .placar-item > span { font-size: 13px; color: var(--tinta-2); }
-      .placar-item .sub { margin-top: var(--e0); }
+      /* Placar do Google Ads: os números que respondem "e daí?" antes da
+         tabela. Cada um é um bloco fechado porque são grandezas distintas —
+         encostados, o olho soma o que não se soma (ensaio não é envio). */
+      .placar {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--e2); margin-bottom: var(--e3);
+      }
+      .placar-item {
+        display: flex; flex-direction: column;
+        border: 1px solid var(--linha); border-radius: var(--r);
+        background: var(--carta); padding: var(--e2);
+      }
+      .placar-item strong { font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
+      .placar-item > span { font-size: 13px; color: var(--tinta-2); margin-top: var(--e0); }
+      .placar-item .sub { margin-top: var(--e1); }
+      /* O bloco do dinheiro é o que se procura primeiro: ganha a borda escura. */
+      .placar-item.destaque { border-color: var(--linha-forte); }
+      .placar-item.destaque strong { color: var(--fluxo); }
       /* Veredito da conferência, sob cada endereço. Vazio até alguém pedir:
          a leitura vai às contas dos clientes, então não roda sozinha. */
       .conferencia:not(:empty) { margin-top: var(--e1); font-size: 12.5px; line-height: 1.5; }
@@ -929,10 +939,10 @@
             placar('em ensaio', q.ensaios, 'modo sombra: validadas, não contadas') +
             placar('recusadas', q.erros, q.erros ? 'o Google não aceitou' : '') +
             placar('sem atribuir', q.ignoradas, 'faltou gclid e dados do lead') +
-          '</div>' +
-          (q.contabilizadas
-            ? '<p class="dica">Somando o valor das contabilizadas: <strong>BRL ' + esc(String(q.valor)) + '</strong>.</p>'
-            : '');
+            // o valor era uma frase solta encostada no cabeçalho da tabela;
+            // é da mesma família dos outros, então vira bloco também
+            placar('em valor', 'BRL ' + q.valor, 'soma das contabilizadas', true) +
+          '</div>';
 
         alvo.innerHTML = r.linhas.length
           ? '<table><thead><tr>' +
@@ -947,8 +957,9 @@
         ligarPaginacao(alvo, function (o) { carregarConversoes(id, o); });
       }
 
-      function placar(rotulo, valor, dica) {
-        return '<div class="placar-item"><strong>' + valor + '</strong>' +
+      function placar(rotulo, valor, dica, destaque) {
+        return '<div class="placar-item' + (destaque ? ' destaque' : '') + '">' +
+          '<strong>' + esc(String(valor)) + '</strong>' +
           '<span>' + esc(rotulo) + '</span>' +
           (dica ? '<span class="sub">' + esc(dica) + '</span>' : '') + '</div>';
       }
