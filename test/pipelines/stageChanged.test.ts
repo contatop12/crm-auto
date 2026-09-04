@@ -180,6 +180,33 @@ describe('enviarConversao', () => {
     expect(linha(consultar).erro).toBeNull();
   });
 
+  test('o que so foi ensaiado na sombra sobe de verdade ao sair dela', async () => {
+    const { env, exec, consultar } = cenario({ validateOnly: 1 });
+    await enviarConversao(env, 1, card());
+    expect(corpoEnviado().validateOnly).toBe(true);
+    expect(linha(consultar).validate_only).toBe(1);
+
+    // sai do modo sombra
+    exec(`UPDATE tenant_config SET validate_only = 0 WHERE tenant_id = 1`);
+    const r = await enviarConversao(env, 1, card());
+
+    expect(r.status).toBe('ok');
+    expect(chamadas).toHaveLength(2);
+    expect(chamadas[1]!.corpo.validateOnly).toBe(false);
+    expect(linha(consultar).validate_only).toBe(0);
+    // continua uma linha so': o ensaio virou envio, nao uma segunda conversao
+    expect(consultar(`SELECT * FROM conversions`)).toHaveLength(1);
+  });
+
+  test('na sombra, o ensaio repetido continua sendo um so', async () => {
+    const { env, consultar } = cenario({ validateOnly: 1 });
+    await enviarConversao(env, 1, card());
+    const r = await enviarConversao(env, 1, card());
+    expect(r.status).toBe('ignorado');
+    expect(chamadas).toHaveLength(1);
+    expect(consultar(`SELECT * FROM conversions`)).toHaveLength(1);
+  });
+
   test('sem gclid e sem dados do lead nao ha o que atribuir', async () => {
     const { env, exec, consultar } = cenario();
     exec(`UPDATE leads SET gclid = NULL, email = NULL, phone_e164 = NULL WHERE protocol = 'VITA-123'`);

@@ -139,15 +139,33 @@ export async function enviarConversao(
     .run();
 
   if (!posto.meta.changes) {
-    // Já existe. Só reenvia o que não chegou ao Google: 'enviado' é definitivo,
-    // 'ignorado' foi decidido por falta de dado e não melhora com retentativa.
     const atual = await env.DB.prepare(
-      'SELECT status FROM conversions WHERE tenant_id = ? AND dedupe_key = ?',
+      'SELECT status, validate_only FROM conversions WHERE tenant_id = ? AND dedupe_key = ?',
     )
       .bind(tenantId, chave)
-      .first<{ status: string }>();
-    if (atual?.status !== 'erro' && atual?.status !== 'pendente') {
+      .first<{ status: string; validate_only: number }>();
+
+    // Só reenvia o que não chegou ao Google. 'erro' e 'pendente' são retentativa
+    // legítima; 'ignorado' foi decidido por falta de dado e não melhora tentando
+    // de novo.
+    //
+    // O ensaio NÃO conta como envio. Em modo sombra a linha fica `enviado` com
+    // `validate_only = 1`, mas o Google só validou o formato — não contabilizou
+    // nada. Sem esta ressalva, sair da sombra silenciaria de vez toda conversão
+    // que tinha sido ensaiada: o dedup diria "já enviada" sobre algo que nunca
+    // chegou a valer.
+    const ensaio = atual?.status === 'enviado' && atual.validate_only === 1 && !sombra;
+    const retentativa = atual?.status === 'erro' || atual?.status === 'pendente';
+    if (!ensaio && !retentativa) {
       return { status: 'ignorado', motivo: `conversao ${chave} ja enviada (${atual?.status})` };
+    }
+    if (ensaio) {
+      // a linha passa a valer de verdade
+      await env.DB.prepare(
+        'UPDATE conversions SET validate_only = 0 WHERE tenant_id = ? AND dedupe_key = ?',
+      )
+        .bind(tenantId, chave)
+        .run();
     }
   }
 
