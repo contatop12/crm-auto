@@ -57,6 +57,47 @@ describe('planejarGtm', () => {
     expect(p.jaExistem).toContain('tag: 00 - UTM Persist');
   });
 
+  test('conta por tipo o que ja esta no lugar', () => {
+    // Sem isto a tela so' mostrava a categoria com pendencia, e categoria
+    // invisivel se le como "nao conferi" — nao como "esta tudo certo".
+    const p = planejarGtm(modelo, {
+      ...vazio,
+      tags: ['00 - UTM Persist', 'P12 | Collector - WhatsApp Click'],
+      variaveis: ['00 | [URL] - utm_source'],
+      builtIn: ['PAGE_URL'],
+    }, VALORES);
+
+    expect(p.jaExistemPorTipo).toEqual({
+      templates: 0, variaveis: 1, gatilhos: 0, tags: 2, builtIn: 1,
+    });
+  });
+
+  test('variavel integrada que ja existe tambem conta', () => {
+    // as integradas nunca passaram pelo filtro comum, entao sumiam da contagem
+    const p = planejarGtm(modelo, { ...vazio, builtIn: ['PAGE_URL', 'CLICK_URL'] }, VALORES);
+    expect(p.builtInACriar).toEqual([]);
+    expect(p.jaExistemPorTipo.builtIn).toBe(2);
+  });
+
+  test('container ja padronizado nao propoe nada', () => {
+    const p = planejarGtm(modelo, {
+      templates: ['Persist Campaign Data'],
+      variaveis: modelo.variable.map((v) => String(v.name)),
+      gatilhos: modelo.trigger.map((t) => String(t.name)),
+      tags: modelo.tag.map((t) => String(t.name)),
+      builtIn: ['PAGE_URL', 'CLICK_URL'],
+    }, VALORES);
+
+    expect(p.templatesACriar).toEqual([]);
+    expect(p.variaveisACriar).toEqual([]);
+    expect(p.gatilhosACriar).toEqual([]);
+    expect(p.tagsACriar).toEqual([]);
+    expect(p.builtInACriar).toEqual([]);
+    expect(p.jaExistemPorTipo).toEqual({
+      templates: 1, variaveis: 4, gatilhos: 2, tags: 2, builtIn: 2,
+    });
+  });
+
   test('compara por nome ignorando caixa e espaco', () => {
     const p = planejarGtm(modelo, { ...vazio, tags: ['  00 - UTM PERSIST '] }, VALORES);
     expect(p.tagsACriar.map((t) => t.name)).toEqual(['P12 | Collector - WhatsApp Click']);

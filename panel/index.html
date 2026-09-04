@@ -111,6 +111,21 @@
       .id { font-family: var(--mono); font-size: 12px; color: var(--tinta-3); }
       .dica { color: var(--tinta-2); font-size: 12.5px; margin: 8px 0 0; max-width: 62ch; }
       .carregando { color: var(--tinta-3); font-size: 13px; }
+
+      /* Plano do GTM: uma linha por categoria, sempre as cinco. A que não tem
+         pendência precisa dizer isso — sumir da tela se lê como "não conferi". */
+      .gtm-plano { margin-top: var(--e2); }
+      .gtm-linha {
+        display: grid; grid-template-columns: 1fr auto auto; align-items: baseline;
+        gap: var(--e1) var(--e2); padding: var(--e2) 0;
+        border-bottom: 1px solid var(--linha);
+      }
+      .gtm-linha:last-child { border-bottom: 0; }
+      .gtm-nome { font-weight: 550; font-size: 13.5px; }
+      .gtm-ok { color: var(--fluxo); font-size: 12.5px; display: flex; align-items: center; gap: var(--e0); }
+      .gtm-falta { color: var(--espera); font-size: 12.5px; font-weight: 650; }
+      .gtm-conta { color: var(--tinta-3); font-size: 12.5px; text-align: right; }
+      .gtm-itens { grid-column: 1 / -1; margin: 0; color: var(--tinta-2); line-height: 1.6; }
       .pista { display: block; margin-top: var(--e0); color: var(--tinta-2); }
       .motivo { color: var(--tinta-2); }
       .mono { font-family: var(--mono); font-size: 12px; }
@@ -612,8 +627,8 @@
           <h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.02em">
             ${esc(cliente ? cliente.nome : 'Cliente ' + id)}
           </h2>
-          <p class="cliente-slug" style="margin:0 0 12px">${esc(cliente ? cliente.slug : '')}</p>
-          <div class="linha-acoes" style="margin:0 0 20px">
+          <p class="cliente-slug" style="margin:0 0 16px">${esc(cliente ? cliente.slug : '')}</p>
+          <div class="linha-acoes" style="margin:0 0 24px">
             <button id="btn-editar">${ic('editar')} Editar cliente</button>
             <label class="switch" data-dica="Ligado, a conversão é gravada no Google Ads de verdade">
               <input type="checkbox" id="sw-envio" />
@@ -662,7 +677,7 @@
             <h2>Etiquetas deste cliente</h2>
             <div class="linha-acoes">
               <input id="l-slug" placeholder="nome da etiqueta (ex: reagendar)" />
-              <input id="l-cor" type="color" value="#999999" style="width:52px;padding:2px" />
+              <input id="l-cor" type="color" value="#999999" style="width:52px;padding:4px" />
               <input id="l-desc" placeholder="descrição" />
               <button id="btn-l-add">Criar no Chatwoot</button>
               <span class="carregando" id="etiquetas-estado"></span>
@@ -848,7 +863,7 @@
               '<th class="esconder-mobile">Motivo</th><th>Assin.</th>' +
             '</tr></thead><tbody>' + grupos.map(linhaGrupo).join('') + '</tbody></table>' +
             paginacao('eventos', r.total, r.limite, r.offset) +
-            '<p class="carregando" style="margin-top:10px">Clique numa linha para ver o corpo do webhook. ' +
+            '<p class="carregando" style="margin-top:8px">Clique numa linha para ver o corpo do webhook. ' +
             'Telefone mascarado; o nome vem só com a inicial do sobrenome.</p>'
           : '<div class="vazio"><p>Nenhum webhook recebido deste cliente.</p>' +
             '<p class="mono">Confira em Integrações se o webhook está registrado apontando para este Worker.</p></div>';
@@ -1614,7 +1629,7 @@
                   : '—') +
                 '</td></tr>';
             }).join('') + '</tbody></table>'
-            + '<p class="carregando" style="margin-top:10px">As etapas vêm do board do Chatwoot. ' +
+            + '<p class="carregando" style="margin-top:8px">As etapas vêm do board do Chatwoot. ' +
               'Automático = o card anda sozinho; as demais dependem de uma frase abaixo, ou da mão do vendedor.</p>'
           : '<div class="vazio"><p>Etapas ainda não sincronizadas.</p>' +
             '<p class="mono">Elas vêm do board do Chatwoot, não são digitadas aqui.</p></div>';
@@ -1695,11 +1710,11 @@
               '</tr>';
           }).join('') +
           '</tbody></table>' +
-          '<p class="carregando" style="margin-top:10px">As metas do catálogo têm o mesmo nome em todos os clientes; o que muda é a etapa que dispara cada uma. ' +
+          '<p class="carregando" style="margin-top:8px">As metas do catálogo têm o mesmo nome em todos os clientes; o que muda é a etapa que dispara cada uma. ' +
           'Valor vazio = a conversão carrega o valor real da negociação. ' +
           'Meta que já existe é apenas ligada à etapa, não é criada de novo. ' +
           'Meta adicionada à mão vale só para este cliente.</p>' +
-          '<div class="linha-acoes" style="margin-top:12px">' +
+          '<div class="linha-acoes" style="margin-top:16px">' +
           '<button id="btn-validar">Validar no Google</button>' +
           '<button id="btn-publicar" class="principal">Publicar na conta</button></div>';
 
@@ -2163,7 +2178,7 @@
         };
 
         alvo.innerHTML =
-          '<div class="linha-acoes" style="margin-bottom:14px">' +
+          '<div class="linha-acoes" style="margin-bottom:16px">' +
             '<button id="btn-testar-chave">' + ic('conferir') + 'Testar a chave</button>' +
             '<span class="carregando" id="chave-estado">confere se o endereço abre, sem gravar nada</span>' +
           '</div>' +
@@ -2290,31 +2305,48 @@
             const r = await enviar(
               '/tenants/' + id + '/gtm/padronizar' + (aplicar ? '?aplicar=1' : ''), 'POST', {});
 
-            const bloco = function (t, itens) {
-              if (!itens || !itens.length) return '';
-              return '<p style="margin:10px 0 4px"><strong>' + esc(t) + '</strong></p>' +
-                '<p class="mono">' + itens.map(esc).join(' · ') + '</p>';
-            };
             const c = r.a_criar;
+            const existem = r.ja_existem_por_tipo || {};
             const total = c.templates.length + c.variaveis.length + c.gatilhos.length +
               c.tags.length + c.built_in.length;
 
+            /**
+             * Toda categoria aparece, sempre — inclusive a que não tem
+             * pendência. Antes, categoria sem nada a criar sumia da tela, e o
+             * silêncio se lia como "não conferi" em vez de "está no lugar".
+             */
+            const linha = function (titulo, itens, jaTem) {
+              const falta = (itens || []).length;
+              return '<div class="gtm-linha">' +
+                '<span class="gtm-nome">' + esc(titulo) + '</span>' +
+                (falta
+                  ? '<span class="gtm-falta">' + falta + ' a criar</span>'
+                  : '<span class="gtm-ok">' + ic('conferir') + ' no lugar</span>') +
+                '<span class="gtm-conta">' + (jaTem || 0) + ' no container</span>' +
+                (falta ? '<p class="mono gtm-itens">' + itens.map(esc).join(' · ') + '</p>' : '') +
+                '</div>';
+            };
+
             est.textContent = r.previa
-              ? 'workspace "' + r.workspace + '" · ' + (total ? total + ' a criar' : 'já está padronizado')
+              ? 'workspace "' + r.workspace + '" · ' + (total ? total + ' a criar' : 'nada a criar')
               : r.criados + ' criados' + (r.falhas.length ? ' · ' + r.falhas.length + ' falharam' : '');
 
             document.getElementById('gtm-plano').innerHTML =
-              bloco('Templates', c.templates) + bloco('Variáveis', c.variaveis) +
-              bloco('Gatilhos', c.gatilhos) + bloco('Tags', c.tags) +
-              bloco('Variáveis integradas', c.built_in) +
-              (r.falhas && r.falhas.length ? '<p class="st-erro">' + r.falhas.map(esc).join('<br>') + '</p>' : '') +
+              (r.previa && !total
+                ? '<div class="aviso">Container conferido: está tudo no padrão, nada a criar.</div>'
+                : '') +
+              '<div class="gtm-plano">' +
+                linha('Templates', c.templates, existem.templates) +
+                linha('Variáveis', c.variaveis, existem.variaveis) +
+                linha('Gatilhos', c.gatilhos, existem.gatilhos) +
+                linha('Tags', c.tags, existem.tags) +
+                linha('Variáveis integradas', c.built_in, existem.builtIn) +
+              '</div>' +
+              (r.falhas && r.falhas.length
+                ? '<div class="erro">' + r.falhas.map(esc).join('<br>') + '</div>' : '') +
               (r.sem_valor && r.sem_valor.length
                 ? '<div class="erro">Constantes sem valor real: ' + esc(r.sem_valor.join(', ')) +
                   '. O container postaria para lugar nenhum.</div>'
-                : '') +
-              (r.ja_existem.length
-                ? '<p class="carregando" style="margin-top:10px">' + r.ja_existem.length +
-                  ' já existem no container e não foram tocados.</p>'
                 : '');
           } catch (e) {
             est.textContent = 'falhou: ' + e.message;
@@ -2369,7 +2401,7 @@
 
         const bloco = function (titulo, itens, classe) {
           if (!itens.length) return '';
-          return '<p style="margin:10px 0 4px"><strong>' + esc(titulo) + '</strong></p>' +
+          return '<p style="margin:8px 0 4px"><strong>' + esc(titulo) + '</strong></p>' +
             '<p class="' + classe + '">' + itens.map(esc).join(' · ') + '</p>';
         };
 
@@ -2377,7 +2409,7 @@
           bloco('Etiquetas a criar', r.etiquetas_a_criar, 'mono') +
           bloco('Atributos a criar', r.atributos_a_criar, 'mono') +
           bloco('Falhas', r.falhas || [], 'st-erro') +
-          '<p class="carregando" style="margin-top:10px">' +
+          '<p class="carregando" style="margin-top:8px">' +
             r.etiquetas_existentes.length + ' etiquetas e ' + r.atributos_existentes +
             ' atributos do padrão já existem nesta conta.' +
             (r.fora_do_padrao.length
@@ -2414,7 +2446,7 @@
           '<section><h2>Etiquetas</h2>' +
             '<div class="linha-acoes">' +
               '<input id="e-slug" placeholder="slug (ex: google-ads)" />' +
-              '<input id="e-cor" type="color" value="#999999" style="width:52px;padding:2px" />' +
+              '<input id="e-cor" type="color" value="#999999" style="width:52px;padding:4px" />' +
               '<input id="e-desc" placeholder="descrição" />' +
               '<button id="btn-e-add">Adicionar</button>' +
             '</div>' +
@@ -2430,7 +2462,7 @@
           MODELOS.map(function (m) {
             const linhas = r.atributos.filter(function (a) { return a.modelo === m[0]; });
             return '<section><h2>Atributos · ' + esc(m[1]) + '</h2>' +
-              '<p class="carregando" style="margin:0 0 12px">' + esc(m[2]) + '</p>' +
+              '<p class="carregando" style="margin:0 0 16px">' + esc(m[2]) + '</p>' +
               '<div class="linha-acoes">' +
                 '<input class="a-chave" data-m="' + m[0] + '" placeholder="chave (ex: utm_id)" />' +
                 '<input class="a-nome" data-m="' + m[0] + '" placeholder="nome na tela (ex: UTM ID)" />' +
@@ -2534,7 +2566,7 @@
           (inicio
             ? '<p class="dica">O link abaixo vale <strong>10 minutos</strong> e serve uma vez. Entre com a conta que administra os containers dos clientes.</p>' +
               '<div class="linha-acoes"><a class="botao-link" id="link-google" href="' + esc(inicio.url) + '">Abrir consentimento do Google</a></div>' +
-              '<p class="dica" style="margin-top:14px">Este endereço precisa estar cadastrado como <strong>URI de redirecionamento autorizado</strong> no cliente OAuth do Google Cloud:</p>' +
+              '<p class="dica" style="margin-top:16px">Este endereço precisa estar cadastrado como <strong>URI de redirecionamento autorizado</strong> no cliente OAuth do Google Cloud:</p>' +
               '<div class="endereco"><div class="linha"><code>' + esc(inicio.redirect_uri) + '</code>' +
               '<button class="copiar" data-url="' + esc(inicio.redirect_uri) + '">copiar</button></div></div>'
             : '<div class="erro">não foi possível gerar o link: ' + esc(falha || 'sem detalhe') + '</div>') +

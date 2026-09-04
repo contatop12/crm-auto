@@ -81,6 +81,20 @@ export interface PlanoGtm {
   builtInACriar: string[];
   /** Ja estao no container e nao sao tocadas. */
   jaExistem: string[];
+  /**
+   * Quantas ja estao no lugar, por tipo.
+   *
+   * A tela so' conseguia mostrar a categoria com pendencia; as demais sumiam, e
+   * categoria invisivel se le como "nao conferi" em vez de "esta tudo certo".
+   * Com a contagem por tipo da' para afirmar as duas coisas.
+   */
+  jaExistemPorTipo: {
+    templates: number;
+    variaveis: number;
+    gatilhos: number;
+    tags: number;
+    builtIn: number;
+  };
   /** Constantes que ficariam com o valor de exemplo do modelo. */
   semValor: string[];
 }
@@ -121,6 +135,15 @@ export function planejarGtm(
   const variaveis = faltando(modelo.variable, noContainer.variaveis, 'variável')
     .map((v) => preencherConstantes(v, valores));
 
+  // As integradas nao passam pelo `faltando` — o GTM as identifica por `type`,
+  // nao por nome — entao ficavam de fora da contagem de "ja existem".
+  const doModelo = modelo.builtInVariable.map((b) => String(b.type ?? '')).filter(Boolean);
+  const builtIn = doModelo.filter((t) => !noContainer.builtIn.includes(t));
+  const builtInExistentes = doModelo.length - builtIn.length;
+
+  const contar = (rotulo: string) =>
+    jaExistem.filter((x) => x.startsWith(`${rotulo}: `)).length;
+
   // Constante que continuaria com o exemplo do modelo faria o container
   // apontar para o n8n antigo; vazia faria o coletor postar para lugar nenhum.
   // Os dois falham em silencio — o GTM nao reclama de URL que nao responde.
@@ -137,10 +160,15 @@ export function planejarGtm(
     variaveisACriar: variaveis,
     gatilhosACriar: faltando(modelo.trigger, noContainer.gatilhos, 'gatilho'),
     tagsACriar: faltando(modelo.tag, noContainer.tags, 'tag'),
-    builtInACriar: modelo.builtInVariable
-      .map((b) => String(b.type ?? ''))
-      .filter((t) => t && !noContainer.builtIn.includes(t)),
+    builtInACriar: builtIn,
     jaExistem,
+    jaExistemPorTipo: {
+      templates: contar('template'),
+      variaveis: contar('variável'),
+      gatilhos: contar('gatilho'),
+      tags: contar('tag'),
+      builtIn: builtInExistentes,
+    },
     semValor,
   };
 }

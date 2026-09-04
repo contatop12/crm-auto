@@ -1104,6 +1104,7 @@ admin.post('/tenants/:id/gtm/padronizar', async (c) => {
       built_in: plano.builtInACriar,
     },
     ja_existem: plano.jaExistem,
+    ja_existem_por_tipo: plano.jaExistemPorTipo,
     sem_valor: plano.semValor,
   };
 
