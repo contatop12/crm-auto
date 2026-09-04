@@ -42,6 +42,15 @@
         --ui: 'Archivo', ui-sans-serif, system-ui, sans-serif;
         --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
+        /* Escala de espaço: múltiplos de 8, com 4 como meio-passo para pares
+           que pertencem um ao outro (rótulo e valor). Nada fora disto. */
+        --e0: 4px;
+        --e1: 8px;
+        --e2: 16px;
+        --e3: 24px;
+        --e4: 32px;
+        --e5: 48px;
+
         --r: 5px;
         --sombra: 0 1px 2px rgba(23, 25, 28, .04), 0 1px 1px rgba(23, 25, 28, .03);
       }
@@ -67,16 +76,16 @@
         border-bottom: 1px solid var(--linha);
       }
       .marca {
-        display: flex; align-items: center; gap: 9px;
+        display: flex; align-items: center; gap: 8px;
         font-weight: 700; font-size: 15px; letter-spacing: -.015em;
         white-space: nowrap;
       }
       .marca svg { color: var(--fluxo); }
 
-      .menu { display: flex; gap: 2px; margin-right: auto; }
+      .menu { display: flex; gap: 4px; margin-right: auto; }
       .menu button {
-        display: inline-flex; align-items: center; gap: 7px;
-        padding: 7px 11px; border: 0; border-radius: var(--r);
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 8px 8px; border: 0; border-radius: var(--r);
         background: none; color: var(--tinta-2);
         font: inherit; font-size: 13px; cursor: pointer;
       }
@@ -89,45 +98,37 @@
         white-space: nowrap;
       }
 
-      main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 96px; }
+      main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 96px; }
 
       /* ---------- tipografia ---------- */
 
-      h1 { font-size: 26px; font-weight: 700; letter-spacing: -.025em; margin: 0 0 2px; }
+      h1 { font-size: 26px; font-weight: 700; letter-spacing: -.025em; margin: 0 0 4px; }
       h2 {
         font-size: 15px; font-weight: 650; letter-spacing: -.01em;
         margin: 0; color: var(--tinta);
       }
       .sub-titulo { color: var(--tinta-2); font-size: 13px; margin: 0; }
       .id { font-family: var(--mono); font-size: 12px; color: var(--tinta-3); }
-      .dica { color: var(--tinta-2); font-size: 12.5px; margin: 5px 0 0; max-width: 62ch; }
+      .dica { color: var(--tinta-2); font-size: 12.5px; margin: 8px 0 0; max-width: 62ch; }
       .carregando { color: var(--tinta-3); font-size: 13px; }
+      .pista { display: block; margin-top: var(--e0); color: var(--tinta-2); }
       .motivo { color: var(--tinta-2); }
       .mono { font-family: var(--mono); font-size: 12px; }
       .nada { color: var(--tinta-3); }
       .sub {
         display: block; font-family: var(--mono); font-size: 11px;
-        color: var(--tinta-3); margin-top: 2px;
+        color: var(--tinta-3); margin-top: 4px;
       }
 
-      /* ---------- seção sanfonada ---------- */
+      /* ---------- seção ----------
+         Régua e espaço, sem caixa e sem dobrar. O conteúdo de uma seção está
+         sempre à vista: esconder atrás de um clique fazia procurar o que já
+         estava na tela. */
 
-      section { border-top: 1px solid var(--linha); }
-      section:first-of-type { border-top: 0; }
-
-      .cabeca {
-        display: flex; align-items: center; gap: 10px; width: 100%;
-        padding: 18px 0 16px; border: 0; background: none;
-        font: inherit; text-align: left; cursor: pointer; color: inherit;
-      }
-      .cabeca .seta { color: var(--tinta-3); transition: transform .18s ease; flex: none; }
-      .cabeca[aria-expanded='false'] .seta { transform: rotate(-90deg); }
-      .cabeca .conta {
-        margin-left: auto; font-family: var(--mono); font-size: 12px;
-        color: var(--tinta-3); flex: none;
-      }
-      .corpo-secao { padding-bottom: 26px; }
-      .corpo-secao[hidden] { display: none; }
+      section { border-top: 1px solid var(--linha); padding: var(--e4) 0; }
+      section:first-of-type { border-top: 0; padding-top: 0; }
+      section:last-child { padding-bottom: 0; }
+      section > h2 { margin: 0 0 var(--e2); }
 
       /* Barra de carregamento: um tratamento só, em toda a tela. */
       .barra { height: 2px; background: var(--linha); overflow: hidden; border-radius: 2px; }
@@ -149,7 +150,7 @@
       button, select, input {
         font: inherit; color: var(--tinta);
         border: 1px solid var(--linha-forte); border-radius: var(--r);
-        background: var(--carta); padding: 6px 11px;
+        background: var(--carta); padding: 8px 8px;
       }
       button { cursor: pointer; box-shadow: var(--sombra); }
       button:hover:not(:disabled) { border-color: var(--tinta-3); }
@@ -163,10 +164,10 @@
       :focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
 
       .linha-acoes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-      .campo { margin-bottom: 14px; }
-      .campo label { display: block; font-size: 13px; font-weight: 550; margin-bottom: 5px; }
+      .campo { margin-bottom: 16px; }
+      .campo label { display: block; font-size: 13px; font-weight: 550; margin-bottom: 8px; }
       .campo input, .campo select { width: 100%; }
-      .grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0 18px; }
+      .grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0 24px; }
 
       /* Ícone dentro de botão: alinhado à baseline visual do texto. */
       button svg, .marca svg, .menu svg { flex: none; vertical-align: -2px; }
@@ -180,7 +181,7 @@
         transform: translateX(-50%);
         background: var(--tinta); color: #fff;
         font: 12px/1.4 var(--ui); white-space: nowrap;
-        padding: 5px 9px; border-radius: 4px;
+        padding: 8px 8px; border-radius: 4px;
         opacity: 0; pointer-events: none; transition: opacity .12s;
         z-index: 40;
       }
@@ -191,12 +192,12 @@
       table { width: 100%; border-collapse: collapse; }
       th {
         text-align: left; font-size: 11.5px; font-weight: 600;
-        color: var(--tinta-3); padding: 0 12px 8px 0;
+        color: var(--tinta-3); padding: 0 16px 8px 0;
         border-bottom: 1px solid var(--linha);
         white-space: nowrap;
       }
       td {
-        padding: 11px 12px 11px 0; border-bottom: 1px solid var(--linha);
+        padding: 8px 16px 8px 0; border-bottom: 1px solid var(--linha);
         vertical-align: top; font-size: 13px;
       }
       tr:last-child td { border-bottom: 0; }
@@ -208,7 +209,7 @@
       .st-ignorado, .st-recebido { color: var(--espera); }
 
       .tag {
-        display: inline-block; padding: 1px 6px; border-radius: 3px;
+        display: inline-block; padding: var(--e0) var(--e1); border-radius: 3px;
         border: 1px solid var(--linha-forte); color: var(--tinta-2);
         font-size: 11.5px; line-height: 16px; white-space: nowrap;
       }
@@ -220,21 +221,21 @@
       .cliente {
         display: block; width: 100%; text-align: left;
         background: var(--carta); border: 1px solid var(--linha);
-        border-radius: 8px; padding: 16px 18px; margin-bottom: 10px;
+        border-radius: 8px; padding: 16px 24px; margin-bottom: 8px;
         box-shadow: var(--sombra); cursor: pointer;
       }
       .cliente:hover { border-color: var(--tinta-3); }
-      .cliente .topo-linha { display: flex; align-items: baseline; gap: 10px; }
+      .cliente .topo-linha { display: flex; align-items: baseline; gap: 8px; }
       .cliente .nome { font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
       .cliente .sinal { margin-left: auto; font-size: 11.5px; font-weight: 600; }
       .cliente .numeros {
-        margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--tinta-2);
-        display: flex; gap: 18px; flex-wrap: wrap;
+        margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--tinta-2);
+        display: flex; gap: 24px; flex-wrap: wrap;
       }
 
       /* A trilha é a assinatura da tela: um tick por webhook, do mais velho
          ao mais novo. É o que se olha primeiro para saber se algo travou. */
-      .trilha { display: flex; gap: 2px; margin: 12px 0 0; height: 22px; align-items: flex-end; }
+      .trilha { display: flex; gap: 4px; margin: 16px 0 0; height: 22px; align-items: flex-end; }
       .tick { width: 5px; height: 100%; border-radius: 1px; background: var(--parado); }
       .tick-ok { background: var(--fluxo); }
       .tick-erro { background: var(--falha); height: 100%; }
@@ -243,13 +244,13 @@
       /* ---------- abas ---------- */
 
       .abas {
-        display: flex; gap: 2px; border-bottom: 1px solid var(--linha);
-        margin: 20px 0 4px; overflow-x: auto;
+        display: flex; gap: 4px; border-bottom: 1px solid var(--linha);
+        margin: 24px 0 4px; overflow-x: auto;
       }
       .aba {
         border: 0; border-bottom: 2px solid transparent; border-radius: 0;
         background: none; box-shadow: none;
-        padding: 9px 13px; color: var(--tinta-2); font-size: 13.5px; white-space: nowrap;
+        padding: 8px 16px; color: var(--tinta-2); font-size: 13.5px; white-space: nowrap;
       }
       .aba:hover { color: var(--tinta); border-color: var(--linha-forte); }
       .aba[aria-selected='true'] { color: var(--tinta); border-color: var(--tinta); font-weight: 600; }
@@ -258,29 +259,29 @@
 
       .aviso, .erro {
         border-left: 3px solid var(--espera); background: rgba(154, 91, 18, .05);
-        padding: 11px 14px; border-radius: 0 var(--r) var(--r) 0;
-        font-size: 13px; color: var(--tinta-2); margin: 14px 0 0;
+        padding: 8px 16px; border-radius: 0 var(--r) var(--r) 0;
+        font-size: 13px; color: var(--tinta-2); margin: 16px 0 0;
       }
       .erro { border-color: var(--falha); background: rgba(163, 43, 32, .05); color: var(--falha); }
 
       .vazio {
-        text-align: center; padding: 40px 20px; color: var(--tinta-2);
+        text-align: center; padding: 40px 24px; color: var(--tinta-2);
         border: 1px dashed var(--linha-forte); border-radius: 8px;
       }
-      .vazio p { margin: 0 0 6px; }
+      .vazio p { margin: 0 0 8px; }
       .vazio .mono { color: var(--tinta-3); }
 
       pre {
         background: var(--carta); border: 1px solid var(--linha); border-radius: var(--r);
-        padding: 14px; overflow: auto; max-height: 460px;
-        font: 12px/1.6 var(--mono); margin: 12px 0 0;
+        padding: 16px; overflow: auto; max-height: 460px;
+        font: 12px/1.6 var(--mono); margin: 16px 0 0;
       }
 
       /* ---------- paginação ---------- */
 
-      .paginacao { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
-      .paginacao label { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; font-size: 12.5px; color: var(--tinta-3); }
-      .paginacao select { padding: 4px 7px; font-size: 12.5px; }
+      .paginacao { display: flex; align-items: center; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
+      .paginacao label { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12.5px; color: var(--tinta-3); }
+      .paginacao select { padding: 4px 8px; font-size: 12.5px; }
 
       /* ---------- gaveta ---------- */
 
@@ -300,46 +301,46 @@
       @media (prefers-reduced-motion: reduce) { .gaveta { animation: none; } }
 
       .gaveta header {
-        display: flex; align-items: center; justify-content: space-between; gap: 12px;
-        padding: 16px 20px; border-bottom: 1px solid var(--linha);
+        display: flex; align-items: center; justify-content: space-between; gap: 16px;
+        padding: 16px 24px; border-bottom: 1px solid var(--linha);
       }
-      .gaveta .fechar { border: 0; background: none; box-shadow: none; padding: 6px; color: var(--tinta-2); }
+      .gaveta .fechar { border: 0; background: none; box-shadow: none; padding: 8px; color: var(--tinta-2); }
       .gaveta .lista { max-height: 36%; overflow-y: auto; border-bottom: 1px solid var(--linha); }
       .gaveta .item {
-        display: grid; gap: 2px 10px; width: 100%; text-align: left;
+        display: grid; gap: 4px 8px; width: 100%; text-align: left;
         grid-template-columns: max-content max-content 1fr;
-        padding: 10px 20px; border: 0; border-bottom: 1px solid var(--linha);
+        padding: 8px 24px; border: 0; border-bottom: 1px solid var(--linha);
         border-radius: 0; background: none; box-shadow: none;
       }
       .gaveta .item:hover { background: rgba(23, 25, 28, .03); }
       .gaveta .item.ativo { background: var(--carta); box-shadow: inset 3px 0 0 var(--tinta); }
       .gaveta .item .quando { font-family: var(--mono); font-size: 12px; }
       .gaveta .item .sub { grid-column: 1 / -1; }
-      .gaveta .corpo { flex: 1; overflow-y: auto; padding: 18px 20px; }
+      .gaveta .corpo { flex: 1; overflow-y: auto; padding: 24px 24px; }
       .gaveta .corpo pre { max-height: none; }
 
       /* ---------- endereços e resumo ---------- */
 
-      .endereco { margin-bottom: 18px; }
-      .endereco .rotulo { font-weight: 600; font-size: 13px; margin-bottom: 5px; }
+      .endereco { margin-bottom: 24px; }
+      .endereco .rotulo { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
       .endereco .linha { display: flex; gap: 8px; }
       .endereco code {
         flex: 1; font: 12px/1.5 var(--mono);
         background: var(--carta); border: 1px solid var(--linha); border-radius: var(--r);
-        padding: 8px 10px; overflow-x: auto; white-space: nowrap; user-select: all;
+        padding: 8px 8px; overflow-x: auto; white-space: nowrap; user-select: all;
       }
-      .endereco .uso { margin-top: 5px; }
+      .endereco .uso { margin-top: 8px; }
 
       dl.resumo {
-        display: grid; grid-template-columns: max-content 1fr; gap: 3px 16px;
-        margin: 0 0 14px; font-size: 12.5px;
+        display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px;
+        margin: 0 0 16px; font-size: 12.5px;
       }
       dl.resumo dt { color: var(--tinta-3); }
       dl.resumo dd { margin: 0; font-family: var(--mono); }
 
       /* ---------- interruptor ---------- */
 
-      .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
+      .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
       .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
       .switch .trilho {
         width: 38px; height: 21px; border-radius: 11px;
@@ -359,7 +360,7 @@
 
       a.botao-link {
         display: inline-block; text-decoration: none; font: inherit;
-        padding: 6px 13px; border-radius: var(--r);
+        padding: 8px 16px; border-radius: var(--r);
         background: var(--tinta); color: #fff;
       }
 
@@ -375,32 +376,38 @@
       .wrap { min-height: 100%; }
       .painel[hidden] { display: none; }
 
-      .cliente-topo { display: flex; align-items: baseline; gap: 10px; }
+      .cliente-topo { display: flex; align-items: baseline; gap: 8px; }
       .cliente-nome { font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
       .cliente-sinal { margin-left: auto; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
       .sinal-ok { color: var(--fluxo); }
       .sinal-erro { color: var(--falha); }
       .sinal-silencio { color: var(--tinta-3); }
       .cliente-stats {
-        margin-top: 10px; font-family: var(--mono); font-size: 12px;
-        color: var(--tinta-2); display: flex; gap: 18px; flex-wrap: wrap;
+        margin-top: 8px; font-family: var(--mono); font-size: 12px;
+        color: var(--tinta-2); display: flex; gap: 24px; flex-wrap: wrap;
       }
-      .cliente-erro { margin-top: 6px; font-size: 12.5px; color: var(--falha); }
-      .trilha-vazia { color: var(--tinta-3); font-size: 12.5px; margin: 12px 0 0; }
+      .cliente-erro {
+        flex-basis: 100%; margin-top: var(--e1); font-size: 12.5px;
+        color: var(--falha); line-height: 1.5;
+      }
+      .trilha-vazia { color: var(--tinta-3); font-size: 12.5px; margin: 16px 0 0; }
 
       /* Fluxo do lead: as cinco etapas que interessam monitorar. Cada linha é
          estado + o que a etapa é + como ela funciona. */
       .checagem {
-        display: flex; gap: 14px; align-items: baseline;
-        padding: 11px 0; border-bottom: 1px solid var(--linha);
+        display: flex; gap: var(--e2); align-items: baseline;
+        padding: var(--e2) 0; border-bottom: 1px solid var(--linha);
       }
-      .checagem:last-child { border-bottom: 0; }
+      .checagem:first-child { padding-top: 0; }
+      .checagem:last-child { border-bottom: 0; padding-bottom: 0; }
       .checagem-marca {
-        flex: none; width: 62px; font-size: 11.5px; font-weight: 650;
+        flex: none; width: 64px; font-size: 11.5px; font-weight: 650;
         text-transform: lowercase;
       }
       .checagem-titulo { flex: none; font-weight: 550; font-size: 13.5px; }
       .checagem-detalhe { color: var(--tinta-2); font-size: 12.5px; line-height: 1.5; }
+      /* O `<br>` colava as duas linhas. Descrição é outra frase, não continuação. */
+      .checagem-como { display: block; margin-top: var(--e0); color: var(--tinta-3); }
       .marca-ok { color: var(--fluxo); }
       .marca-erro { color: var(--falha); }
       .marca-aviso { color: var(--espera); }
@@ -408,8 +415,8 @@
 
       @media (max-width: 720px) {
         .esconder-mobile { display: none; }
-        main { padding: 20px 16px 72px; }
-        .topo { gap: 12px; padding: 0 16px; }
+        main { padding: 24px 16px 72px; }
+        .topo { gap: 16px; padding: 0 16px; }
         .menu button span { display: none; }
       }
     </style>
@@ -433,7 +440,6 @@
         padroes: 'M4 7h16M4 12h16M4 17h9M18.5 15.5l2 2 3-3.5',
         google: 'M12 3a9 9 0 100 18 9 9 0 000-18zM3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 000 18M12 3a14 14 0 010 18',
         mais: 'M12 5v14M5 12h14',
-        seta: 'M6 9l6 6 6-6',
         editar: 'M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4',
         conferir: 'M20 6L9 17l-5-5',
         atualizar: 'M21 12a9 9 0 11-3-6.7M21 4v5h-5',
@@ -441,7 +447,6 @@
         fechar: 'M6 6l12 12M18 6L6 18',
         anterior: 'M15 18l-6-6 6-6',
         proxima: 'M9 6l6 6-6 6',
-        alerta: 'M12 9v4M12 17h.01M10.3 4l-8 14a2 2 0 001.7 3h16a2 2 0 001.7-3l-8-14a2 2 0 00-3.4 0z',
       };
 
       function ic(nome, tam) {
@@ -460,51 +465,6 @@
        * a esconder mais do que mostra. O estado de cada uma fica no navegador,
        * porque quem abre "Etiquetas" toda vez quer ela aberta amanhã também.
        */
-      /**
-       * Transforma `<section><h2>` em sanfona, depois de renderizado.
-       *
-       * Agir sobre o DOM em vez de reescrever os oito blocos de template deixa
-       * o conteúdo de cada seção onde estava. O estado de aberta fica no
-       * navegador: quem abre "Etiquetas" toda vez quer ela aberta amanhã.
-       */
-      function sanfonar(raiz) {
-        (raiz || document).querySelectorAll('section > h2').forEach(function (h) {
-          const sec = h.parentElement;
-          if (sec.dataset.sanfona) return;
-          sec.dataset.sanfona = '1';
-
-          const chave = (h.textContent || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
-          let aberta = true;
-          try {
-            const v = localStorage.getItem('sec:' + chave);
-            if (v !== null) aberta = v === '1';
-          } catch { /* sem armazenamento: abre */ }
-
-          const corpo = document.createElement('div');
-          corpo.className = 'corpo-secao';
-          while (h.nextSibling) corpo.appendChild(h.nextSibling);
-
-          const cabeca = document.createElement('button');
-          cabeca.className = 'cabeca';
-          cabeca.setAttribute('aria-expanded', String(aberta));
-          cabeca.innerHTML = '<span class="seta">' + ic('seta') + '</span>' +
-            '<h2>' + esc(h.textContent || '') + '</h2>';
-
-          h.remove();
-          sec.appendChild(cabeca);
-          sec.appendChild(corpo);
-          corpo.hidden = !aberta;
-
-          cabeca.addEventListener('click', function () {
-            const abrir = cabeca.getAttribute('aria-expanded') !== 'true';
-            cabeca.setAttribute('aria-expanded', String(abrir));
-            corpo.hidden = !abrir;
-            try { localStorage.setItem('sec:' + chave, abrir ? '1' : '0'); }
-            catch { /* segue sem lembrar */ }
-          });
-        });
-      }
-
       /** Um tratamento de carregamento só, em toda a tela. */
       const CARREGANDO = '<div class="barra"></div>';
 
@@ -615,7 +575,7 @@
                   c.erros_24h === 1 ? 'erro' : 'erros'
                 } · <b>${c.leads}</b> leads · <b>${c.conversoes_enviadas}</b> conversões
                 · último evento ${haQuanto(c.ultimo_evento_em)}
-                ${c.ultimo_erro_motivo ? `<br><span class="cliente-erro">último erro: ${esc(c.ultimo_erro_motivo)}</span>` : ''}
+                ${c.ultimo_erro_motivo ? `<span class="cliente-erro">último erro: ${esc(c.ultimo_erro_motivo)}</span>` : ''}
               </div>
             </button>`;
           })
@@ -846,7 +806,6 @@
         });
 
         abrirAba('fluxo');
-        sanfonar(tela);
         rodape.textContent = new Date().toLocaleTimeString('pt-BR');
         menuAtivo(null);
       }
@@ -1475,9 +1434,9 @@
                 estado.innerHTML = '<span class="st-ok">aviso entregue — confira o grupo</span>';
               } else {
                 estado.innerHTML = '<span class="st-erro">' + esc(r.erro) + '</span>' +
-                  (r.permanente
-                    ? '<br>é cadastro: corrija o codi_id aqui ou peça a rota no Pulseboard. Tentar de novo dá o mesmo.'
-                    : '<br>pode ser passageiro — tente de novo em instantes');
+                  '<span class="pista">' + (r.permanente
+                    ? 'é cadastro: corrija a URL aqui ou peça a rota no Pulseboard. Tentar de novo dá o mesmo.'
+                    : 'pode ser passageiro — tente de novo em instantes') + '</span>';
               }
             } catch (e) {
               estado.innerHTML = '<span class="st-erro">' + esc(e.message) + '</span>';
@@ -1542,7 +1501,7 @@
               '<span class="checagem-marca ' + marca[e.estado] + '">' + rotulo[e.estado] + '</span>' +
               '<span class="checagem-titulo" style="min-width:210px">' + esc(e.titulo) + '</span>' +
               '<span class="checagem-detalhe">' + esc(e.detalhe) +
-              '<br><span style="color:var(--tinta-3)">' + esc(e.comoFunciona) + '</span></span>' +
+              '<span class="checagem-como">' + esc(e.comoFunciona) + '</span></span>' +
               '</div>';
           }).join('');
       }
@@ -2493,8 +2452,6 @@
               '</section>';
           }).join('') +
           '<div id="padroes-erro"></div>';
-
-        sanfonar(tela);
         menuAtivo('btn-padroes');
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
 
@@ -2582,8 +2539,6 @@
               '<button class="copiar" data-url="' + esc(inicio.redirect_uri) + '">copiar</button></div></div>'
             : '<div class="erro">não foi possível gerar o link: ' + esc(falha || 'sem detalhe') + '</div>') +
           '</section>';
-
-        sanfonar(tela);
         menuAtivo('btn-google');
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
         tela.querySelectorAll('.copiar').forEach(function (b) {
