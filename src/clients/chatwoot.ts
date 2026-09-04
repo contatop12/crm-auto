@@ -51,6 +51,12 @@ export interface CwTask {
   value: string | null;
 }
 
+interface RegraCw {
+  name?: unknown;
+  active?: unknown;
+  actions?: Array<{ action_name?: unknown; action_params?: unknown[] }>;
+}
+
 export class ChatwootClient {
   constructor(
     private readonly baseUrl: string,
@@ -104,6 +110,29 @@ export class ChatwootClient {
       `/api/v1/accounts/${acc}/webhooks`,
     );
     return r.payload?.webhooks ?? [];
+  }
+
+  /**
+   * Regras de automacao da conta, reduzidas ao webhook que cada uma dispara.
+   *
+   * E' o que responde "o Chatwoot esta mesmo apontando para o Worker?". Sem
+   * isso, uma regra desligada ou com a chave antiga aparece na tela como
+   * "nunca recebeu", igualzinho a uma que nunca foi criada.
+   */
+  async automacoes(acc: number): Promise<Array<{ nome: string; ativa: boolean; urls: string[] }>> {
+    const r = await this.req<{
+      payload?: RegraCw[];
+    } | RegraCw[]>('GET', `/api/v1/accounts/${acc}/automation_rules`);
+
+    const regras = Array.isArray(r) ? r : (r.payload ?? []);
+    return regras.map((g) => ({
+      nome: String(g.name ?? ''),
+      ativa: g.active !== false,
+      urls: (g.actions ?? [])
+        .filter((a) => String(a.action_name ?? '').includes('webhook'))
+        .flatMap((a) => (a.action_params ?? []).map(String))
+        .filter((u) => /^https?:\/\//i.test(u)),
+    }));
   }
 
   async labels(acc: number): Promise<string[]> {

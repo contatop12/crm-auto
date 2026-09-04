@@ -111,6 +111,10 @@
       .id { font-family: var(--mono); font-size: 12px; color: var(--tinta-3); }
       .dica { color: var(--tinta-2); font-size: 12.5px; margin: 8px 0 0; max-width: 62ch; }
       .carregando { color: var(--tinta-3); font-size: 13px; }
+      /* Veredito da conferência, sob cada endereço. Vazio até alguém pedir:
+         a leitura vai às contas dos clientes, então não roda sozinha. */
+      .conferencia:not(:empty) { margin-top: var(--e1); font-size: 12.5px; line-height: 1.5; }
+      .conf-detalhe { color: var(--tinta-2); }
 
       /* Plano do GTM: uma linha por categoria, sempre as cinco. A que não tem
          pendência precisa dizer isso — sumir da tela se lê como "não conferi". */
@@ -2168,27 +2172,29 @@
             (d.erros ? ' · ' + d.erros + ' com erro' : '') + '</span>';
         };
 
-        const bloco = function (rotulo, url, dica, dados) {
+        const bloco = function (chave, rotulo, url, dica, dados) {
           return '<div class="endereco">' +
             '<div class="rotulo">' + esc(rotulo) + '</div>' +
             '<div class="linha"><code>' + esc(url) + '</code>' +
             '<button class="copiar" data-url="' + esc(url) + '">copiar</button></div>' +
             '<p class="dica">' + dica + '</p>' +
-            '<div class="uso">' + recebeu(dados) + '</div></div>';
+            '<div class="uso">' + recebeu(dados) + '</div>' +
+            '<div class="conferencia" id="conf-' + chave + '"></div></div>';
         };
 
         alvo.innerHTML =
           '<div class="linha-acoes" style="margin-bottom:16px">' +
             '<button id="btn-testar-chave">' + ic('conferir') + 'Testar a chave</button>' +
-            '<span class="carregando" id="chave-estado">confere se o endereço abre, sem gravar nada</span>' +
+            '<button id="btn-conferir-origem">' + ic('atualizar') + 'Conferir a configuração</button>' +
+            '<span class="carregando" id="chave-estado">a chave confere se o endereço abre; a configuração, se o GTM e o Chatwoot apontam para cá</span>' +
           '</div>' +
-          bloco('GTM · clique no anúncio', base + '/click' + k,
+          bloco('click', 'GTM · clique no anúncio', base + '/click' + k,
             'POST com o corpo do clique. Grava a linha em <strong>leads</strong>, que é o que o protocolo da mensagem casa depois.',
             uso.click) +
-          bloco('Chatwoot · entrada no funil (avisa o grupo)', base + '/kanban' + k,
+          bloco('kanban_entrada', 'Chatwoot · entrada no funil (avisa o grupo)', base + '/kanban' + k,
             'Ação <strong>Enviar evento de webhook</strong> numa automação de <em>kanban_task_updated</em>, com o board do funil e a etapa de entrada.',
             uso.kanban_entrada) +
-          bloco('Chatwoot · conversão por etapa', base + '/kanban' + k + '&evento=conversao',
+          bloco('kanban_conversao', 'Chatwoot · conversão por etapa', base + '/kanban' + k + '&evento=conversao',
             'Já está nas regras <strong>Evento Qualificado</strong> e <strong>Compra</strong>. O <code>&amp;evento=conversao</code> impede que elas disparem aviso de lead novo.',
             uso.kanban_conversao) +
           '<div class="aviso">A chave vai na própria URL, porque nem o GTM nem a automação do Chatwoot mandam header. ' +
@@ -2216,6 +2222,50 @@
             est.textContent = 'não respondeu: ' + e.message;
             est.className = 'st-erro';
           }
+        });
+
+        /**
+         * A pergunta que faltava: o outro lado está apontando para cá?
+         *
+         * "Nunca recebeu" tem três causas com consertos opostos — ninguém
+         * colou, colaram com a chave antiga, ou a regra está desligada. A tela
+         * mostrava as três com a mesma frase.
+         */
+        document.getElementById('btn-conferir-origem').addEventListener('click', async function () {
+          const b = document.getElementById('btn-conferir-origem');
+          const est = document.getElementById('chave-estado');
+          b.disabled = true;
+          est.className = 'carregando';
+          est.textContent = 'lendo o GTM e o Chatwoot…';
+
+          ['click', 'kanban_entrada', 'kanban_conversao'].forEach(function (n) {
+            document.getElementById('conf-' + n).innerHTML = '<div class="barra"></div>';
+          });
+
+          try {
+            const r = await api('/tenants/' + id + '/webhooks/conferir');
+            const marca = { ok: 'st-ok', erro: 'st-erro', falta: 'st-ignorado' };
+            const rotulo = { ok: 'configurado', erro: 'atenção', falta: 'não configurado' };
+            let ruins = 0;
+            ['click', 'kanban_entrada', 'kanban_conversao'].forEach(function (n) {
+              const v = r[n] || { estado: 'falta', detalhe: 'sem resposta' };
+              if (v.estado !== 'ok') ruins++;
+              document.getElementById('conf-' + n).innerHTML =
+                '<span class="' + marca[v.estado] + '"><strong>' + rotulo[v.estado] + '</strong></span> ' +
+                '<span class="conf-detalhe">' + esc(v.detalhe) + '</span>';
+            });
+            est.className = ruins ? 'st-erro' : 'st-ok';
+            est.textContent = ruins
+              ? ruins + (ruins > 1 ? ' endereços precisam de atenção' : ' endereço precisa de atenção')
+              : 'os três endereços estão configurados na origem';
+          } catch (e) {
+            est.className = 'st-erro';
+            est.textContent = 'não deu para conferir: ' + e.message;
+            ['click', 'kanban_entrada', 'kanban_conversao'].forEach(function (n) {
+              document.getElementById('conf-' + n).innerHTML = '';
+            });
+          }
+          b.disabled = false;
         });
 
         alvo.querySelectorAll('.copiar').forEach(function (b) {

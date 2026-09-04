@@ -12,6 +12,8 @@ import { maskPayload, maskPhone } from '../domain/mask';
 import { resumirEvento, encurtarNome } from '../domain/resumoEvento';
 import { checarTenant, type TenantParaChecagem } from '../health/checks';
 import { ChatwootClient } from '../clients/chatwoot';
+import { TagManagerClient } from '../clients/tagManager';
+import { conferirNoChatwoot, conferirNoGtm, type Veredito } from '../domain/conferencia';
 
 /**
  * API do painel. Tudo aqui passa pelo `requireAccess` — o Access na frente do
@@ -162,6 +164,95 @@ api.get('/tenants/:id/ingest-status', async (c) => {
     kanban_conversao: junta((l) => l.event_type === 'kanban_conversao'),
   });
 });
+
+/**
+ * O outro lado esta' mesmo apontando para ca'?
+ *
+ * A terceira pergunta, que faltava. `/ping` prova que a chave ABRE a porta;
+ * `ingest-status` prova que alguem JA' USOU o endereco. Nenhuma das duas
+ * explica um "nunca recebeu" — que pode ser endereco nao colado, colado com a
+ * chave antiga, ou regra desligada. Sao tres consertos diferentes, e a tela
+ * mostrava os tres com a mesma frase.
+ *
+ * Le' a conta do cliente ao vivo. Uma checagem que confia no nosso proprio
+ * banco nao serviria: o que se quer saber e' justamente o que esta' do outro
+ * lado.
+ */
+api.get('/tenants/:id/webhooks/conferir', async (c) => {
+  const id = Number(c.req.param('id'));
+  const cfg = await c.env.DB.prepare(
+    `SELECT t.slug, c.cw_account_id, c.ingest_key, c.gtm_account_id, c.gtm_container_id
+     FROM tenants t LEFT JOIN tenant_config c ON c.tenant_id = t.id WHERE t.id = ?`,
+  )
+    .bind(id)
+    .first<{
+      slug: string; cw_account_id: number | null; ingest_key: string | null;
+      gtm_account_id: string | null; gtm_container_id: string | null;
+    }>();
+
+  if (!cfg?.ingest_key) return c.json({ error: 'cliente sem chave de ingestao' }, 400);
+
+  const base = `${new URL(c.req.url).origin}/ingest/${cfg.slug}`;
+  const k = `?k=${encodeURIComponent(cfg.ingest_key)}`;
+
+  // Contas diferentes, uma nao depende da outra: vao juntas.
+  const [gtm, chatwoot] = await Promise.all([
+    lerGtm(c.env, cfg, `${base}/click${k}`),
+    lerRegrasDoChatwoot(c.env, cfg.cw_account_id),
+  ]);
+
+  return c.json({
+    click: gtm,
+    kanban_entrada: chatwoot(`${base}/kanban${k}`),
+    kanban_conversao: chatwoot(`${base}/kanban${k}&evento=conversao`),
+  });
+});
+
+interface CfgConferencia {
+  gtm_account_id: string | null;
+  gtm_container_id: string | null;
+}
+
+async function lerGtm(env: Env, cfg: CfgConferencia, esperada: string): Promise<Veredito> {
+  try {
+    if (!cfg.gtm_account_id || !cfg.gtm_container_id) {
+      return { estado: 'falta', detalhe: 'cliente sem container do GTM no cadastro' };
+    }
+    const tm = await TagManagerClient.deD1(env);
+    if (!tm) return { estado: 'falta', detalhe: 'Tag Manager sem autorizacao — veja Acesso Google' };
+
+    const ws = await tm.workspacePadrao(cfg.gtm_account_id, cfg.gtm_container_id);
+    const valor = await tm.valorDaConstante(
+      cfg.gtm_account_id, cfg.gtm_container_id, ws.workspaceId, '00 - [P12] COLLECT URL',
+    );
+    return conferirNoGtm(esperada, valor);
+  } catch (e) {
+    // nao conseguir LER a conta e' diferente de a conta estar errada
+    return { estado: 'erro', detalhe: `nao deu para ler o GTM: ${(e as Error).message.slice(0, 160)}` };
+  }
+}
+
+/**
+ * Devolve uma funcao que julga qualquer endereco contra as regras da conta.
+ *
+ * As regras sao lidas UMA vez e reaproveitadas para os dois enderecos do
+ * Kanban — sao a mesma lista, e pedir duas vezes so' dobraria a chamada.
+ */
+async function lerRegrasDoChatwoot(
+  env: Env,
+  accountId: number | null,
+): Promise<(alvo: string) => Veredito> {
+  if (!accountId) {
+    return () => ({ estado: 'falta', detalhe: 'cliente sem conta do Chatwoot no cadastro' });
+  }
+  try {
+    const regras = await ChatwootClient.fromEnv(env).automacoes(accountId);
+    return (alvo) => conferirNoChatwoot(alvo, regras);
+  } catch (e) {
+    const msg = (e as Error).message.slice(0, 160);
+    return () => ({ estado: 'erro', detalhe: `nao deu para ler o Chatwoot: ${msg}` });
+  }
+}
 
 /**
  * Corpo de um webhook recebido.

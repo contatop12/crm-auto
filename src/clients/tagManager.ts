@@ -164,6 +164,25 @@ export class TagManagerClient {
     );
 
   /** A versao no ar agora, para a tela dizer o que o site esta usando. */
+  /**
+   * O valor de uma constante do container, pelo nome.
+   *
+   * `inventario` so' devolve nomes; aqui interessa o CONTEUDO — uma COLLECT URL
+   * apontando para o n8n antigo coleta normalmente e entrega para um fluxo
+   * desligado, sem erro nenhum aparecer.
+   */
+  async valorDaConstante(acc: string, cont: string, ws: string, nome: string): Promise<string | null> {
+    const r = await this.req<{
+      variable?: Array<{ name?: string; parameter?: Array<{ key?: string; value?: string }> }>;
+    }>('GET', `${this.caminho(acc, cont, ws)}/variables`);
+
+    const alvo = (r.variable ?? []).find(
+      (v) => String(v.name ?? '').trim().toLowerCase() === nome.trim().toLowerCase(),
+    );
+    if (!alvo) return null;
+    return (alvo.parameter ?? []).find((p) => p.key === 'value')?.value ?? null;
+  }
+
   async versaoPublicada(acc: string, c: string) {
     return this.req<{ containerVersion?: { containerVersionId: string; name?: string } }>(
       'GET',
