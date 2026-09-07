@@ -14,6 +14,8 @@ import { checarTenant, type TenantParaChecagem } from '../health/checks';
 import { ChatwootClient } from '../clients/chatwoot';
 import { TagManagerClient } from '../clients/tagManager';
 import { conferirNoChatwoot, conferirNoGtm, type Veredito } from '../domain/conferencia';
+import { avisarLeadNoGrupo } from '../pipelines/kanbanTask';
+import { enviarConversao } from '../pipelines/stageChanged';
 
 /**
  * API do painel. Tudo aqui passa pelo `requireAccess` — o Access na frente do
@@ -142,6 +144,97 @@ api.get('/tenants/:id/events', async (c) => {
       boards ?? { organico: null, funil: null },
     ),
   );
+});
+
+/**
+ * Tenta de novo o aviso que falhou.
+ *
+ * Reenvio e' acao deliberada, nao retentativa automatica: o erro que sobra na
+ * tela ja' passou pela fila e nao melhorou sozinho — e' cadastro, ou o
+ * Pulseboard estava fora do ar tempo demais. Quem decide tentar de novo e'
+ * quem consertou a causa, e essa pessoa esta' olhando a tela.
+ *
+ * O corpo do card e' buscado no Chatwoot em vez de remontado a partir da linha
+ * gravada: a linha guarda o que FOI enviado, e reenviar isso repetiria o erro
+ * quando a causa era o proprio dado. O card e' a verdade de agora.
+ */
+api.post('/tenants/:id/avisos/reenviar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const { chave } = await c.req.json<{ chave?: string }>();
+  if (!chave) return c.json({ error: 'informe a chave do aviso' }, 400);
+
+  const linha = await c.env.DB.prepare(
+    'SELECT task_id, status FROM group_notifications WHERE tenant_id = ? AND chave = ?',
+  )
+    .bind(id, chave)
+    .first<{ task_id: number | null; status: string }>();
+
+  if (!linha) return c.json({ error: 'aviso nao encontrado' }, 404);
+  if (linha.status === 'enviado') {
+    return c.json({ error: 'este aviso ja foi entregue; reenviar duplicaria a mensagem no grupo' }, 409);
+  }
+  if (!linha.task_id) return c.json({ error: 'aviso sem card ligado — nao da para remontar' }, 400);
+
+  const cfg = await c.env.DB.prepare(
+    'SELECT cw_account_id FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ cw_account_id: number | null }>();
+  if (!cfg?.cw_account_id) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  let card: Record<string, unknown> | null;
+  try {
+    card = await ChatwootClient.fromEnv(c.env).tarefa(cfg.cw_account_id, linha.task_id);
+  } catch (e) {
+    return c.json({ error: `nao deu para ler o card no Chatwoot: ${(e as Error).message}` }, 502);
+  }
+  if (!card) return c.json({ error: `o card ${linha.task_id} nao existe mais no Chatwoot` }, 404);
+
+  const r = await avisarLeadNoGrupo(c.env, id, JSON.stringify(card));
+  console.log(JSON.stringify({ acao: 'reenviar_aviso', por: c.get('identity').email, tenant_id: id, chave, status: r.status }));
+  return c.json({ ok: r.status === 'ok', status: r.status, motivo: r.motivo });
+});
+
+/**
+ * Tenta de novo a conversao que o Google recusou.
+ *
+ * `enviarConversao` ja' sabe reenviar linha em `erro` — e' a mesma porta da
+ * retentativa da fila. Aqui so' se remonta o corpo que o webhook do Kanban
+ * mandaria, para nao existir uma segunda regra de dedup, de valor e de
+ * montagem do evento.
+ */
+api.post('/tenants/:id/conversoes/reenviar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const { dedupe_key } = await c.req.json<{ dedupe_key?: string }>();
+  if (!dedupe_key) return c.json({ error: 'informe a conversao' }, 400);
+
+  const v = await c.env.DB.prepare(
+    `SELECT v.status, v.protocol, v.conversion_action, v.event_at, f.cw_step_id
+     FROM conversions v
+     LEFT JOIN funnel_stages f
+       ON f.tenant_id = v.tenant_id AND f.conversion_action_id = v.conversion_action
+     WHERE v.tenant_id = ? AND v.dedupe_key = ?`,
+  )
+    .bind(id, dedupe_key)
+    .first<{ status: string; protocol: string; conversion_action: string; event_at: string | null; cw_step_id: number | null }>();
+
+  if (!v) return c.json({ error: 'conversao nao encontrada' }, 404);
+  if (v.status === 'enviado') {
+    return c.json({ error: 'esta conversao ja subiu; reenviar contaria duas vezes no Google' }, 409);
+  }
+  if (!v.cw_step_id) {
+    return c.json({ error: 'a meta desta conversao nao esta mais ligada a nenhuma etapa do funil' }, 400);
+  }
+
+  const corpo = JSON.stringify({
+    board_step_id: v.cw_step_id,
+    custom_attributes: { protocolo: v.protocol },
+    step_changed_at: v.event_at ?? new Date().toISOString(),
+  });
+
+  const r = await enviarConversao(c.env, id, corpo);
+  console.log(JSON.stringify({ acao: 'reenviar_conversao', por: c.get('identity').email, tenant_id: id, dedupe_key, status: r.status }));
+  return c.json({ ok: r.status === 'ok', status: r.status, motivo: r.motivo });
 });
 
 /**
@@ -499,7 +592,7 @@ api.get('/tenants/:id/avisos', async (c) => {
     .first<{ n: number }>();
 
   const { results } = await c.env.DB.prepare(
-    `SELECT chave, protocolo, canal, lead_nome, telefone, status, erro, enviado_em, created_at
+    `SELECT chave, task_id, protocolo, canal, lead_nome, telefone, status, erro, enviado_em, created_at
      FROM group_notifications WHERE tenant_id = ?
      ORDER BY created_at DESC LIMIT ? OFFSET ?`,
   )

@@ -969,10 +969,20 @@
             placar('em valor', 'BRL ' + q.valor, 'soma das contabilizadas', true) +
           '</div>';
 
+        // O erro aqui custa dinheiro: é uma venda que o Google não soube que
+        // aconteceu, e sem isso ele otimiza as campanhas pelo alvo errado.
+        const recusadas = q.erros;
+
         alvo.innerHTML = r.linhas.length
-          ? '<table><thead><tr>' +
+          ? (recusadas
+              ? '<div class="erro">' + recusadas +
+                (recusadas > 1 ? ' conversões foram recusadas' : ' conversão foi recusada') +
+                ' pelo Google e não estão contando nas campanhas deste cliente. ' +
+                'Enquanto não subirem, o lance automático otimiza sem elas.</div>'
+              : '') +
+            '<table><thead><tr>' +
               '<th>Quando</th><th>Lead</th><th>Etapa e meta</th>' +
-              '<th>Valor</th><th>Atribuição</th><th>Resultado</th>' +
+              '<th>Valor</th><th>Atribuição</th><th>Resultado</th><th></th>' +
             '</tr></thead><tbody>' + r.linhas.map(linhaConversao).join('') + '</tbody></table>' +
             paginacao('conversoes', r.total, r.limite, r.offset)
           : '<div class="vazio"><p>Nenhuma conversão enviada ainda.</p>' +
@@ -980,6 +990,12 @@
             'Confira em Fluxo se as etapas têm meta ligada.</p></div>';
 
         ligarPaginacao(alvo, function (o) { carregarConversoes(id, o); });
+        ligarReenvio(alvo, '.reenviar-conv', function (b) {
+          return {
+            rota: '/tenants/' + id + '/conversoes/reenviar',
+            corpo: { dedupe_key: b.dataset.chave },
+          };
+        }, function () { carregarConversoes(id, offset || 0); });
       }
 
       function placar(rotulo, valor, dica, destaque) {
@@ -1017,6 +1033,11 @@
           '<td>' + (v.conversion_value !== null ? esc(v.currency + ' ' + v.conversion_value) : nada) + '</td>' +
           '<td>' + (a ? esc(a[0]) + '<span class="sub">' + esc(a[1]) + '</span>' : nada) + '</td>' +
           '<td>' + situacao + '</td>' +
+          // 'ignorado' nao reenvia: faltou gclid E dados do lead, e tentar de
+          // novo com o mesmo lead da' no mesmo. So' 'erro' e' recuperavel.
+          '<td>' + (v.status === 'erro'
+            ? '<button class="reenviar-conv" data-chave="' + esc(v.dedupe_key) + '">Reenviar</button>'
+            : '') + '</td>' +
           '</tr>';
       }
 
@@ -1031,8 +1052,15 @@
         }
         const linhas = r.linhas;
 
+        const falharam = linhas.filter(function (l) { return l.status === 'erro'; }).length;
+
         alvo.innerHTML = linhas.length
-          ? `<table><thead><tr><th>Quando</th><th>Lead</th><th>Canal</th><th>Telefone</th><th>Status</th></tr></thead><tbody>${linhas
+          ? (falharam
+              ? '<div class="erro">' + falharam +
+                (falharam > 1 ? ' avisos não chegaram ao grupo' : ' aviso não chegou ao grupo') +
+                '. O vendedor não foi notificado desses leads. Corrija a causa e reenvie.</div>'
+              : '') +
+            `<table><thead><tr><th>Quando</th><th>Lead</th><th>Canal</th><th>Telefone</th><th>Status</th><th></th></tr></thead><tbody>${linhas
               .map(
                 (l) => `<tr>
                   <td title="${esc(hora(l.created_at))}">${haQuanto(l.created_at)}</td>
@@ -1041,7 +1069,10 @@
                   <td class="motivo">${esc(l.telefone || '')}</td>
                   <td class="st-${l.status === 'enviado' ? 'ok' : l.status === 'erro' ? 'erro' : 'recebido'}">${esc(
                     l.status,
-                  )}${l.erro ? ' · ' + esc(l.erro) : ''}</td>
+                  )}${l.erro ? '<span class="sub motivo">' + esc(l.erro) + '</span>' : ''}</td>
+                  <td>${l.status === 'erro'
+                    ? `<button class="reenviar-aviso" data-chave="${esc(l.chave)}">Reenviar</button>`
+                    : ''}</td>
                 </tr>`,
               )
               .join('')}</tbody></table>` + paginacao('avisos', r.total, r.limite, r.offset)
@@ -1051,6 +1082,43 @@
              </div>`;
 
         ligarPaginacao(alvo, function (o) { carregarAvisos(id, o); });
+        ligarReenvio(alvo, '.reenviar-aviso', function (b) {
+          return { rota: '/tenants/' + id + '/avisos/reenviar', corpo: { chave: b.dataset.chave } };
+        }, function () { carregarAvisos(id, offset || 0); });
+      }
+
+      /**
+       * Reenvio é ação deliberada, não retentativa automática.
+       *
+       * O erro que sobrou na tela já passou pela fila e não melhorou sozinho —
+       * é cadastro, ou o serviço ficou fora do ar tempo demais. Quem aperta é
+       * quem consertou a causa. O botão trava durante a tentativa para o
+       * segundo clique não virar mensagem duplicada no grupo.
+       */
+      function ligarReenvio(raiz, seletor, montar, aoTerminar) {
+        raiz.querySelectorAll(seletor).forEach(function (b) {
+          b.addEventListener('click', async function () {
+            const alvo = montar(b);
+            const antes = b.textContent;
+            b.disabled = true;
+            b.textContent = 'reenviando…';
+            try {
+              const r = await enviar(alvo.rota, 'POST', alvo.corpo);
+              if (r.ok) {
+                b.textContent = 'reenviado';
+                setTimeout(aoTerminar, 900);
+                return;
+              }
+              b.textContent = antes;
+              b.disabled = false;
+              alert('Não reenviou: ' + (r.motivo || r.status));
+            } catch (e) {
+              b.textContent = antes;
+              b.disabled = false;
+              alert('Não reenviou: ' + e.message);
+            }
+          });
+        });
       }
 
       async function carregarWebhooks(id, slug) {

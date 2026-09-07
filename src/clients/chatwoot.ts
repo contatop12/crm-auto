@@ -278,6 +278,16 @@ export class ChatwootClient {
   }
 
   /** Uma pagina de tasks. `meta.has_more` diz se falta mais. */
+  /** Um card pelo id. E' o que o reenvio precisa: o corpo que o webhook mandaria. */
+  async tarefa(acc: number, taskId: number): Promise<Record<string, unknown> | null> {
+    const r = await this.req<Record<string, unknown>>(
+      'GET',
+      `/api/v1/accounts/${acc}/kanban/tasks/${taskId}`,
+    );
+    const t = (r.payload ?? r) as Record<string, unknown>;
+    return t && typeof t === 'object' && t.id ? t : null;
+  }
+
   async tasks(
     acc: number,
     board: number,
