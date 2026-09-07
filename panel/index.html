@@ -550,6 +550,24 @@
         return r.json();
       }
 
+      /**
+       * Vale a pena mostrar o último erro deste cliente?
+       *
+       * O cartão fala de uma janela de 24h ("28 em 24h · 0 erros"). Um erro de
+       * fora dessa janela, ao lado de um "0 erros", diz duas coisas opostas na
+       * mesma linha — foi o que aconteceu com a Vita: um Pulseboard que falhou
+       * há quatro dias, com o roteamento antigo por codi_id, continuava sendo a
+       * primeira coisa que se lia sobre o cliente.
+       *
+       * Fica quando ainda é notícia: aconteceu dentro da janela, ou nada deu
+       * certo depois dele. Erro velho E superado é história, e história tem
+       * lugar próprio — a aba Atividade.
+       */
+      function mostrarErro(c) {
+        if (!c.ultimo_erro_motivo) return false;
+        return c.erros_24h > 0 || !c.erro_superado;
+      }
+
       function haQuanto(iso) {
         if (!iso) return 'nunca';
         const seg = (Date.now() - new Date(iso.replace(' ', 'T') + 'Z').getTime()) / 1000;
@@ -617,7 +635,7 @@
                   c.erros_24h === 1 ? 'erro' : 'erros'
                 } · <b>${c.leads}</b> leads · <b>${c.conversoes_enviadas}</b> conversões
                 · último evento ${haQuanto(c.ultimo_evento_em)}
-                ${c.ultimo_erro_motivo
+                ${mostrarErro(c)
                   ? `<span class="cliente-erro${c.erro_superado ? ' superado' : ''}">${
                       c.erro_superado ? 'último erro (já superado, ' : 'último erro ('
                     }${esc(haQuanto(c.ultimo_erro_em))}): ${esc(c.ultimo_erro_motivo)}</span>`
