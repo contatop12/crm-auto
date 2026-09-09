@@ -152,6 +152,38 @@ describe('enviarConversao', () => {
     expect(corpoEnviado().events[0].transactionId).toBe('VITA-123-qualificado_1');
   });
 
+  test('lead do Meta nao sobe conversao para o Google', async () => {
+    // O Google nao trouxe esse lead. Sem a trava ele subiria por e-mail e
+    // telefone — nao ha gclid — e o Google aceitaria sem reclamar, usando dado
+    // falso para decidir lance.
+    const { env, exec, consultar } = cenario();
+    exec(`UPDATE leads SET gclid = NULL, utm_source = 'meta', fbc = 'fb.1.2.3' WHERE protocol = 'VITA-123'`);
+
+    const r = await enviarConversao(env, 1, card());
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('Meta');
+    expect(chamadas).toHaveLength(0);
+    expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
+  });
+
+  test('lead de formulario do Meta, sem fbc, tambem nao sobe', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE leads SET gclid = NULL, utm_source = 'meta' WHERE protocol = 'VITA-123'`);
+    const r = await enviarConversao(env, 1, card());
+    expect(r.status).toBe('ignorado');
+    expect(chamadas).toHaveLength(0);
+  });
+
+  test('gclid vence o fbc: quem clicou no Google e do Google', async () => {
+    // o `fbc` e' cookie de pixel e so' prova que a pessoa passou pelo Meta em
+    // algum momento; o clique do Google e' mais forte e mais recente
+    const { env, exec } = cenario();
+    exec(`UPDATE leads SET fbc = 'fb.1.2.3' WHERE protocol = 'VITA-123'`);
+    const r = await enviarConversao(env, 1, card());
+    expect(r.status).toBe('ok');
+    expect(chamadas).toHaveLength(1);
+  });
+
   test('protocolo sem clique registrado nao sobe', async () => {
     const { env } = cenario();
     const r = await enviarConversao(env, 1, card({ custom_attributes: { protocolo: 'VITA-999' } }));

@@ -46,6 +46,8 @@ interface Lead {
   gbraid: string | null;
   wbraid: string | null;
   valor_proposta: number | null;
+  utm_source: string | null;
+  fbc: string | null;
 }
 
 export async function enviarConversao(
@@ -110,13 +112,31 @@ export async function enviarConversao(
   }
 
   const lead = await env.DB.prepare(
-    `SELECT email, phone_e164, gclid, gbraid, wbraid, valor_proposta
+    `SELECT email, phone_e164, gclid, gbraid, wbraid, valor_proposta, utm_source, fbc
      FROM leads WHERE tenant_id = ? AND protocol = ?`,
   )
     .bind(tenantId, protocolo)
     .first<Lead>();
   if (!lead) {
     return { status: 'ignorado', motivo: `protocolo ${protocolo} sem clique registrado em leads` };
+  }
+
+  /**
+   * Esta conta e' do GOOGLE Ads. Lead do Meta nao entra.
+   *
+   * Sem esta trava, um lead que preencheu formulario no Meta subiria como
+   * conversao para o Google — que nao trouxe esse lead. O Google usaria isso
+   * para otimizar campanha, ou seja: dado falso virando decisao de lance.
+   *
+   * Nao ha `gclid` num lead de Meta, entao ele subiria por e-mail/telefone e
+   * o Google aceitaria sem reclamar. Falha silenciosa, do tipo que so' aparece
+   * meses depois num relatorio que nao fecha.
+   */
+  if (ehDoMeta(lead)) {
+    return {
+      status: 'ignorado',
+      motivo: `${protocolo} veio do Meta — conversao do Google nao recebe lead de outra plataforma`,
+    };
   }
 
   const valor = etapa.conversion_value ?? num(p.value) ?? lead.valor_proposta;
@@ -306,6 +326,20 @@ async function fechar(
 }
 
 type Rec = Record<string, unknown>;
+
+/**
+ * O lead veio do Meta?
+ *
+ * `fbc` e' o identificador de clique do Meta; `utm_source` marcado como meta
+ * cobre o lead de formulario, que nao tem clique nenhum. Um lead com `gclid`
+ * NAO e' do Meta, mesmo que tenha `fbc` — o clique do Google e' mais forte e
+ * mais recente que um cookie de pixel que so' prova que a pessoa passou por la'.
+ */
+function ehDoMeta(l: Lead): boolean {
+  if (l.gclid || l.gbraid || l.wbraid) return false;
+  if (l.fbc) return true;
+  return /^(meta|facebook|instagram|fb|ig)$/i.test((l.utm_source ?? '').trim());
+}
 
 function obj(v: unknown): Rec | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : null;

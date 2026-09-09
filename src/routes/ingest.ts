@@ -17,7 +17,7 @@ export const ingest = new Hono<{ Bindings: Env }>();
 async function aceitar(
   env: Env,
   tenantId: number,
-  source: 'click' | 'chatwoot' | 'kanban',
+  source: 'click' | 'chatwoot' | 'kanban' | 'meta',
   eventType: string,
   payload: string,
   signatureOk: boolean | null,
@@ -101,6 +101,29 @@ ingest.post('/:slug/chatwoot', async (c) => {
   }
 
   await aceitar(c.env, tenant.id, 'chatwoot', evento, raw, tenant.cwWebhookSecret ? true : null);
+  return c.json({ ok: true });
+});
+
+/**
+ * Formulario nativo do Meta.
+ *
+ * Endereco proprio por cliente, como o do clique: a chave na URL e' o que
+ * separa um cliente do outro, e o Meta nao manda header.
+ *
+ * O corpo nao e' assumido. A automacao pode entregar o `field_data` cru do
+ * webhook do Meta ou ja' achatado — as duas formas sao aceitas, porque exigir
+ * um formato so' transferiria para quem monta a automacao um trabalho que o
+ * parser faz melhor.
+ */
+ingest.post('/:slug/meta-lead', async (c) => {
+  const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
+  if (!tenant) return c.json({ ok: false, error: 'tenant desconhecido' }, 404);
+
+  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key');
+  if (chave !== tenant.ingestKey) return c.json({ ok: false, error: 'chave invalida' }, 401);
+
+  const body = await c.req.text();
+  await aceitar(c.env, tenant.id, 'meta', 'meta_lead_form', body, null);
   return c.json({ ok: true });
 });
 

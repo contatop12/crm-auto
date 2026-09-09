@@ -39,6 +39,6 @@ export interface QueueMessage {
   /** Id da linha em `events`. O payload cru fica no banco, nao na fila. */
   eventId: number;
   tenantId: number;
-  source: 'click' | 'chatwoot' | 'kanban';
+  source: 'click' | 'chatwoot' | 'kanban' | 'meta';
   eventType: string;
 }

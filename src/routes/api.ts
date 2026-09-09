@@ -337,6 +337,7 @@ api.get('/tenants/:id/ingest-status', async (c) => {
     chatwoot: junta((l) => l.source === 'chatwoot'),
     kanban_entrada: junta((l) => l.event_type === 'kanban_entrada'),
     kanban_conversao: junta((l) => l.event_type === 'kanban_conversao'),
+    meta: junta((l) => l.source === 'meta'),
   });
 });
 

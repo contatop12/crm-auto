@@ -50,7 +50,7 @@ export async function listarTenants(db: D1Database): Promise<Tenant[]> {
 
 export interface NovoEvento {
   tenantId: number | null;
-  source: 'click' | 'chatwoot' | 'kanban';
+  source: 'click' | 'chatwoot' | 'kanban' | 'meta';
   eventType: string;
   payload: string;
   signatureOk: boolean | null;

@@ -5,6 +5,7 @@ import { atribuirLead } from '../pipelines/leadMessage';
 import { registrarClique } from '../pipelines/click';
 import { moverPelaResposta } from '../pipelines/sellerMessage';
 import { enviarConversao } from '../pipelines/stageChanged';
+import { registrarLeadMeta } from '../pipelines/metaLead';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -50,6 +51,11 @@ async function processar(msg: QueueMessage, env: Env, payload: string): Promise<
         default:
           return { status: 'ignorado', motivo: `evento sem pipeline: ${msg.eventType}` };
       }
+
+    case 'meta':
+      // So' grava. O lead do formulario nao teve conversa nem card ainda; o
+      // cruzamento acontece quando ele aparecer no WhatsApp.
+      return registrarLeadMeta(env, msg.tenantId, payload);
 
     case 'kanban':
       // `conversao` vem das regras de etapa avancada (Qualificado, Compra).

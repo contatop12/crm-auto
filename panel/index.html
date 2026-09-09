@@ -2429,6 +2429,11 @@
           bloco('kanban_entrada', 'Chatwoot · entrada no funil (avisa o grupo)', base + '/kanban' + k,
             'Ação <strong>Enviar evento de webhook</strong> numa automação de <em>kanban_task_updated</em>, com o board do funil e a etapa de entrada.',
             uso.kanban_entrada) +
+          bloco('meta', 'Meta · formulário nativo', base + '/meta-lead' + k,
+            'POST com o lead do formulário. Grava em <strong>leads</strong> com o telefone; ' +
+            'quando a pessoa aparecer no WhatsApp, o sistema casa os dois sozinho pelo telefone. ' +
+            'Não sobe conversão para o Google — o lead não veio de lá.',
+            uso.meta) +
           bloco('kanban_conversao', 'Chatwoot · conversão por etapa', base + '/kanban' + k + '&evento=conversao',
             'Já está nas regras <strong>Evento Qualificado</strong> e <strong>Compra</strong>. O <code>&amp;evento=conversao</code> impede que elas disparem aviso de lead novo.',
             uso.kanban_conversao) +
