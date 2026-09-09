@@ -627,6 +627,28 @@ admin.get('/tenants/:id/fluxo', async (c) => {
     .bind(id)
     .first<{ t24: number; t7: number; ultimo: string | null; nao_moveu: number }>();
 
+  /**
+   * Resposta de vendedor que se perdeu por falta de card.
+   *
+   * E' a falha mais cara que este sistema tem, porque nao parece falha: a
+   * conversa segue normal no Chatwoot, o vendedor atende, e o card fica parado
+   * numa etapa que nao corresponde mais a realidade. Ficou cinco dias assim na
+   * conversa 389 da Persianas e so' apareceu porque alguem olhou o Kanban.
+   *
+   * So' conta as COM protocolo. Conversa sem protocolo e' organica e nao tem
+   * card mesmo — misturar as duas daria centenas de falsos alarmes e ensinaria
+   * a ignorar o aviso.
+   */
+  const perdidas = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n, MAX(received_at) AS ultima
+     FROM events
+     WHERE tenant_id = ? AND event_type = 'message_outgoing'
+       AND motivo LIKE '%sem card%' AND payload LIKE '%"protocolo"%'
+       AND received_at >= datetime('now','-7 day')`,
+  )
+    .bind(id)
+    .first<{ n: number; ultima: string | null }>();
+
   const semWebhook = !cfg.cw_account_id
     ? 'cliente sem conta do Chatwoot'
     : Number(cfg.tem_segredo) === 0
@@ -683,8 +705,12 @@ admin.get('/tenants/:id/fluxo', async (c) => {
         total24h: Number(moves?.t24 ?? 0),
         total7d: Number(moves?.t7 ?? 0),
         ultimoEm: moves?.ultimo ?? null,
-        ultimoErroEm: null,
-        ultimoErroMotivo: null,
+        // resposta perdida conta como erro DESTA etapa: e' exatamente ela que
+        // deixou de acontecer
+        ultimoErroEm: Number(perdidas?.n ?? 0) > 0 ? perdidas?.ultima ?? null : null,
+        ultimoErroMotivo: Number(perdidas?.n ?? 0) > 0
+          ? `${perdidas!.n} resposta(s) do vendedor ignoradas por falta de card — esses leads ficaram parados na etapa em que estavam`
+          : null,
         implementado: true,
         pendencia:
           Number(cfg.etapas) === 0
