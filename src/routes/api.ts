@@ -67,9 +67,20 @@ api.get('/overview', async (c) => {
         l.erros_24h > 0 && !maisRecente(l.ultimo_ok_em, l.ultimo_erro_em) ? 'erro'
         : l.recebidos_24h === 0 ? 'silencio'
         : 'ok',
-      // o erro continua visivel, mas datado: sem a data, um erro de ontem se
-      // parece com um de agora
-      erro_superado: l.erros_24h > 0 && maisRecente(l.ultimo_ok_em, l.ultimo_erro_em),
+      /**
+       * Houve sucesso DEPOIS do ultimo erro?
+       *
+       * Nao depende da janela de 24h. Amarrar isso a `erros_24h > 0` foi um
+       * engano meu: erro de cinco dias atras tem `erros_24h = 0`, o campo
+       * nascia `false`, e a tela lia `false` como "ainda vigente" — que e' o
+       * oposto do que aconteceu. Era por isso que a Vita continuava exibindo um
+       * Pulseboard que falhou no dia 3.
+       */
+      erro_superado: maisRecente(l.ultimo_ok_em, l.ultimo_erro_em),
+      /** Onde consertar: e' a aba que tem o botao de reenviar. */
+      erro_em: /pulseboard|grupo/i.test(l.ultimo_erro_motivo ?? '') ? 'atividade'
+        : /google|conversao|data manager/i.test(l.ultimo_erro_motivo ?? '') ? 'google'
+        : 'atividade',
     })),
   );
 });

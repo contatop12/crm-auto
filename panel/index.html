@@ -432,6 +432,14 @@
       /* Erro que ja' passou continua legível, mas para de gritar: houve
          sucesso depois dele, e vermelho aqui treina a ignorar vermelho. */
       .cliente-erro.superado { color: var(--tinta-2); }
+      /* Erro vigente precisa de saída, não só de aviso: leva à aba que tem o
+         botão de reenviar. Vive dentro do cartão, que já é um <button>, então
+         não pode ser outro <button> — daí o role/tabindex. */
+      .ir-corrigir {
+        display: inline-block; margin-left: var(--e1); font-weight: 650;
+        color: var(--falha); text-decoration: underline; cursor: pointer;
+      }
+      .ir-corrigir:hover { text-decoration: none; }
       .trilha-vazia { color: var(--tinta-3); font-size: 12.5px; margin: 16px 0 0; }
 
       /* Fluxo do lead: as cinco etapas que interessam monitorar. Cada linha é
@@ -638,12 +646,29 @@
                 ${mostrarErro(c)
                   ? `<span class="cliente-erro${c.erro_superado ? ' superado' : ''}">${
                       c.erro_superado ? 'último erro (já superado, ' : 'último erro ('
-                    }${esc(haQuanto(c.ultimo_erro_em))}): ${esc(c.ultimo_erro_motivo)}</span>`
+                    }${esc(haQuanto(c.ultimo_erro_em))}): ${esc(c.ultimo_erro_motivo)}${
+                      c.erro_superado ? '' :
+                      `<span class="ir-corrigir" data-id="${c.tenant_id}" data-aba="${esc(c.erro_em)}" role="link" tabindex="0">Ver e reenviar →</span>`
+                    }</span>`
                   : ''}
               </div>
             </button>`;
           })
           .join('');
+
+        tela.querySelectorAll('.ir-corrigir').forEach(function (a) {
+          const ir = function (ev) {
+            // o cartão inteiro é clicável e abriria a aba Fluxo; este atalho
+            // precisa vencer, então para o evento antes de subir
+            ev.stopPropagation();
+            ev.preventDefault();
+            verCliente(a.dataset.id, a.dataset.aba);
+          };
+          a.addEventListener('click', ir);
+          a.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter' || ev.key === ' ') ir(ev);
+          });
+        });
 
         tela.querySelectorAll('.cliente').forEach((el) =>
           el.addEventListener('click', () => verCliente(el.dataset.id)),
@@ -667,7 +692,7 @@
         });
       }
 
-      async function verCliente(id) {
+      async function verCliente(id, abaInicial) {
         tela.innerHTML = CARREGANDO;
         const [cliente] = (await api('/overview')).filter((c) => String(c.tenant_id) === String(id));
 
@@ -879,7 +904,7 @@
           b.addEventListener('click', () => abrirAba(b.dataset.aba));
         });
 
-        abrirAba('fluxo');
+        abrirAba(abaInicial || 'fluxo');
         rodape.textContent = new Date().toLocaleTimeString('pt-BR');
         menuAtivo(null);
       }
