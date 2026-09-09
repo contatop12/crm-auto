@@ -12,6 +12,8 @@ import {
 } from '../domain/gtm';
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { mascararSegredo } from '../domain/segredo';
+import { SheetsClient } from '../clients/sheets';
+import { CAMPOS_PLANILHA, colunaParaIndice } from '../domain/planilha';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
   planejarProvisionamento,
@@ -89,6 +91,88 @@ admin.get('/tenants/:id/config', async (c) => {
     ingest_key_revelavel: Number(ingest_key_revelada) === 0,
     tem_ingest_key: !!ingest_key,
   });
+});
+
+/**
+ * Planilha geral de leads: destino de cada dado, e para onde escrever.
+ *
+ * Le' e grava o mapa inteiro de uma vez. Editar coluna a coluna daria margem a
+ * ficar com duas colunas apontando para o mesmo lugar entre um salvamento e
+ * outro; substituir o conjunto e' mais simples e nao tem estado intermediario.
+ */
+admin.get('/tenants/:id/planilha', async (c) => {
+  const id = Number(c.req.param('id'));
+  const cfg = await c.env.DB.prepare(
+    `SELECT sheets_ativo, sheets_leads_doc_id, sheets_leads_aba
+     FROM tenant_config WHERE tenant_id = ?`,
+  )
+    .bind(id)
+    .first<{ sheets_ativo: number; sheets_leads_doc_id: string | null; sheets_leads_aba: string | null }>();
+
+  const { results } = await c.env.DB.prepare(
+    'SELECT coluna, campo FROM sheet_columns WHERE tenant_id = ? ORDER BY coluna',
+  )
+    .bind(id)
+    .all<{ coluna: string; campo: string }>();
+
+  return c.json({
+    ativo: Number(cfg?.sheets_ativo ?? 0) === 1,
+    doc_id: cfg?.sheets_leads_doc_id ?? null,
+    aba: cfg?.sheets_leads_aba ?? null,
+    colunas: results,
+    campos: CAMPOS_PLANILHA,
+  });
+});
+
+admin.put('/tenants/:id/planilha', async (c) => {
+  const id = Number(c.req.param('id'));
+  const b = await c.req.json<{
+    ativo?: boolean; doc_id?: string; aba?: string;
+    colunas?: Array<{ coluna?: string; campo?: string }>;
+  }>();
+
+  const docId = String(b.doc_id ?? '').trim() || null;
+  // ligar sem planilha escolhida encheria a tela de erro a cada conversao
+  const ativo = b.ativo && docId ? 1 : 0;
+
+  await c.env.DB.prepare(
+    `UPDATE tenant_config
+     SET sheets_ativo = ?, sheets_leads_doc_id = ?, sheets_leads_aba = ?, updated_at = datetime('now')
+     WHERE tenant_id = ?`,
+  )
+    .bind(ativo, docId, String(b.aba ?? '').trim() || null, id)
+    .run();
+
+  const validas = (b.colunas ?? [])
+    .map((x) => ({ coluna: String(x.coluna ?? '').trim().toUpperCase(), campo: String(x.campo ?? '').trim() }))
+    .filter((x) => colunaParaIndice(x.coluna) >= 0 && x.campo);
+
+  await c.env.DB.prepare('DELETE FROM sheet_columns WHERE tenant_id = ?').bind(id).run();
+  for (const v of validas) {
+    await c.env.DB.prepare(
+      'INSERT OR REPLACE INTO sheet_columns (tenant_id, coluna, campo) VALUES (?, ?, ?)',
+    )
+      .bind(id, v.coluna, v.campo)
+      .run();
+  }
+
+  console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, colunas: validas.length }));
+  return c.json({ ok: true, colunas: validas.length, ativo: ativo === 1 });
+});
+
+/** Abas do documento, para a tela oferecer em vez de exigir digitar certo. */
+admin.get('/tenants/:id/planilha/abas', async (c) => {
+  const docId = c.req.query('doc');
+  if (!docId) return c.json({ error: 'informe o id da planilha' }, 400);
+
+  const sheets = await SheetsClient.deD1(c.env);
+  if (!sheets) return c.json({ error: 'Google sem autorizacao — veja Acesso Google' }, 400);
+
+  try {
+    return c.json({ abas: await sheets.abas(docId) });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 502);
+  }
 });
 
 const CANAIS = ['click', 'kanban', 'meta'] as const;

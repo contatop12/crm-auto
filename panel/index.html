@@ -718,6 +718,7 @@
             <button class="aba" role="tab" data-aba="atividade" aria-selected="false">Atividade</button>
             <button class="aba" role="tab" data-aba="google" aria-selected="false">Google Ads</button>
             <button class="aba" role="tab" data-aba="webhooks" aria-selected="false">Webhooks</button>
+            <button class="aba" role="tab" data-aba="planilha" aria-selected="false">Planilha</button>
           </div>
 
           <div class="painel" data-painel="fluxo">
@@ -863,6 +864,15 @@
           </section>
           </div>
 
+          <div class="painel" data-painel="planilha" hidden>
+          <section>
+            <h2>Planilha geral de leads</h2>
+            <p class="dica">Cada conversão enviada vira uma linha. Você escolhe para qual
+            coluna vai cada dado — a planilha do cliente fica na ordem que o time dele já usa.</p>
+            <div id="planilha"></div>
+          </section>
+          </div>
+
           <div class="painel" data-painel="google" hidden>
           <section>
             <h2>Conversões enviadas ao Google Ads</h2>
@@ -916,6 +926,7 @@
           if (nome === 'atividade') { carregarAvisos(id, 0); carregarEventos(id, 0); }
           if (nome === 'google') carregarConversoes(id, 0);
           if (nome === 'webhooks') carregarWebhooksTab(id, slug);
+          if (nome === 'planilha') carregarPlanilha(id);
         }
 
         tela.querySelectorAll('.aba').forEach((b) => {
@@ -2428,6 +2439,125 @@
 
       /** Chaves em mãos nesta visita à tela. Sair da aba as perde, de propósito. */
       let chavesVisiveis = {};
+
+      /**
+       * Destino de cada dado na planilha do cliente.
+       *
+       * A coluna é digitada como letra (`A`, `B`, `AA`) porque é assim que ela
+       * aparece no Sheets — pedir número obrigaria a contar, e contar erra.
+       */
+      async function carregarPlanilha(id) {
+        const alvo = document.getElementById('planilha');
+        if (!alvo) return;
+        alvo.innerHTML = CARREGANDO;
+
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/planilha');
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+
+        const opcoes = function (sel) {
+          return '<option value="">— não enviar —</option>' + r.campos.map(function (c) {
+            return '<option value="' + esc(c.campo) + '"' +
+              (c.campo === sel ? ' selected' : '') + '>' + esc(c.rotulo) + '</option>';
+          }).join('');
+        };
+
+        // sempre uma linha vazia no fim, para acrescentar sem apertar "adicionar"
+        const linhas = r.colunas.concat([{ coluna: '', campo: '' }]);
+
+        alvo.innerHTML =
+          '<div class="grade">' +
+            '<div class="campo"><label for="pl-doc">ID da planilha</label>' +
+            '<input id="pl-doc" value="' + esc(r.doc_id || '') + '" placeholder="o trecho entre /d/ e /edit na URL" />' +
+            '<p class="dica">Compartilhe a planilha com a conta Google autorizada, com permissão de edição.</p></div>' +
+            '<div class="campo"><label for="pl-aba">Aba</label>' +
+            '<input id="pl-aba" value="' + esc(r.aba || '') + '" placeholder="Leads" />' +
+            '<p class="dica">Em branco usa <code>Leads</code>.</p></div>' +
+          '</div>' +
+          '<div class="campo"><label><input type="checkbox" id="pl-ativo"' +
+          (r.ativo ? ' checked' : '') + ' /> Escrever na planilha a cada conversão enviada</label>' +
+          '<p class="dica">Desligado, nada é escrito. Falha na planilha nunca derruba a conversão.</p></div>' +
+          '<table><thead><tr><th style="width:120px">Coluna</th><th>Dado</th><th></th></tr></thead><tbody id="pl-linhas">' +
+          linhas.map(function (l) {
+            return '<tr>' +
+              '<td><input class="pl-col" value="' + esc(l.coluna) + '" placeholder="A" style="width:80px" /></td>' +
+              '<td><select class="pl-campo">' + opcoes(l.campo) + '</select></td>' +
+              '<td><button class="pl-del">remover</button></td>' +
+              '</tr>';
+          }).join('') +
+          '</tbody></table>' +
+          '<div class="linha-acoes"><button id="pl-add">Adicionar coluna</button>' +
+          '<button id="pl-salvar" class="principal">Salvar</button>' +
+          '<span class="carregando" id="pl-estado"></span></div>';
+
+        const corpo = document.getElementById('pl-linhas');
+
+        function ligarRemover() {
+          corpo.querySelectorAll('.pl-del').forEach(function (b) {
+            if (b.dataset.ligado) return;
+            b.dataset.ligado = '1';
+            b.addEventListener('click', function () { b.closest('tr').remove(); });
+          });
+        }
+        ligarRemover();
+
+        document.getElementById('pl-add').addEventListener('click', function () {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td><input class="pl-col" placeholder="A" style="width:80px" /></td>' +
+            '<td><select class="pl-campo">' + opcoes('') + '</select></td>' +
+            '<td><button class="pl-del">remover</button></td>';
+          corpo.appendChild(tr);
+          ligarRemover();
+        });
+
+        document.getElementById('pl-salvar').addEventListener('click', async function () {
+          const est = document.getElementById('pl-estado');
+          const colunas = [];
+          corpo.querySelectorAll('tr').forEach(function (tr) {
+            const col = tr.querySelector('.pl-col').value.trim();
+            const campo = tr.querySelector('.pl-campo').value;
+            if (col && campo) colunas.push({ coluna: col, campo: campo });
+          });
+
+          // duas colunas para o mesmo lugar seria silenciosamente destrutivo:
+          // a última gravada venceria e a outra sumiria sem aviso
+          const vistas = {};
+          const repetida = colunas.find(function (c) {
+            const k = c.coluna.toUpperCase();
+            if (vistas[k]) return true;
+            vistas[k] = 1;
+            return false;
+          });
+          if (repetida) {
+            est.className = 'st-erro';
+            est.textContent = 'a coluna ' + repetida.coluna.toUpperCase() + ' está repetida';
+            return;
+          }
+
+          est.className = 'carregando';
+          est.textContent = 'salvando…';
+          try {
+            const res = await enviar('/tenants/' + id + '/planilha', 'PUT', {
+              ativo: document.getElementById('pl-ativo').checked,
+              doc_id: document.getElementById('pl-doc').value,
+              aba: document.getElementById('pl-aba').value,
+              colunas: colunas,
+            });
+            est.className = 'st-ok';
+            est.textContent = res.colunas + ' coluna(s) salvas · ' +
+              (res.ativo ? 'escrevendo na planilha' : 'desligado');
+            carregarPlanilha(id);
+          } catch (e) {
+            est.className = 'st-erro';
+            est.textContent = 'falhou: ' + e.message;
+          }
+        });
+      }
 
       async function carregarWebhooksTab(id, slug) {
         const alvo = document.getElementById('wh-lista');

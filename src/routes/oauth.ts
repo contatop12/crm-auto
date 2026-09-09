@@ -29,6 +29,9 @@ const ESCOPOS = [
   // ("Usage ... is limited to existing users"). Sem este escopo, a chamada
   // volta 403 "insufficient authentication scopes".
   'https://www.googleapis.com/auth/datamanager',
+  // A planilha geral de leads e' espelho: o time do cliente trabalha nela.
+  // Sem este escopo o append volta 403 e o espelho fica mudo.
+  'https://www.googleapis.com/auth/spreadsheets',
 ].join(' ');
 
 const TTL_STATE = 600; // 10 min: o consentimento e' um ato continuo

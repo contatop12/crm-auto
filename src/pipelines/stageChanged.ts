@@ -2,6 +2,10 @@ import type { Env } from '../env';
 import { GoogleAdsClient } from '../clients/googleAds';
 import { montarEvento, montarCorpo } from '../domain/conversao';
 import { exigir } from '../domain/config';
+import { SheetsClient } from '../clients/sheets';
+import { montarLinha, type Coluna } from '../domain/planilha';
+import { montarCanal } from '../domain/canal';
+import { detectOrigin, detectPlatform } from '../domain/platform';
 
 /**
  * Mudança de etapa no Kanban vira conversão no Google Ads.
@@ -226,6 +230,15 @@ export async function enviarConversao(
     }
 
     await fechar(env, tenantId, chave, 'enviado', { requestId: r.requestId ?? null, tipo });
+
+    // Espelho, depois do envio. Falhar aqui nao desfaz a conversao: a planilha
+    // e' onde o time do cliente trabalha, nao a fonte da verdade.
+    await espelharNaPlanilha(env, tenantId, {
+      protocolo, etapa: etapa.nome, conversao: etapa.conversion_event,
+      valor, moeda: cfg.ga_currency, quando,
+    }).catch((e: Error) => {
+      console.log(JSON.stringify({ acao: 'planilha_falhou', protocolo, erro: e.message }));
+    });
     return {
       status: 'ok',
       motivo:
@@ -356,4 +369,89 @@ function data(v: string | null): number | null {
   if (!v) return null;
   const t = Date.parse(v);
   return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * Escreve a linha do lead na planilha geral.
+ *
+ * So' o que teve conversao enviada chega aqui, que e' o recorte pedido: a
+ * planilha geral e' de leads que viraram alguma coisa, nao de todo clique.
+ *
+ * O canal e' montado com o mesmo vocabulario do aviso no grupo — quem le' a
+ * planilha e quem le' o WhatsApp veem a mesma palavra para a mesma coisa.
+ */
+async function espelharNaPlanilha(
+  env: Env,
+  tenantId: number,
+  ctx: {
+    protocolo: string; etapa: string; conversao: string;
+    valor: number | null; moeda: string; quando: number;
+  },
+): Promise<void> {
+  const cfg = await env.DB.prepare(
+    `SELECT c.sheets_ativo, c.sheets_leads_doc_id, c.sheets_leads_aba, t.nome AS cliente
+     FROM tenant_config c JOIN tenants t ON t.id = c.tenant_id WHERE c.tenant_id = ?`,
+  )
+    .bind(tenantId)
+    .first<{ sheets_ativo: number; sheets_leads_doc_id: string | null; sheets_leads_aba: string | null; cliente: string }>();
+
+  if (!cfg || cfg.sheets_ativo !== 1 || !cfg.sheets_leads_doc_id) return;
+
+  const { results: mapa } = await env.DB.prepare(
+    'SELECT coluna, campo FROM sheet_columns WHERE tenant_id = ?',
+  )
+    .bind(tenantId)
+    .all<Coluna>();
+  if (!mapa.length) return; // nada mapeado: escrever seria chutar a ordem
+
+  const lead = await env.DB.prepare(
+    `SELECT nome, email, phone_e164, gclid, utm_source, utm_medium, utm_campaign, utm_term, origem, evento
+     FROM leads WHERE tenant_id = ? AND protocol = ?`,
+  )
+    .bind(tenantId, ctx.protocolo)
+    .first<Record<string, string | null>>();
+
+  const d = new Date(ctx.quando);
+  // horario de Brasilia: a planilha e' lida por gente, nao por maquina
+  const local = new Date(d.getTime() - 3 * 3600 * 1000);
+  const iso = local.toISOString();
+  const data = `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  const hora = iso.slice(11, 19);
+
+  const canal = montarCanal({
+    origem: detectOrigin({ origemClick: lead?.origem, eventClick: lead?.evento }),
+    plataforma: detectPlatform({
+      utmSource: lead?.utm_source, utmMedium: lead?.utm_medium,
+      utmCampaign: lead?.utm_campaign, gclid: lead?.gclid,
+    }),
+    quizVersion: null,
+  });
+
+  const linha = montarLinha(mapa, {
+    timestamp: `${data} ${hora}`,
+    data,
+    hora,
+    canal,
+    plataforma: detectPlatform({ gclid: lead?.gclid, utmSource: lead?.utm_source }),
+    campanha: lead?.utm_campaign,
+    protocolo: ctx.protocolo,
+    nome: lead?.nome,
+    telefone: lead?.phone_e164,
+    email: lead?.email,
+    etapa: ctx.etapa,
+    conversao: ctx.conversao,
+    valor: ctx.valor === null ? '' : `${ctx.moeda} ${ctx.valor}`,
+    gclid: lead?.gclid,
+    utm_source: lead?.utm_source,
+    utm_medium: lead?.utm_medium,
+    utm_term: lead?.utm_term,
+    cliente: cfg.cliente,
+  });
+  if (!linha.length) return;
+
+  const sheets = await SheetsClient.deD1(env);
+  if (!sheets) throw new Error('Google sem autorizacao — veja Acesso Google');
+
+  await sheets.acrescentar(cfg.sheets_leads_doc_id, cfg.sheets_leads_aba || 'Leads', linha);
+  console.log(JSON.stringify({ acao: 'planilha_ok', protocolo: ctx.protocolo, colunas: linha.length }));
 }
