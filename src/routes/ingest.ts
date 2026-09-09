@@ -40,12 +40,41 @@ async function aceitar(
  * O beacon manda `text/plain`, entao o corpo chega como string crua.
  * Autenticado pela `ingest_key` do tenant, nao por assinatura.
  */
+/**
+ * A chave deste canal abre a porta?
+ *
+ * Cada webhook tem a sua. Sem isto, a chave que passa por uma automacao de
+ * terceiro (o Make, no Meta) teria o mesmo poder de gravar cliques e mover
+ * conversoes — e trocar uma obrigaria a reconfigurar as outras tres.
+ *
+ * Cai na chave antiga do cliente enquanto houver: a separacao e' recente e
+ * recusar aqui derrubaria endereco que esta' funcionando.
+ */
+async function chaveDoCanal(
+  db: D1Database,
+  tenantId: number,
+  canal: 'click' | 'kanban' | 'meta',
+  legado: string | null,
+  oferecida: string | null,
+): Promise<boolean> {
+  if (!oferecida) return false;
+  const l = await db
+    .prepare('SELECT chave FROM ingest_keys WHERE tenant_id = ? AND canal = ?')
+    .bind(tenantId, canal)
+    .first<{ chave: string }>()
+    .catch(() => null);
+  if (l?.chave) return oferecida === l.chave;
+  return !!legado && oferecida === legado;
+}
+
 ingest.post('/:slug/click', async (c) => {
   const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
   if (!tenant) return c.json({ ok: false, error: 'tenant desconhecido' }, 404);
 
-  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key');
-  if (chave !== tenant.ingestKey) return c.json({ ok: false, error: 'chave invalida' }, 401);
+  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key') ?? null;
+  if (!(await chaveDoCanal(c.env.DB, tenant.id, 'click', tenant.ingestKey, chave))) {
+    return c.json({ ok: false, error: 'chave invalida' }, 401);
+  }
 
   const body = await c.req.text();
   let protocolo = '';
@@ -119,8 +148,10 @@ ingest.post('/:slug/meta-lead', async (c) => {
   const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
   if (!tenant) return c.json({ ok: false, error: 'tenant desconhecido' }, 404);
 
-  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key');
-  if (chave !== tenant.ingestKey) return c.json({ ok: false, error: 'chave invalida' }, 401);
+  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key') ?? null;
+  if (!(await chaveDoCanal(c.env.DB, tenant.id, 'meta', tenant.ingestKey, chave))) {
+    return c.json({ ok: false, error: 'chave invalida' }, 401);
+  }
 
   const body = await c.req.text();
   await aceitar(c.env, tenant.id, 'meta', 'meta_lead_form', body, null);
@@ -148,8 +179,14 @@ ingest.get('/:slug/ping', async (c) => {
   // endereco que vai para o GTM e para as automacoes, sem gravar nada
   const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
   if (!tenant) return c.json({ ok: false, erro: 'cliente desconhecido' }, 404);
-  if (chave !== tenant.ingestKey) return c.json({ ok: false, erro: 'chave invalida' }, 401);
-  return c.json({ ok: true, cliente: c.req.param('slug') });
+  // o ping serve os tres canais: vale se a chave abrir QUALQUER um deles
+  const canais = ['click', 'kanban', 'meta'] as const;
+  const abre = await Promise.all(
+    canais.map((n) => chaveDoCanal(c.env.DB, tenant.id, n, tenant.ingestKey, chave)),
+  );
+  const canal = canais.find((_, i) => abre[i]);
+  if (!canal) return c.json({ ok: false, erro: 'chave invalida' }, 401);
+  return c.json({ ok: true, cliente: c.req.param('slug'), canal });
 });
 
 /**
@@ -161,8 +198,10 @@ ingest.post('/:slug/kanban', async (c) => {
   const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
   if (!tenant) return c.json({ ok: false, error: 'tenant desconhecido' }, 404);
 
-  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key');
-  if (chave !== tenant.ingestKey) return c.json({ ok: false, error: 'chave invalida' }, 401);
+  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key') ?? null;
+  if (!(await chaveDoCanal(c.env.DB, tenant.id, 'kanban', tenant.ingestKey, chave))) {
+    return c.json({ ok: false, error: 'chave invalida' }, 401);
+  }
 
   const raw = await c.req.text();
 

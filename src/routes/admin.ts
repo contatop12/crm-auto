@@ -91,47 +91,72 @@ admin.get('/tenants/:id/config', async (c) => {
   });
 });
 
-/**
- * Mostra a chave inteira — uma vez.
- *
- * Depois disto ela volta a ser mascarada para sempre, e a unica forma de ver
- * outra e' gerar outra. Segredo que a tela mostra toda vez que alguem abre a
- * aba nao e' segredo: esta chave ja' saiu em print de tela mais de uma vez
- * justamente por ficar exposta o tempo todo.
- */
-admin.post('/tenants/:id/ingest-key/revelar', async (c) => {
+const CANAIS = ['click', 'kanban', 'meta'] as const;
+type Canal = (typeof CANAIS)[number];
+
+const ehCanal = (v: string): v is Canal => (CANAIS as readonly string[]).includes(v);
+
+/** Estado das chaves do cliente, mascaradas. Nunca devolve o valor. */
+admin.get('/tenants/:id/webhooks/chaves', async (c) => {
   const id = Number(c.req.param('id'));
-  const l = await c.env.DB.prepare(
-    'SELECT ingest_key, ingest_key_revelada FROM tenant_config WHERE tenant_id = ?',
+  const { results } = await c.env.DB.prepare(
+    'SELECT canal, chave, revelada, created_at FROM ingest_keys WHERE tenant_id = ?',
   )
     .bind(id)
-    .first<{ ingest_key: string | null; ingest_key_revelada: number }>();
+    .all<{ canal: string; chave: string; revelada: number; created_at: string }>();
 
-  if (!l?.ingest_key) return c.json({ error: 'cliente sem chave de ingestao' }, 404);
-  if (Number(l.ingest_key_revelada) === 1) {
-    return c.json({
-      error: 'esta chave ja foi exibida. Para ver uma chave inteira, gere uma nova.',
-    }, 409);
-  }
-
-  await c.env.DB.prepare('UPDATE tenant_config SET ingest_key_revelada = 1 WHERE tenant_id = ?')
-    .bind(id)
-    .run();
-
-  console.log(JSON.stringify({ acao: 'revelar_ingest_key', por: c.get('identity').email, tenant_id: id }));
-  return c.json({ ok: true, ingest_key: l.ingest_key });
+  return c.json({
+    canais: results.map((k) => ({
+      canal: k.canal,
+      mascarada: mascararSegredo(k.chave),
+      revelavel: Number(k.revelada) === 0,
+      criada_em: k.created_at,
+    })),
+  });
 });
 
 /**
- * Gera uma chave nova e a mostra uma vez.
+ * Mostra a chave de UM canal — uma vez.
  *
- * DERRUBA a anterior no mesmo instante: todo endereco ja' colado no GTM, no
- * Chatwoot e no Make passa a receber 401 ate' ser atualizado. Por isso a
- * resposta devolve a lista do que precisa ser trocado — descobrir isso pelo
- * silencio dos leads seria caro.
+ * Depois disto ela volta a ser mascarada para sempre, e a unica forma de ver
+ * outra e' gerar outra. Segredo que a tela mostra toda vez que alguem abre a
+ * aba nao e' segredo.
  */
-admin.post('/tenants/:id/ingest-key/gerar', async (c) => {
+admin.post('/tenants/:id/webhooks/:canal/revelar', async (c) => {
   const id = Number(c.req.param('id'));
+  const canal = c.req.param('canal');
+  if (!ehCanal(canal)) return c.json({ error: 'canal desconhecido' }, 400);
+
+  const l = await c.env.DB.prepare(
+    'SELECT chave, revelada FROM ingest_keys WHERE tenant_id = ? AND canal = ?',
+  )
+    .bind(id, canal)
+    .first<{ chave: string; revelada: number }>();
+
+  if (!l) return c.json({ error: 'este cliente nao tem chave para este canal' }, 404);
+  if (Number(l.revelada) === 1) {
+    return c.json({ error: 'esta chave ja foi exibida. Para ver uma inteira, gere uma nova.' }, 409);
+  }
+
+  await c.env.DB.prepare('UPDATE ingest_keys SET revelada = 1 WHERE tenant_id = ? AND canal = ?')
+    .bind(id, canal)
+    .run();
+
+  console.log(JSON.stringify({ acao: 'revelar_chave', por: c.get('identity').email, tenant_id: id, canal }));
+  return c.json({ ok: true, canal, chave: l.chave });
+});
+
+/**
+ * Gera a chave de UM canal e a mostra uma vez.
+ *
+ * Derruba so' aquele endereco. Era esse o ponto de separar as chaves: girar a
+ * do Meta nao pode obrigar a reconfigurar o GTM e o Chatwoot do mesmo cliente.
+ */
+admin.post('/tenants/:id/webhooks/:canal/gerar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const canal = c.req.param('canal');
+  if (!ehCanal(canal)) return c.json({ error: 'canal desconhecido' }, 400);
+
   const t = await c.env.DB.prepare('SELECT slug FROM tenants WHERE id = ?')
     .bind(id)
     .first<{ slug: string }>();
@@ -139,106 +164,21 @@ admin.post('/tenants/:id/ingest-key/gerar', async (c) => {
 
   const nova = gerarIngestKey();
   await c.env.DB.prepare(
-    "UPDATE tenant_config SET ingest_key = ?, ingest_key_revelada = 0, updated_at = datetime('now') WHERE tenant_id = ?",
+    `INSERT INTO ingest_keys (tenant_id, canal, chave, revelada) VALUES (?, ?, ?, 0)
+     ON CONFLICT (tenant_id, canal) DO UPDATE SET chave = excluded.chave, revelada = 0`,
   )
-    .bind(nova, id)
+    .bind(id, canal, nova)
     .run();
 
-  console.log(JSON.stringify({ acao: 'gerar_ingest_key', por: c.get('identity').email, tenant_id: id }));
+  console.log(JSON.stringify({ acao: 'gerar_chave', por: c.get('identity').email, tenant_id: id, canal }));
 
   const base = `${new URL(c.req.url).origin}/ingest/${t.slug}`;
-  return c.json({
-    ok: true,
-    ingest_key: nova,
-    trocar: [
-      `${base}/click?k=${nova}`,
-      `${base}/kanban?k=${nova}`,
-      `${base}/kanban?k=${nova}&evento=conversao`,
-      `${base}/meta-lead?k=${nova}`,
-    ],
-  });
-});
-
-admin.post('/tenants', async (c) => {
-  const body = await c.req.json<Record<string, unknown>>();
-  const entrada = {
-    nome: String(body.nome ?? ''),
-    slug: String(body.slug ?? ''),
-    cw_account_id: Number(body.cw_account_id) || null,
-    cw_board_funil_id: Number(body.cw_board_funil_id) || null,
-    cw_board_organico_id: Number(body.cw_board_organico_id) || null,
+  const trocar: Record<Canal, string[]> = {
+    click: [`${base}/click?k=${nova}`],
+    kanban: [`${base}/kanban?k=${nova}`, `${base}/kanban?k=${nova}&evento=conversao`],
+    meta: [`${base}/meta-lead?k=${nova}`],
   };
-
-  const { erros, slug } = validarCliente(entrada);
-  if (erros.length) return c.json({ error: erros.join(' · '), erros }, 400);
-
-  const repetido = await c.env.DB.prepare('SELECT id FROM tenants WHERE slug = ?')
-    .bind(slug)
-    .first();
-  if (repetido) return c.json({ error: `ja existe um cliente com o endereco "${slug}"` }, 409);
-
-  const t = await c.env.DB.prepare(
-    'INSERT INTO tenants (slug, nome, ativo) VALUES (?, ?, 1) RETURNING id',
-  )
-    .bind(slug, entrada.nome.trim())
-    .first<{ id: number }>();
-
-  await c.env.DB.prepare(
-    `INSERT INTO tenant_config
-       (tenant_id, cw_account_id, cw_board_funil_id, cw_board_organico_id,
-        ga_customer_id, ga_login_customer_id, evo_instancia, pulseboard_url,
-        ingest_key, validate_only, pulseboard_ativo)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1,
-             CASE WHEN ? IS NULL THEN 0 ELSE 1 END)`,
-  )
-    .bind(
-      t!.id,
-      entrada.cw_account_id,
-      entrada.cw_board_funil_id,
-      entrada.cw_board_organico_id,
-      String(body.ga_customer_id ?? '') || null,
-      c.env.GOOGLE_ADS_MCC_ID,
-      String(body.evo_instancia ?? '') || null,
-      String(body.pulseboard_url ?? '') || null,
-      gerarIngestKey(),
-      // o aviso nasce desligado enquanto nao ha URL do grupo: sem ela o
-      // primeiro lead do cliente novo vira erro, e erro de cadastro na
-      // estreia e' o pior momento para descobrir que falta preencher algo
-      String(body.pulseboard_url ?? '') || null,
-    )
-    .run();
-
-  console.log(JSON.stringify({ acao: 'criar_cliente', por: c.get('identity').email, slug }));
-  return c.json({ ok: true, id: t!.id, slug }, 201);
-});
-
-admin.patch('/tenants/:id', async (c) => {
-  const id = Number(c.req.param('id'));
-  const body = await c.req.json<Record<string, unknown>>();
-
-  if (typeof body.nome === 'string' && body.nome.trim()) {
-    await c.env.DB.prepare("UPDATE tenants SET nome = ?, updated_at = datetime('now') WHERE id = ?")
-      .bind(body.nome.trim(), id)
-      .run();
-  }
-  if (body.ativo !== undefined) {
-    await c.env.DB.prepare('UPDATE tenants SET ativo = ? WHERE id = ?')
-      .bind(body.ativo ? 1 : 0, id)
-      .run();
-  }
-
-  for (const campo of CAMPOS_CONFIG) {
-    if (!(campo in body)) continue;
-    const v = body[campo];
-    await c.env.DB.prepare(`UPDATE tenant_config SET ${campo} = ? WHERE tenant_id = ?`)
-      .bind(v === '' || v === null || v === undefined ? null : (v as string | number), id)
-      .run();
-  }
-
-  console.log(
-    JSON.stringify({ acao: 'editar_cliente', por: c.get('identity').email, tenant_id: id }),
-  );
-  return c.json({ ok: true });
+  return c.json({ ok: true, canal, chave: nova, trocar: trocar[canal] });
 });
 
 /**
