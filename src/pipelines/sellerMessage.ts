@@ -59,7 +59,23 @@ export async function moverPelaResposta(
     return { status: 'ignorado', motivo: `conversa ${conversaId}: resposta sem texto` };
   }
 
-  const task = obj(conv?.kanban_task);
+  /**
+   * O card pode ter nascido DEPOIS deste webhook.
+   *
+   * O payload e' o retrato de quando a mensagem chegou. Se o vendedor responde
+   * nos segundos entre a conversa nascer e o card ser criado, o retrato vem sem
+   * card e a resposta se perde — a etapa nunca avanca, e reprocessar nao ajuda
+   * porque o retrato guardado continua sem card.
+   *
+   * Aconteceu de verdade: a conversa 389 da Persianas recebeu tres respostas
+   * enquanto o card nao existia, e ficou parada em "Novo Lead" mesmo com
+   * "Qualificando" configurada para receber qualquer resposta.
+   *
+   * Perguntar ao Chatwoot custa uma chamada, e so' acontece quando o retrato
+   * nao trouxe card — que e' raro e e' exatamente quando importa.
+   */
+  // o card inteiro, nao so' o id: board e etapa saem dele nas linhas abaixo
+  const task = obj(conv?.kanban_task) ?? (await cardAgora(env, tenantId, conversaId));
   const taskId = num(task?.id);
   if (!taskId) {
     return { status: 'ignorado', motivo: `conversa ${conversaId} sem card no Kanban` };
@@ -214,4 +230,35 @@ function str(v: unknown): string | null {
 }
 function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * O card desta conversa, perguntado ao Chatwoot agora.
+ *
+ * Nao levanta excecao: sem card a resposta e' ignorada como antes, e uma falha
+ * de rede aqui nao pode virar erro de pipeline por uma consulta de socorro.
+ */
+async function cardAgora(
+  env: Env,
+  tenantId: number,
+  conversaId: number,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const cfg = await env.DB.prepare(
+      'SELECT cw_account_id FROM tenant_config WHERE tenant_id = ?',
+    )
+      .bind(tenantId)
+      .first<{ cw_account_id: number | null }>();
+    if (!cfg?.cw_account_id) return null;
+
+    const conversa = await ChatwootClient.fromEnv(env).conversa(cfg.cw_account_id, conversaId);
+    const t = obj(obj(conversa)?.kanban_task);
+    if (t) {
+      console.log(JSON.stringify({ acao: 'card_achado_depois', conversa: conversaId, task: num(t.id) }));
+    }
+    return t;
+  } catch (e) {
+    console.log(JSON.stringify({ acao: 'card_agora_falhou', conversa: conversaId, erro: (e as Error).message }));
+    return null;
+  }
 }

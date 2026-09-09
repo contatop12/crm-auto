@@ -55,6 +55,39 @@ afterEach(() => vi.unstubAllGlobals());
 const moveu = () => chamadas.find((c) => /\/move$/.test(c.url));
 
 describe('moverPelaResposta', () => {
+  test('o card criado DEPOIS do webhook ainda e encontrado', async () => {
+    // O payload e' o retrato de quando a mensagem chegou. Se o vendedor
+    // responde nos segundos entre a conversa nascer e o card ser criado, o
+    // retrato vem sem card e a resposta se perdia. Aconteceu com a conversa 389
+    // da Persianas: tres respostas ignoradas, card parado em "Novo Lead".
+    const { env } = cenario();
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const metodo = init.method ?? 'GET';
+      chamadas.push({ metodo, url: String(url), corpo: init.body ? JSON.parse(String(init.body)) : null });
+      if (/\/conversations\/76$/.test(String(url))) {
+        return Response.json({ id: 76, kanban_task: { id: 1421, board_id: FUNIL, board_step: { name: 'Qualificando' } } });
+      }
+      if (metodo === 'GET') return Response.json({ custom_attributes: {} });
+      return Response.json({ ok: true });
+    });
+
+    const r = await moverPelaResposta(env, 1, msg({ conversation: { id: 76 } }));
+    expect(r.status).toBe('ok');
+    expect(moveu()).toBeTruthy();
+  });
+
+  test('sem card nem depois de perguntar, segue ignorado', async () => {
+    const { env } = cenario();
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      chamadas.push({ metodo: init.method ?? 'GET', url: String(url), corpo: null });
+      if (/\/conversations\/76$/.test(String(url))) return Response.json({ id: 76 });
+      return Response.json({ ok: true });
+    });
+    const r = await moverPelaResposta(env, 1, msg({ conversation: { id: 76 } }));
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toMatch(/sem card/);
+  });
+
   test('a frase move o card para a etapa dela', async () => {
     const { env } = cenario();
     const r = await moverPelaResposta(env, 1, msg());
