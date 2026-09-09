@@ -11,6 +11,7 @@ import {
   lerModelo, planejarGtm, limparParaCriar, remapearGatilhos, indiceDeGatilhos,
 } from '../domain/gtm';
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
+import { mascararSegredo } from '../domain/segredo';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
   planejarProvisionamento,
@@ -70,13 +71,92 @@ admin.get('/tenants/:id/config', async (c) => {
   const t = await c.env.DB.prepare(
     `SELECT t.id, t.slug, t.nome, t.ativo, c.cw_account_id, c.cw_board_funil_id,
             c.cw_board_organico_id, c.ga_customer_id, c.evo_instancia,
-            c.pulseboard_url, c.pulseboard_ativo, c.gtm_account_id, c.gtm_container_id, c.gtm_prefixo, c.validate_only, c.janela_match_dias, c.ingest_key,
+            c.pulseboard_url, c.pulseboard_ativo, c.gtm_account_id, c.gtm_container_id, c.gtm_prefixo, c.validate_only, c.janela_match_dias, c.ingest_key, c.ingest_key_revelada,
             CASE WHEN c.cw_webhook_secret IS NULL THEN 0 ELSE 1 END AS tem_segredo_webhook
      FROM tenants t LEFT JOIN tenant_config c ON c.tenant_id = t.id WHERE t.id = ?`,
   )
     .bind(Number(c.req.param('id')))
-    .first();
-  return t ? c.json(t) : c.json({ error: 'cliente nao encontrado' }, 404);
+    .first<Record<string, unknown>>();
+
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+
+  // A chave nunca sai inteira por aqui. Quem precisa dela usa `revelar`, que
+  // e' acao deliberada, registrada, e vale uma vez so'.
+  const { ingest_key, ingest_key_revelada, ...resto } = t;
+  return c.json({
+    ...resto,
+    ingest_key_mascarada: mascararSegredo(ingest_key as string | null),
+    ingest_key_revelavel: Number(ingest_key_revelada) === 0,
+    tem_ingest_key: !!ingest_key,
+  });
+});
+
+/**
+ * Mostra a chave inteira — uma vez.
+ *
+ * Depois disto ela volta a ser mascarada para sempre, e a unica forma de ver
+ * outra e' gerar outra. Segredo que a tela mostra toda vez que alguem abre a
+ * aba nao e' segredo: esta chave ja' saiu em print de tela mais de uma vez
+ * justamente por ficar exposta o tempo todo.
+ */
+admin.post('/tenants/:id/ingest-key/revelar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const l = await c.env.DB.prepare(
+    'SELECT ingest_key, ingest_key_revelada FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ ingest_key: string | null; ingest_key_revelada: number }>();
+
+  if (!l?.ingest_key) return c.json({ error: 'cliente sem chave de ingestao' }, 404);
+  if (Number(l.ingest_key_revelada) === 1) {
+    return c.json({
+      error: 'esta chave ja foi exibida. Para ver uma chave inteira, gere uma nova.',
+    }, 409);
+  }
+
+  await c.env.DB.prepare('UPDATE tenant_config SET ingest_key_revelada = 1 WHERE tenant_id = ?')
+    .bind(id)
+    .run();
+
+  console.log(JSON.stringify({ acao: 'revelar_ingest_key', por: c.get('identity').email, tenant_id: id }));
+  return c.json({ ok: true, ingest_key: l.ingest_key });
+});
+
+/**
+ * Gera uma chave nova e a mostra uma vez.
+ *
+ * DERRUBA a anterior no mesmo instante: todo endereco ja' colado no GTM, no
+ * Chatwoot e no Make passa a receber 401 ate' ser atualizado. Por isso a
+ * resposta devolve a lista do que precisa ser trocado — descobrir isso pelo
+ * silencio dos leads seria caro.
+ */
+admin.post('/tenants/:id/ingest-key/gerar', async (c) => {
+  const id = Number(c.req.param('id'));
+  const t = await c.env.DB.prepare('SELECT slug FROM tenants WHERE id = ?')
+    .bind(id)
+    .first<{ slug: string }>();
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+
+  const nova = gerarIngestKey();
+  await c.env.DB.prepare(
+    "UPDATE tenant_config SET ingest_key = ?, ingest_key_revelada = 0, updated_at = datetime('now') WHERE tenant_id = ?",
+  )
+    .bind(nova, id)
+    .run();
+
+  console.log(JSON.stringify({ acao: 'gerar_ingest_key', por: c.get('identity').email, tenant_id: id }));
+
+  const base = `${new URL(c.req.url).origin}/ingest/${t.slug}`;
+  return c.json({
+    ok: true,
+    ingest_key: nova,
+    trocar: [
+      `${base}/click?k=${nova}`,
+      `${base}/kanban?k=${nova}`,
+      `${base}/kanban?k=${nova}&evento=conversao`,
+      `${base}/meta-lead?k=${nova}`,
+    ],
+  });
 });
 
 admin.post('/tenants', async (c) => {

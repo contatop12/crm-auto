@@ -2388,13 +2388,24 @@
           alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
           return;
         }
-        if (!cfg.ingest_key) {
+        if (!cfg.tem_ingest_key) {
           alvo.innerHTML = '<div class="vazio"><p>Este cliente ainda não tem chave de ingestão.</p></div>';
           return;
         }
 
+        /**
+         * A chave só aparece inteira quando alguém pede, e só uma vez.
+         *
+         * Segredo que a tela mostra toda vez que a aba abre não é segredo —
+         * esta chave já saiu em print de tela mais de uma vez por ficar
+         * exposta. Mascarada dá para conferir QUAL chave está no ar, que é o
+         * que se precisa no dia a dia.
+         */
         const base = location.origin + '/ingest/' + encodeURIComponent(slug);
-        const k = '?k=' + encodeURIComponent(cfg.ingest_key);
+        let chaveVisivel = null;
+        const k = function () {
+          return '?k=' + encodeURIComponent(chaveVisivel || cfg.ingest_key_mascarada);
+        };
 
         // Duas perguntas diferentes: a chave ABRE a porta, e alguém JÁ USOU o
         // endereço. Uma URL pode estar perfeita e nunca ter sido colada no GTM.
@@ -2421,30 +2432,95 @@
           '<div class="linha-acoes" style="margin-bottom:16px">' +
             '<button id="btn-testar-chave">' + ic('conferir') + 'Testar a chave</button>' +
             '<button id="btn-conferir-origem">' + ic('atualizar') + 'Conferir a configuração</button>' +
+            (cfg.ingest_key_revelavel
+              ? '<button id="btn-revelar-chave" class="principal">Exibir a chave (uma vez)</button>'
+              : '<button id="btn-gerar-chave" class="perigo">Gerar nova chave</button>') +
             '<span class="carregando" id="chave-estado">a chave confere se o endereço abre; a configuração, se o GTM e o Chatwoot apontam para cá</span>' +
           '</div>' +
-          bloco('click', 'GTM · clique no anúncio', base + '/click' + k,
+          bloco('click', 'GTM · clique no anúncio', base + '/click' + k(),
             'POST com o corpo do clique. Grava a linha em <strong>leads</strong>, que é o que o protocolo da mensagem casa depois.',
             uso.click) +
-          bloco('kanban_entrada', 'Chatwoot · entrada no funil (avisa o grupo)', base + '/kanban' + k,
+          bloco('kanban_entrada', 'Chatwoot · entrada no funil (avisa o grupo)', base + '/kanban' + k(),
             'Ação <strong>Enviar evento de webhook</strong> numa automação de <em>kanban_task_updated</em>, com o board do funil e a etapa de entrada.',
             uso.kanban_entrada) +
-          bloco('meta', 'Meta · formulário nativo', base + '/meta-lead' + k,
+          bloco('meta', 'Meta · formulário nativo', base + '/meta-lead' + k(),
             'POST com o lead do formulário. Grava em <strong>leads</strong> com o telefone; ' +
             'quando a pessoa aparecer no WhatsApp, o sistema casa os dois sozinho pelo telefone. ' +
             'Não sobe conversão para o Google — o lead não veio de lá.',
             uso.meta) +
-          bloco('kanban_conversao', 'Chatwoot · conversão por etapa', base + '/kanban' + k + '&evento=conversao',
+          bloco('kanban_conversao', 'Chatwoot · conversão por etapa', base + '/kanban' + k() + '&evento=conversao',
             'Já está nas regras <strong>Evento Qualificado</strong> e <strong>Compra</strong>. O <code>&amp;evento=conversao</code> impede que elas disparem aviso de lead novo.',
             uso.kanban_conversao) +
           '<div class="aviso">A chave vai na própria URL, porque nem o GTM nem a automação do Chatwoot mandam header. ' +
           'Trate estes endereços como senha: quem os tiver consegue gravar dados neste cliente.</div>';
 
+        /** Redesenha os endereços com a chave que estiver em mãos agora. */
+        function redesenhar() {
+          carregarEnderecos(id, slug);
+        }
+
+        const btnRevelar = document.getElementById('btn-revelar-chave');
+        if (btnRevelar) {
+          btnRevelar.addEventListener('click', async function () {
+            if (!confirm('A chave será exibida UMA vez. Depois disso, só gerando outra.' +
+              ' Copie os endereços antes de sair desta tela.')) return;
+            btnRevelar.disabled = true;
+            try {
+              const r = await enviar('/tenants/' + id + '/ingest-key/revelar', 'POST', {});
+              chaveVisivel = r.ingest_key;
+              // redesenha sem recarregar: recarregar perderia a chave, que a
+              // API nao devolve de novo
+              alvo.querySelectorAll('code').forEach(function (el) {
+                el.textContent = el.textContent.replace(
+                  encodeURIComponent(cfg.ingest_key_mascarada), encodeURIComponent(chaveVisivel));
+              });
+              alvo.querySelectorAll('.copiar').forEach(function (b) {
+                b.dataset.url = b.dataset.url.replace(
+                  encodeURIComponent(cfg.ingest_key_mascarada), encodeURIComponent(chaveVisivel));
+              });
+              btnRevelar.textContent = 'exibida — copie agora';
+              document.getElementById('chave-estado').innerHTML =
+                '<span class="st-ok">chave à mostra. Ao sair desta tela ela volta a ficar oculta.</span>';
+            } catch (e) {
+              btnRevelar.disabled = false;
+              alert('Não exibiu: ' + e.message);
+            }
+          });
+        }
+
+        const btnGerar = document.getElementById('btn-gerar-chave');
+        if (btnGerar) {
+          btnGerar.addEventListener('click', async function () {
+            if (!confirm(
+              'Gerar uma chave nova DERRUBA a atual no mesmo instante. ' +
+              'Todo endereço já colado no GTM, no Chatwoot e no Make passa a receber 401 ' +
+              'até você atualizar. Continuar?'
+            )) return;
+            btnGerar.disabled = true;
+            try {
+              const r = await enviar('/tenants/' + id + '/ingest-key/gerar', 'POST', {});
+              chaveVisivel = r.ingest_key;
+              redesenhar();
+              setTimeout(function () {
+                alert('Chave nova gerada. Atualize estes endereços:\n\n' + r.trocar.join('\n'));
+              }, 300);
+            } catch (e) {
+              btnGerar.disabled = false;
+              alert('Não gerou: ' + e.message);
+            }
+          });
+        }
+
         document.getElementById('btn-testar-chave').addEventListener('click', async function () {
           const est = document.getElementById('chave-estado');
           est.innerHTML = 'testando…';
           try {
-            const r = await fetch('/ingest/' + encodeURIComponent(slug) + '/ping' + k);
+            if (!chaveVisivel) {
+              est.className = 'carregando';
+              est.textContent = 'a chave está oculta — exiba ou gere uma nova para testar';
+              return;
+            }
+            const r = await fetch('/ingest/' + encodeURIComponent(slug) + '/ping' + k());
             if (r.status === 200) {
               est.textContent = 'chave válida — o endereço abre e responde';
               est.className = 'st-ok';

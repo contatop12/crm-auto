@@ -1,0 +1,11 @@
+-- A chave de ingestao passa a ser segredo de verdade: vista uma vez, depois
+-- so' mascarada.
+--
+-- Ela grava dados no cliente. Ate' aqui aparecia inteira no painel toda vez que
+-- alguem abria a aba, e por isso ja' saiu em print de tela mais de uma vez.
+--
+-- Nasce como REVELADA para quem ja' existe: mentir que nunca foi vista nao
+-- protege nada — ela ja' esta' colada no GTM, no Chatwoot e no Make. Quem quiser
+-- fechar de fato gera uma nova, que e' a unica coisa que realmente invalida a
+-- antiga.
+ALTER TABLE tenant_config ADD COLUMN ingest_key_revelada INTEGER NOT NULL DEFAULT 1;
