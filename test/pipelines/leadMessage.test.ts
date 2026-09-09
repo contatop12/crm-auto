@@ -6,8 +6,8 @@ import type { Env } from '../../src/env';
 function cenario() {
   const { d1, exec, consultar } = fakeD1();
   exec(`INSERT INTO tenants (id, slug, nome, ativo) VALUES (1, 'vita', 'Vita', 1)`);
-  exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, ga_customer_id, evo_instancia, ingest_key, janela_match_dias)
-        VALUES (1, 2, 7, '6973821129', NULL, 'k', 90)`);
+  exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, ga_customer_id, evo_instancia, ingest_key, janela_match_dias, gtm_prefixo)
+        VALUES (1, 2, 7, '6973821129', NULL, 'k', 90, 'VITA')`);
   for (const [slug, zap] of [['mensagem', 'Mensagem'], ['google-ads', 'Lead do Google Ads'], ['search', 'Search'], ['formulario', null]] as const) {
     exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
           VALUES (1, '${slug}', '${slug}', ${zap ? `'${zap}'` : 'NULL'})`);
@@ -125,6 +125,104 @@ describe('atribuirLead', () => {
     const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
     expect(attrs.funil).toBe('PROMOVER');
     expect(r.motivo).toMatch(/marcada para promover/);
+  });
+
+  test('a frase do anuncio salva o lead que chegou sem clique', async () => {
+    // Nao houve protocolo na mensagem nem clique casado pelo telefone. O texto
+    // do botao do anuncio e' a unica prova de origem — sem isto o lead era
+    // descartado: pago, atendido, e invisivel para o Google.
+    const { env, exec, consultar } = cenario();
+    exec(`DELETE FROM leads WHERE tenant_id = 1`);
+    exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+          VALUES (1, 'Olá! Vim pelo google e gostaria de agendar uma avaliação auditiva.', 'mensagem', 'google')`);
+
+    const r = await atribuirLead(env, 1, webhook({
+      content: 'Olá! Vim pelo google e gostaria de agendar uma avaliação auditiva.',
+    }));
+    expect(r.status).toBe('ok');
+
+    const leads = consultar<{ protocol: string; gclid: string | null; origem: string }>(
+      'SELECT * FROM leads WHERE tenant_id = 1',
+    );
+    expect(leads).toHaveLength(1);
+    expect(leads[0]!.protocol).toContain('-MSG-');
+    // sem clique registrado, entao sem gclid: a conversao sobe pelos dados do lead
+    expect(leads[0]!.gclid).toBeNull();
+
+    const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+    expect(attrs.funil).toBe('PROMOVER');
+    expect(attrs.protocolo).toContain('-MSG-');
+  });
+
+  test('a frase resgata o clique que chegou sem gclid e sem utm', async () => {
+    // Caso real da Vita (VITA-MTSMZ0YIEUB9): o clique foi registrado "sem
+    // plataforma", o lead FOI encontrado pelo protocolo — entao a busca por
+    // frase nem era consultada — e a plataforma saiu 'outro'. Card parou no
+    // Organico, nenhuma conversao subiu. Lead de anuncio, pago, invisivel.
+    const { env, exec, consultar } = cenario();
+    exec(`UPDATE leads SET gclid = NULL, utm_source = NULL, utm_medium = NULL, utm_campaign = NULL
+          WHERE tenant_id = 1`);
+    exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+          VALUES (1, 'vim pelo google', 'mensagem', 'google')`);
+
+    const r = await atribuirLead(env, 1, webhook({
+      content: 'Olá, vim pelo google e gostaria de mais informações [Protocolo: VITA-MRIAP9IN8WNQ]',
+    }));
+
+    expect(r.status).toBe('ok');
+    const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+    expect(attrs.funil).toBe('PROMOVER');
+    expect(consultar('SELECT * FROM conversions')).toHaveLength(1);
+  });
+
+  test('a frase NAO sobrepoe a plataforma que o clique ja trouxe', async () => {
+    // o dado do clique e' mais especifico: diz campanha, termo, tipo. A frase
+    // so' preenche o que faltava.
+    const { env, exec } = cenario();
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, 'meta-ads', 'meta-ads')`);
+    exec(`UPDATE leads SET utm_source = 'facebook', fbc = 'fb.1.2.3', gclid = NULL WHERE tenant_id = 1`);
+    exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+          VALUES (1, 'vim pelo google', 'mensagem', 'google')`);
+
+    await atribuirLead(env, 1, webhook({ content: 'vim pelo google [Protocolo: VITA-MRIAP9IN8WNQ]' }));
+    const corpo = corpoDe<{ labels: string[] }>(/labels/);
+    expect(corpo.labels).toContain('meta-ads');
+    expect(corpo.labels).not.toContain('google-ads');
+  });
+
+  test('a frase aplica as etiquetas de mensagem e google-ads', async () => {
+    const { env, exec } = cenario();
+    exec(`DELETE FROM leads WHERE tenant_id = 1`);
+    exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+          VALUES (1, 'Olá! Vim pelo google e gostaria de agendar uma avaliação auditiva.', 'mensagem', 'google')`);
+
+    await atribuirLead(env, 1, webhook({
+      content: 'Olá! Vim pelo google e gostaria de agendar uma avaliação auditiva.',
+    }));
+    const corpo = corpoDe<{ labels: string[] }>(/labels/);
+    expect(corpo.labels).toContain('mensagem');
+    expect(corpo.labels).toContain('google-ads');
+  });
+
+  test('a mesma conversa nao vira dois leads pela frase repetida', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`DELETE FROM leads WHERE tenant_id = 1`);
+    exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+          VALUES (1, 'vim pelo google', 'mensagem', 'google')`);
+
+    await atribuirLead(env, 1, webhook({ content: 'oi, vim pelo google' }));
+    // a conversa ja' tem protocolo agora, entao a segunda passa direto — mas o
+    // protocolo derivado da conversa garante a mesma linha mesmo se reprocessar
+    await atribuirLead(env, 1, webhook({ content: 'vim pelo google de novo' }));
+    expect(consultar('SELECT * FROM leads WHERE tenant_id = 1')).toHaveLength(1);
+  });
+
+  test('mensagem qualquer sem frase cadastrada segue sendo descartada', async () => {
+    const { env, exec } = cenario();
+    exec(`DELETE FROM leads WHERE tenant_id = 1`);
+    const r = await atribuirLead(env, 1, webhook({ content: 'oi, quanto custa?' }));
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toMatch(/sem frase de entrada/);
   });
 
   test('promover ja sobe a conversao de entrada, sem esperar webhook', async () => {

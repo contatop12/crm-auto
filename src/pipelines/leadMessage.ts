@@ -8,6 +8,7 @@ import { matchLead } from '../domain/matching';
 import { detectPlatform, detectOrigin, classifyCampaign } from '../domain/platform';
 import { buildLabels } from '../domain/labels';
 import { utmsDoCard, precisaResolverNome } from '../domain/padroes';
+import { casarFraseDeEntrada, protocoloDaFrase, type FraseEntrada } from '../domain/frasesEntrada';
 import { enviarConversao } from './stageChanged';
 import type { LabelVocabulary, LeadCandidate } from '../domain/types';
 
@@ -44,6 +45,7 @@ interface Config {
   evo_instancia: string | null;
   ga_customer_id: string | null;
   janela_match_dias: number | null;
+  gtm_prefixo: string | null;
 }
 
 interface LinhaLead {
@@ -78,7 +80,7 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   if (!conversaId) return { status: 'ignorado', motivo: 'payload sem conversa' };
 
   const cfg = await env.DB.prepare(
-    `SELECT cw_account_id, evo_instancia, ga_customer_id, janela_match_dias
+    `SELECT cw_account_id, evo_instancia, ga_customer_id, janela_match_dias, gtm_prefixo
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(tenantId)
@@ -101,16 +103,28 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
 
   // 1) protocolo na mensagem  2) telefone dentro da janela
   const protocoloDito = findProtocol(texto);
-  const lead = protocoloDito
+  const leadDoClique = protocoloDito
     ? await porProtocolo(env, tenantId, protocoloDito)
     : await porTelefone(env, tenantId, chave, cfg.janela_match_dias ?? 90);
+
+  /**
+   * Ultimo recurso: a frase do anuncio.
+   *
+   * Nao houve protocolo na mensagem nem clique casado pelo telefone — mas o
+   * texto pode ser o que o botao do anuncio ja' manda pronto, e esse texto so'
+   * existe porque alguem apertou aquele botao. Sem isto o lead e' descartado:
+   * pago, atendido, e invisivel para o Google.
+   */
+  const lead = leadDoClique ?? (await leadDaFrase(env, tenantId, {
+    texto, telefone, chave, conversaId, prefixo: cfg.gtm_prefixo,
+  }));
 
   if (!lead) {
     return {
       status: 'ignorado',
       motivo: protocoloDito
         ? `protocolo ${protocoloDito} nao esta na base de cliques`
-        : `sem protocolo na mensagem e sem clique para o telefone`,
+        : `sem protocolo na mensagem, sem clique para o telefone e sem frase de entrada`,
     };
   }
 
@@ -125,8 +139,31 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
     origemClick: lead.origem,
     eventClick: lead.evento,
   };
-  const plataforma = detectPlatform(sinais);
-  const origem = detectOrigin(sinais);
+  /**
+   * A frase tambem RESGATA o clique que nao provou nada.
+   *
+   * Caso real da Vita: o clique chegou com protocolo mas sem gclid e sem UTM
+   * nenhuma — "registrado (sem plataforma)". O lead foi achado, entao a busca
+   * por frase nem era consultada, a plataforma saiu 'outro', o card ficou no
+   * Organico e nenhuma conversao subiu. Lead de anuncio, pago, invisivel.
+   *
+   * A frase e' prova de origem independente de existir linha de clique. Ela so'
+   * PREENCHE o que faltava: quando o clique ja' trouxe plataforma, ela nao
+   * sobrepoe — o dado do clique e' mais especifico (diz a campanha, o termo).
+   */
+  const doClique = detectPlatform(sinais);
+  const porFrase = doClique === 'outro'
+    ? casarFraseDeEntrada(texto, await frasesDoTenant(env, tenantId))
+    : null;
+
+  const plataforma = porFrase ? (porFrase.plataforma as typeof doClique) : doClique;
+  const origem = porFrase ? (porFrase.origem as ReturnType<typeof detectOrigin>) : detectOrigin(sinais);
+
+  if (porFrase) {
+    console.log(JSON.stringify({
+      acao: 'origem_pela_frase', protocolo: lead.protocol, plataforma: porFrase.plataforma,
+    }));
+  }
 
   const cw = ChatwootClient.fromEnv(env);
   const acc = cfg.cw_account_id;
@@ -362,4 +399,69 @@ async function dispararConversaoDeEntrada(
     // a conversao nao pode derrubar a atribuicao: o lead ja' esta' no funil
     console.log(JSON.stringify({ acao: 'conversao_de_entrada_falhou', protocolo, erro: (e as Error).message }));
   }
+}
+
+/**
+ * Cria o lead do anuncio que chegou so' pela frase.
+ *
+ * Grava em `leads` porque tudo depois disto — atribuicao, promocao, conversao —
+ * le' de la'. O protocolo e' derivado da conversa, entao a segunda mensagem do
+ * mesmo lead cai na MESMA linha em vez de criar outra.
+ *
+ * Sem gclid, de proposito: nao houve clique registrado. A conversao sobe pelos
+ * dados do lead, o que o `montarEvento` ja' sabe fazer.
+ */
+async function leadDaFrase(
+  env: Env,
+  tenantId: number,
+  ctx: {
+    texto: string;
+    telefone: string | null;
+    chave: string | null;
+    conversaId: number;
+    prefixo: string | null;
+  },
+): Promise<LinhaLead | null> {
+  const casou = casarFraseDeEntrada(ctx.texto, await frasesDoTenant(env, tenantId));
+  if (!casou) return null;
+
+  const protocolo = protocoloDaFrase(ctx.prefixo ?? '', ctx.conversaId);
+  const fone = normFone(ctx.telefone);
+
+  // `COALESCE` para a segunda mensagem nao apagar o que a primeira gravou
+  await env.DB.prepare(
+    `INSERT INTO leads (tenant_id, protocol, phone_raw, phone_e164, phone_key,
+                        utm_source, origem, evento)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'frase_entrada')
+     ON CONFLICT (tenant_id, protocol) DO UPDATE SET
+       phone_e164 = COALESCE(excluded.phone_e164, leads.phone_e164),
+       phone_key  = COALESCE(excluded.phone_key, leads.phone_key),
+       updated_at = datetime('now')`,
+  )
+    .bind(tenantId, protocolo, ctx.telefone, fone, ctx.chave, casou.plataforma, casou.origem)
+    .run();
+
+  console.log(JSON.stringify({ acao: 'lead_pela_frase', protocolo, plataforma: casou.plataforma }));
+
+  return {
+    protocol: protocolo,
+    nome: null,
+    gclid: null, gbraid: null, wbraid: null,
+    utm_source: casou.plataforma, utm_medium: null, utm_campaign: null,
+    utm_id: null, utm_term: null, utm_content: null,
+    fbc: null,
+    origem: casou.origem, evento: 'frase_entrada',
+    email: null, quiz_version: null, quiz_valor: null,
+  } as LinhaLead;
+}
+
+/** Frases de entrada do cliente. Lista curta; ler duas vezes nao doi. */
+async function frasesDoTenant(env: Env, tenantId: number): Promise<FraseEntrada[]> {
+  const { results } = await env.DB.prepare(
+    'SELECT frase, origem, plataforma FROM lead_entry_phrases WHERE tenant_id = ?',
+  )
+    .bind(tenantId)
+    .all<FraseEntrada>()
+    .catch(() => ({ results: [] as FraseEntrada[] }));
+  return results;
 }
