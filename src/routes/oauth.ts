@@ -20,6 +20,10 @@ export const oauth = new Hono<{ Bindings: Env }>();
 const ESCOPOS = [
   'https://www.googleapis.com/auth/tagmanager.readonly',
   'https://www.googleapis.com/auth/tagmanager.edit.containers',
+  // Publicar sao DOIS passos e dois escopos: criar a versao e por no ar. Sem o
+  // primeiro, `create_version` volta 403 "insufficient authentication scopes" —
+  // que parece falta de permissao na conta e nao e'.
+  'https://www.googleapis.com/auth/tagmanager.edit.containerversions',
   'https://www.googleapis.com/auth/tagmanager.publish',
   // junto porque o refresh token novo substitui o antigo no mesmo cliente:
   // sem isto, autorizar o GTM poderia derrubar o acesso ao Google Ads
