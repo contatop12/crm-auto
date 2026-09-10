@@ -867,8 +867,9 @@
           <div class="painel" data-painel="planilha" hidden>
           <section>
             <h2>Planilha geral de leads</h2>
-            <p class="dica">Cada conversão enviada vira uma linha. Você escolhe para qual
-            coluna vai cada dado — a planilha do cliente fica na ordem que o time dele já usa.</p>
+            <p class="dica">Cada conversão enviada <strong>acrescenta uma linha no fim</strong> da aba —
+            nada existente é sobrescrito. Você escolhe para qual coluna vai cada dado, então a planilha
+            do cliente fica na ordem que o time dele já usa.</p>
             <div id="planilha"></div>
           </section>
           </div>
@@ -2472,8 +2473,8 @@
         alvo.innerHTML =
           '<div class="grade">' +
             '<div class="campo"><label for="pl-doc">ID da planilha</label>' +
-            '<input id="pl-doc" value="' + esc(r.doc_id || '') + '" placeholder="o trecho entre /d/ e /edit na URL" />' +
-            '<p class="dica">Compartilhe a planilha com a conta Google autorizada, com permissão de edição.</p></div>' +
+            '<input id="pl-doc" value="' + esc(r.doc_id || '') + '" placeholder="cole a URL da planilha" />' +
+            '<p class="dica">Cole a URL inteira. Compartilhe a planilha com a conta Google autorizada, com permissão de edição.</p></div>' +
             '<div class="campo"><label for="pl-aba">Aba</label>' +
             '<input id="pl-aba" value="' + esc(r.aba || '') + '" placeholder="Leads" />' +
             '<p class="dica">Em branco usa <code>Leads</code>.</p></div>' +
@@ -2481,20 +2482,62 @@
           '<div class="campo"><label><input type="checkbox" id="pl-ativo"' +
           (r.ativo ? ' checked' : '') + ' /> Escrever na planilha a cada conversão enviada</label>' +
           '<p class="dica">Desligado, nada é escrito. Falha na planilha nunca derruba a conversão.</p></div>' +
-          '<table><thead><tr><th style="width:120px">Coluna</th><th>Dado</th><th></th></tr></thead><tbody id="pl-linhas">' +
-          linhas.map(function (l) {
-            return '<tr>' +
-              '<td><input class="pl-col" value="' + esc(l.coluna) + '" placeholder="A" style="width:80px" /></td>' +
-              '<td><select class="pl-campo">' + opcoes(l.campo) + '</select></td>' +
-              '<td><button class="pl-del">remover</button></td>' +
-              '</tr>';
-          }).join('') +
+          '<table><thead><tr><th style="width:88px">Coluna</th><th>Cabeçalho na planilha</th>' +
+          '<th>Dado que vai aqui</th><th></th></tr></thead><tbody id="pl-linhas">' +
+          linhas.map(function (l) { return linhaMapa(l, opcoes); }).join('') +
           '</tbody></table>' +
-          '<div class="linha-acoes"><button id="pl-add">Adicionar coluna</button>' +
+          '<div class="linha-acoes"><button id="pl-ler">' + ic('atualizar') + ' Ler colunas da planilha</button>' +
+          '<button id="pl-add">Adicionar coluna</button>' +
           '<button id="pl-salvar" class="principal">Salvar</button>' +
           '<span class="carregando" id="pl-estado"></span></div>';
 
         const corpo = document.getElementById('pl-linhas');
+
+        document.getElementById('pl-ler').addEventListener('click', async function () {
+          const est = document.getElementById('pl-estado');
+          const doc = document.getElementById('pl-doc').value.trim();
+          if (!doc) {
+            est.className = 'st-erro';
+            est.textContent = 'cole a URL da planilha primeiro';
+            return;
+          }
+          est.className = 'carregando';
+          est.textContent = 'lendo a primeira linha da planilha…';
+          try {
+            const h = await api('/tenants/' + id + '/planilha/cabecalhos?doc=' +
+              encodeURIComponent(doc) + '&aba=' + encodeURIComponent(document.getElementById('pl-aba').value || 'Leads'));
+            if (!h.colunas.length) {
+              est.className = 'st-erro';
+              est.textContent = 'a primeira linha da aba está vazia — é dela que saem os cabeçalhos';
+              return;
+            }
+            // o que ja' estava escolhido e' preservado: reler a planilha nao
+            // pode apagar um mapa que alguem montou
+            const antes = {};
+            corpo.querySelectorAll('tr').forEach(function (tr) {
+              const c = tr.querySelector('.pl-col').value.trim().toUpperCase();
+              if (c) antes[c] = tr.querySelector('.pl-campo').value;
+            });
+            corpo.innerHTML = h.colunas.map(function (c) {
+              return linhaMapa({ coluna: c.coluna, campo: antes[c.coluna] || '', nome: c.nome }, opcoes);
+            }).join('');
+            ligarRemover();
+            est.className = 'st-ok';
+            est.textContent = h.colunas.length + ' coluna(s) lidas da planilha';
+          } catch (e) {
+            est.className = 'st-erro';
+            est.textContent = 'não deu para ler: ' + e.message;
+          }
+        });
+
+        function linhaMapa(l, opcoes) {
+          return '<tr>' +
+            '<td><input class="pl-col" value="' + esc(l.coluna || '') + '" placeholder="A" style="width:64px" /></td>' +
+            '<td class="motivo">' + (l.nome ? esc(l.nome) : '<span class="nada">—</span>') + '</td>' +
+            '<td><select class="pl-campo">' + opcoes(l.campo) + '</select></td>' +
+            '<td><button class="pl-del">remover</button></td>' +
+            '</tr>';
+        }
 
         function ligarRemover() {
           corpo.querySelectorAll('.pl-del').forEach(function (b) {
@@ -2507,10 +2550,7 @@
 
         document.getElementById('pl-add').addEventListener('click', function () {
           const tr = document.createElement('tr');
-          tr.innerHTML =
-            '<td><input class="pl-col" placeholder="A" style="width:80px" /></td>' +
-            '<td><select class="pl-campo">' + opcoes('') + '</select></td>' +
-            '<td><button class="pl-del">remover</button></td>';
+          tr.innerHTML = linhaMapa({}, opcoes).replace(/^<tr>|<\/tr>$/g, '');
           corpo.appendChild(tr);
           ligarRemover();
         });

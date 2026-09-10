@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarLinha, colunaParaIndice, type Mapa } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarLinha, colunaParaIndice, indiceParaColuna, idDaPlanilha, type Mapa } from '../../src/domain/planilha';
 
 const dados = {
   timestamp: '2026-09-09 14:32:05',
@@ -100,5 +100,47 @@ describe('CAMPOS_PLANILHA', () => {
 
   test('todo campo tem rotulo legivel para a tela', () => {
     for (const c of CAMPOS_PLANILHA) expect(c.rotulo.length).toBeGreaterThan(2);
+  });
+});
+
+describe('idDaPlanilha', () => {
+  const ID = '1_FUKAUvlr1O8O2jMJCVbcdsWXUdjRMvDJo8fSHmQPBw';
+
+  test('extrai da URL inteira, que e o que se cola', () => {
+    expect(idDaPlanilha(`https://docs.google.com/spreadsheets/d/${ID}/edit?gid=149#gid=149`)).toBe(ID);
+  });
+
+  test('URL sem o /edit tambem serve', () => {
+    expect(idDaPlanilha(`https://docs.google.com/spreadsheets/d/${ID}`)).toBe(ID);
+  });
+
+  test('o id sozinho passa direto', () => {
+    expect(idDaPlanilha(ID)).toBe(ID);
+  });
+
+  test('espaco em volta nao atrapalha', () => {
+    expect(idDaPlanilha(`  ${ID}  `)).toBe(ID);
+  });
+
+  test('o que nao e planilha devolve null em vez de virar id invalido', () => {
+    expect(idDaPlanilha('https://docs.google.com/document/d/abc/edit')).toBeNull();
+    expect(idDaPlanilha('planilha do cliente')).toBeNull();
+    expect(idDaPlanilha('')).toBeNull();
+    expect(idDaPlanilha(null)).toBeNull();
+  });
+});
+
+describe('indiceParaColuna', () => {
+  test('e o caminho de volta de colunaParaIndice', () => {
+    for (const letra of ['A', 'B', 'Z', 'AA', 'AB', 'AZ', 'BA']) {
+      expect(indiceParaColuna(colunaParaIndice(letra))).toBe(letra);
+    }
+  });
+
+  test('a primeira coluna e A, nao vazio', () => expect(indiceParaColuna(0)).toBe('A'));
+  test('a 27a e AA', () => expect(indiceParaColuna(26)).toBe('AA'));
+  test('indice invalido devolve vazio em vez de letra errada', () => {
+    expect(indiceParaColuna(-1)).toBe('');
+    expect(indiceParaColuna(1.5)).toBe('');
   });
 });

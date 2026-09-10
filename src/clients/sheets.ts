@@ -65,6 +65,29 @@ export class SheetsClient {
     }
   }
 
+  /**
+   * A primeira linha da aba: os cabecalhos que o cliente ja' usa.
+   *
+   * E' o que permite escolher o destino pelo NOME da coluna em vez de pela
+   * letra. Contar colunas a mao erra, e o erro so' aparece depois, com o dado
+   * escrito no lugar errado.
+   */
+  async cabecalhos(docId: string, aba: string): Promise<string[]> {
+    const alcance = encodeURIComponent(`${aba}!1:1`);
+    const r = await fetch(`${BASE}/${docId}/values/${alcance}`, {
+      headers: { authorization: `Bearer ${this.token}` },
+    });
+    if (!r.ok) {
+      const txt = (await r.text()).slice(0, 300);
+      if (r.status === 403 && /insufficient|scope/i.test(txt)) {
+        throw new Error('falta o escopo de planilhas — reautorize em Acesso Google');
+      }
+      throw new Error(`Sheets ${r.status}: ${txt}`);
+    }
+    const j = (await r.json()) as { values?: string[][] };
+    return (j.values?.[0] ?? []).map((v) => String(v ?? '').trim());
+  }
+
   /** Nomes das abas do documento, para o painel oferecer em vez de exigir digitar. */
   async abas(docId: string): Promise<string[]> {
     const r = await fetch(`${BASE}/${docId}?fields=sheets.properties.title`, {

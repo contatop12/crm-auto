@@ -75,3 +75,35 @@ export function montarLinha(mapa: Mapa, dados: Record<string, unknown>): string[
   }
   return linha;
 }
+
+/**
+ * O id do documento, dado o que a pessoa colou.
+ *
+ * Pedir "o trecho entre /d/ e /edit" e' pedir para alguem editar uma URL a mao
+ * antes de colar. Aceitar a URL inteira custa uma linha e evita o erro mais
+ * provavel deste campo.
+ */
+export function idDaPlanilha(entrada: string | null | undefined): string | null {
+  const v = (entrada ?? '').trim();
+  if (!v) return null;
+
+  const naUrl = v.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (naUrl) return naUrl[1]!;
+
+  // ja' e' o id: os do Sheets sao longos e nao tem barra nem espaco
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(v)) return v;
+  return null;
+}
+
+/** 0 → `'A'`, 26 → `'AA'`. O caminho de volta de `colunaParaIndice`. */
+export function indiceParaColuna(i: number): string {
+  if (!Number.isInteger(i) || i < 0) return '';
+  let n = i + 1;
+  let s = '';
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}

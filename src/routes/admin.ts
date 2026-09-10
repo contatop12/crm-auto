@@ -13,7 +13,7 @@ import {
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { mascararSegredo } from '../domain/segredo';
 import { SheetsClient } from '../clients/sheets';
-import { CAMPOS_PLANILHA, colunaParaIndice } from '../domain/planilha';
+import { CAMPOS_PLANILHA, colunaParaIndice, indiceParaColuna, idDaPlanilha } from '../domain/planilha';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
   planejarProvisionamento,
@@ -131,7 +131,8 @@ admin.put('/tenants/:id/planilha', async (c) => {
     colunas?: Array<{ coluna?: string; campo?: string }>;
   }>();
 
-  const docId = String(b.doc_id ?? '').trim() || null;
+  // aceita a URL colada, nao so' o id: ninguem deveria editar URL a mao
+  const docId = idDaPlanilha(b.doc_id);
   // ligar sem planilha escolhida encheria a tela de erro a cada conversao
   const ativo = b.ativo && docId ? 1 : 0;
 
@@ -158,6 +159,29 @@ admin.put('/tenants/:id/planilha', async (c) => {
 
   console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, colunas: validas.length }));
   return c.json({ ok: true, colunas: validas.length, ativo: ativo === 1 });
+});
+
+/**
+ * Cabecalhos da aba, com a letra de cada um.
+ *
+ * A tela usa isto para montar o mapa a partir da planilha REAL, em vez de pedir
+ * para digitar letra de coluna — que exige contar e errar.
+ */
+admin.get('/tenants/:id/planilha/cabecalhos', async (c) => {
+  const docId = idDaPlanilha(c.req.query('doc'));
+  if (!docId) return c.json({ error: 'informe a planilha (cole a URL ou o id)' }, 400);
+
+  const sheets = await SheetsClient.deD1(c.env);
+  if (!sheets) return c.json({ error: 'Google sem autorizacao — veja Acesso Google' }, 400);
+
+  try {
+    const nomes = await sheets.cabecalhos(docId, c.req.query('aba') || 'Leads');
+    return c.json({
+      colunas: nomes.map((nome, i) => ({ coluna: indiceParaColuna(i), nome })),
+    });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 502);
+  }
 });
 
 /** Abas do documento, para a tela oferecer em vez de exigir digitar certo. */
