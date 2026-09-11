@@ -5,8 +5,9 @@ import type { LabelVocabulary } from '../../src/domain/types';
 const vocab: LabelVocabulary[] = [
   { slug: 'mensagem', labelChatwoot: 'mensagem', labelWhatsapp: 'mensagem' },
   { slug: 'formulario', labelChatwoot: 'formulario', labelWhatsapp: 'formulario' },
-  { slug: 'google-ads', labelChatwoot: 'google-ads', labelWhatsapp: 'Google Ads' },
-  { slug: 'meta-ads', labelChatwoot: 'meta-ads', labelWhatsapp: 'meta-ads' },
+  { slug: 'google', labelChatwoot: 'google', labelWhatsapp: 'Google' },
+  { slug: 'facebook', labelChatwoot: 'facebook', labelWhatsapp: 'Facebook' },
+  { slug: 'instagram', labelChatwoot: 'instagram', labelWhatsapp: 'Instagram' },
   { slug: 'p-max', labelChatwoot: 'p-max', labelWhatsapp: 'p-max' },
   { slug: 'search', labelChatwoot: 'search', labelWhatsapp: 'search' },
   { slug: 'quiz-v2', labelChatwoot: 'quiz-v2', labelWhatsapp: null },
@@ -19,7 +20,7 @@ describe('buildLabels', () => {
       { origem: 'mensagem', plataforma: 'google', campanhaSlug: 'p-max' },
       vocab,
     );
-    expect(r.slugs).toEqual(['mensagem', 'google-ads', 'p-max']);
+    expect(r.slugs).toEqual(['mensagem', 'google', 'p-max']);
   });
 
   test('lead de quiz gera versao e faixa de valor', () => {
@@ -55,8 +56,8 @@ describe('buildLabels', () => {
 
   test('traduz para o nome real da etiqueta em cada canal', () => {
     const r = buildLabels({ origem: 'mensagem', plataforma: 'google' }, vocab);
-    expect(r.chatwoot).toEqual(['mensagem', 'google-ads']);
-    expect(r.whatsapp).toEqual(['mensagem', 'Google Ads']);
+    expect(r.chatwoot).toEqual(['mensagem', 'google']);
+    expect(r.whatsapp).toEqual(['mensagem', 'Google']);
   });
 
   test('etiqueta sem nome no WhatsApp nao vai para o WhatsApp', () => {
@@ -70,9 +71,9 @@ describe('buildLabels', () => {
 
   test('nao repete etiqueta', () => {
     const r = buildLabels(
-      { origem: 'mensagem', plataforma: 'google', campanhaSlug: 'google-ads' },
+      { origem: 'mensagem', plataforma: 'google', campanhaSlug: 'google' },
       vocab,
     );
-    expect(r.slugs.filter((s) => s === 'google-ads')).toHaveLength(1);
+    expect(r.slugs.filter((s) => s === 'google')).toHaveLength(1);
   });
 });

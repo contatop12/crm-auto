@@ -8,7 +8,7 @@ function cenario() {
   exec(`INSERT INTO tenants (id, slug, nome, ativo) VALUES (1, 'vita', 'Vita', 1)`);
   exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, ga_customer_id, evo_instancia, ingest_key, janela_match_dias, gtm_prefixo)
         VALUES (1, 2, 7, '6973821129', NULL, 'k', 90, 'VITA')`);
-  for (const [slug, zap] of [['mensagem', 'Mensagem'], ['google-ads', 'Lead do Google Ads'], ['search', 'Search'], ['formulario', null]] as const) {
+  for (const [slug, zap] of [['mensagem', 'Mensagem'], ['google', 'Google'], ['search', 'Search'], ['formulario', null]] as const) {
     exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
           VALUES (1, '${slug}', '${slug}', ${zap ? `'${zap}'` : 'NULL'})`);
   }
@@ -179,18 +179,18 @@ describe('atribuirLead', () => {
     // o dado do clique e' mais especifico: diz campanha, termo, tipo. A frase
     // so' preenche o que faltava.
     const { env, exec } = cenario();
-    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, 'meta-ads', 'meta-ads')`);
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, 'facebook', 'facebook')`);
     exec(`UPDATE leads SET utm_source = 'facebook', fbc = 'fb.1.2.3', gclid = NULL WHERE tenant_id = 1`);
     exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
           VALUES (1, 'vim pelo google', 'mensagem', 'google')`);
 
     await atribuirLead(env, 1, webhook({ content: 'vim pelo google [Protocolo: VITA-MRIAP9IN8WNQ]' }));
     const corpo = corpoDe<{ labels: string[] }>(/labels/);
-    expect(corpo.labels).toContain('meta-ads');
-    expect(corpo.labels).not.toContain('google-ads');
+    expect(corpo.labels).toContain('facebook');
+    expect(corpo.labels).not.toContain('google');
   });
 
-  test('a frase aplica as etiquetas de mensagem e google-ads', async () => {
+  test('a frase aplica as etiquetas de mensagem e google', async () => {
     const { env, exec } = cenario();
     exec(`DELETE FROM leads WHERE tenant_id = 1`);
     exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
@@ -201,7 +201,7 @@ describe('atribuirLead', () => {
     }));
     const corpo = corpoDe<{ labels: string[] }>(/labels/);
     expect(corpo.labels).toContain('mensagem');
-    expect(corpo.labels).toContain('google-ads');
+    expect(corpo.labels).toContain('google');
   });
 
   test('a mesma conversa nao vira dois leads pela frase repetida', async () => {
@@ -282,7 +282,7 @@ describe('atribuirLead', () => {
     etiquetasAtuais = ['mensagem', 'Ligar mais tarde'];
     await atribuirLead(env, 1, webhook());
     const labels = corpoDe<{ labels: string[] }>(/\/labels$/).labels;
-    expect(labels).toContain('google-ads');
+    expect(labels).toContain('google');
     expect(labels).toContain('search');
     // trabalho do vendedor nao pode sumir
     expect(labels).toContain('Ligar mais tarde');
