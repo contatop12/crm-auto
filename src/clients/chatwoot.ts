@@ -162,6 +162,41 @@ export class ChatwootClient {
     });
   }
 
+  /** Etiquetas da conta com id, para renomear e apagar pelo id. */
+  async etiquetasComId(acc: number): Promise<Array<{ id: number; title: string; color: string; description: string }>> {
+    const r = await this.req<{ payload?: Array<Record<string, unknown>> }>(
+      'GET',
+      `/api/v1/accounts/${acc}/labels`,
+    );
+    const ls = (r.payload ?? (r as unknown as Array<Record<string, unknown>>)) || [];
+    return (ls as Array<Record<string, unknown>>).map((l) => ({
+      id: Number(l.id),
+      title: String(l.title ?? ''),
+      color: String(l.color ?? '#1f6feb'),
+      description: String(l.description ?? ''),
+    }));
+  }
+
+  /**
+   * Renomeia a etiqueta.
+   *
+   * O Chatwoot leva as conversas junto: quem tinha a etiqueta antiga passa a
+   * mostrar a nova. Verificado contra producao antes de confiar nisso.
+   */
+  async renomearEtiqueta(acc: number, id: number, novo: string, cor: string, descricao: string): Promise<void> {
+    await this.req('PATCH', `/api/v1/accounts/${acc}/labels/${id}`, {
+      title: novo,
+      color: cor,
+      description: descricao,
+      show_on_sidebar: true,
+    });
+  }
+
+  /** Apaga a etiqueta. Some de TODA conversa que a tinha, sem volta. */
+  async apagarEtiqueta(acc: number, id: number): Promise<void> {
+    await this.req('DELETE', `/api/v1/accounts/${acc}/labels/${id}`);
+  }
+
   async criarAtributo(
     acc: number,
     a: { modelo: string; chave: string; nome: string; tipo: string; descricao: string | null },

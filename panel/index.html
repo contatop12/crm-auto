@@ -111,6 +111,10 @@
       .id { font-family: var(--mono); font-size: 12px; color: var(--tinta-3); }
       .dica { color: var(--tinta-2); font-size: 12.5px; margin: 8px 0 0; max-width: 62ch; }
       .carregando { color: var(--tinta-3); font-size: 13px; }
+      /* Ações da etiqueta: discretas até o olho procurar por elas. A linha é
+         sobre a etiqueta, não sobre os botões. */
+      .acoes-etiqueta { display: flex; gap: var(--e1); justify-content: flex-end; }
+      .acoes-etiqueta button { font-size: 12px; padding: var(--e0) var(--e1); }
 
       /* Placar do Google Ads: os números que respondem "e daí?" antes da
          tabela. Cada um é um bloco fechado porque são grandezas distintas —
@@ -2334,7 +2338,7 @@
               esc(r.orfas.join(', ')) + '</span>. O motor tentaria aplicar e falharia.</div>'
             : '') +
           (r.etiquetas.length
-            ? '<table><thead><tr><th>Etiqueta</th><th>O motor usa</th><th>Nome no WhatsApp</th></tr></thead><tbody>' +
+            ? '<table><thead><tr><th>Etiqueta</th><th>O motor usa</th><th>Nome no WhatsApp</th><th></th></tr></thead><tbody>' +
               r.etiquetas.map(function (e) {
                 return '<tr>' +
                   '<td class="mono">' + esc(e.titulo) + '</td>' +
@@ -2344,10 +2348,80 @@
                     ? '<select class="l-zap" data-slug="' + esc(e.titulo) + '"' +
                       (e.no_vocabulario ? '' : ' disabled') + '>' + optZap(e.label_whatsapp) + '</select>'
                     : '<span class="nada">' + esc(e.label_whatsapp || '—') + '</span>') +
+                  '</td>' +
+                  '<td class="acoes-etiqueta">' +
+                    '<button class="l-ren" data-slug="' + esc(e.titulo) + '">renomear</button>' +
+                    '<button class="l-del perigo" data-slug="' + esc(e.titulo) + '">apagar</button>' +
                   '</td></tr>';
               }).join('') + '</tbody></table>'
             : '<div class="vazio"><p>Nenhuma etiqueta nesta conta do Chatwoot.</p>' +
               '<p class="mono">Use Integrações → Gerar no Chatwoot para criar as do padrão.</p></div>');
+
+        /**
+         * Renomear leva as conversas junto.
+         *
+         * Verificado contra produção: renomear `google-ads` para `google` na
+         * Vita levou as oito conversas que a tinham. Por isso renomear é melhor
+         * que apagar e criar — criar do zero deixaria as antigas órfãs.
+         */
+        alvo.querySelectorAll('.l-ren').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            const velho = b.dataset.slug;
+            const novo = prompt(
+              'Renomear "' + velho + '" para:' + '\n\n' +
+              'As conversas que já têm esta etiqueta passam a mostrar o nome novo.',
+              velho,
+            );
+            if (!novo || novo.trim() === velho) return;
+            b.disabled = true;
+            try {
+              const r = await enviar('/tenants/' + id + '/etiquetas/' +
+                encodeURIComponent(velho), 'PATCH', { novo: novo });
+              estado.className = 'st-ok';
+              estado.textContent = r.mudou
+                ? '"' + velho + '" virou "' + r.novo + '"'
+                : 'nada mudou';
+              carregarEtiquetas(id);
+            } catch (e) {
+              b.disabled = false;
+              alert('Não renomeou: ' + e.message);
+            }
+          });
+        });
+
+        /**
+         * Apagar tem dois alcances, e a diferença importa.
+         *
+         * Só do vocabulário: deixa de ser aplicada daqui para frente e continua
+         * nas conversas que já a têm. Do Chatwoot também: some de TODA conversa
+         * que a tinha, sem volta — isso reescreve histórico.
+         */
+        alvo.querySelectorAll('.l-del').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            const slug = b.dataset.slug;
+            const tudo = confirm(
+              'Apagar "' + slug + '" do CHATWOOT também?' + '\n\n' +
+              'OK = some de todas as conversas que a têm, sem volta.' + '\n' +
+              'Cancelar = sai só do vocabulário; para de ser aplicada, mas as conversas antigas mantêm.',
+            );
+            if (!confirm('Confirma apagar "' + slug + '"' +
+              (tudo ? ' do Chatwoot e do vocabulário' : ' só do vocabulário') + '?')) return;
+
+            b.disabled = true;
+            try {
+              const r = await enviar('/tenants/' + id + '/etiquetas/' +
+                encodeURIComponent(slug) + (tudo ? '?chatwoot=1' : ''), 'DELETE', {});
+              estado.className = r.ok ? 'st-ok' : 'st-erro';
+              estado.textContent = r.ok
+                ? '"' + slug + '" removida · no Chatwoot: ' + r.no_chatwoot
+                : r.error;
+              carregarEtiquetas(id);
+            } catch (e) {
+              b.disabled = false;
+              alert('Não apagou: ' + e.message);
+            }
+          });
+        });
 
         alvo.querySelectorAll('.l-on').forEach(function (b) {
           b.addEventListener('change', async function () {

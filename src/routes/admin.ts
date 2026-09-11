@@ -14,6 +14,7 @@ import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { mascararSegredo } from '../domain/segredo';
 import { SheetsClient } from '../clients/sheets';
 import { CAMPOS_PLANILHA, colunaParaIndice, indiceParaColuna, idDaPlanilha } from '../domain/planilha';
+import { etiquetaSlug } from '../domain/labels';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
   planejarProvisionamento,
@@ -851,6 +852,112 @@ admin.get('/tenants/:id/instancias', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+/**
+ * Renomeia uma etiqueta.
+ *
+ * O Chatwoot leva as conversas junto — quem tinha a antiga passa a mostrar a
+ * nova. Foi verificado contra producao antes de virar botao: renomear
+ * `google-ads` para `google` na Vita levou as oito conversas que a tinham.
+ *
+ * Por isso renomear e' melhor que criar a nova e apagar a velha: criar do zero
+ * deixaria as conversas antigas com uma etiqueta orfa.
+ */
+admin.patch('/tenants/:id/etiquetas/:slug', async (c) => {
+  const id = Number(c.req.param('id'));
+  const velho = c.req.param('slug');
+  const { novo: bruto } = await c.req.json<{ novo?: string }>();
+  const novo = etiquetaSlug(bruto);
+
+  if (!novo) return c.json({ error: 'o nome novo ficou vazio depois de normalizar' }, 400);
+  if (novo === velho) return c.json({ ok: true, novo, mudou: false });
+
+  const cfg = await c.env.DB.prepare(
+    'SELECT cw_account_id FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ cw_account_id: number | null }>();
+  if (!cfg?.cw_account_id) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  const cw = ChatwootClient.fromEnv(c.env);
+  let etiquetas;
+  try {
+    etiquetas = await cw.etiquetasComId(cfg.cw_account_id);
+  } catch (e) {
+    return c.json({ error: `nao deu para ler as etiquetas: ${(e as Error).message}` }, 502);
+  }
+
+  const alvo = etiquetas.find((l) => l.title === velho);
+  if (!alvo) return c.json({ error: `"${velho}" nao existe no Chatwoot` }, 404);
+
+  // Renomear para um nome que ja' existe fundiria duas etiquetas sem aviso, e
+  // o Chatwoot recusa de qualquer forma. Melhor dizer o motivo.
+  if (etiquetas.some((l) => l.title === novo)) {
+    return c.json({ error: `ja existe uma etiqueta chamada "${novo}"` }, 409);
+  }
+
+  try {
+    await cw.renomearEtiqueta(cfg.cw_account_id, alvo.id, novo, alvo.color, alvo.description);
+  } catch (e) {
+    return c.json({ error: `o Chatwoot recusou: ${(e as Error).message}` }, 502);
+  }
+
+  // o vocabulario acompanha; ficar com o nome velho aqui faria o motor tentar
+  // aplicar uma etiqueta que nao existe mais
+  await c.env.DB.prepare(
+    'UPDATE label_vocabulary SET slug = ?, label_chatwoot = ? WHERE tenant_id = ? AND slug = ?',
+  )
+    .bind(novo, novo, id, velho)
+    .run();
+
+  console.log(JSON.stringify({ acao: 'renomear_etiqueta', por: c.get('identity').email, tenant_id: id, de: velho, para: novo }));
+  return c.json({ ok: true, novo, mudou: true });
+});
+
+/**
+ * Apaga uma etiqueta.
+ *
+ * Dois alcances, e a diferenca importa: sem `?chatwoot=1` ela so' sai do
+ * vocabulario — deixa de ser aplicada daqui para frente e continua nas
+ * conversas que ja' a tem. Com `?chatwoot=1` some do Chatwoot tambem, e ai'
+ * some de TODA conversa que a tinha, sem volta.
+ *
+ * O segundo caso reescreve historico. A contagem de uso vai na resposta do GET
+ * para quem decide ver o tamanho do que esta' apagando.
+ */
+admin.delete('/tenants/:id/etiquetas/:slug', async (c) => {
+  const id = Number(c.req.param('id'));
+  const slug = c.req.param('slug');
+  const tambemNoChatwoot = c.req.query('chatwoot') === '1';
+
+  await c.env.DB.prepare('DELETE FROM label_vocabulary WHERE tenant_id = ? AND slug = ?')
+    .bind(id, slug)
+    .run();
+
+  if (!tambemNoChatwoot) {
+    console.log(JSON.stringify({ acao: 'remover_do_vocabulario', por: c.get('identity').email, tenant_id: id, slug }));
+    return c.json({ ok: true, slug, no_chatwoot: 'mantida' });
+  }
+
+  const cfg = await c.env.DB.prepare(
+    'SELECT cw_account_id FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ cw_account_id: number | null }>();
+  if (!cfg?.cw_account_id) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  try {
+    const cw = ChatwootClient.fromEnv(c.env);
+    const alvo = (await cw.etiquetasComId(cfg.cw_account_id)).find((l) => l.title === slug);
+    if (alvo) await cw.apagarEtiqueta(cfg.cw_account_id, alvo.id);
+  } catch (e) {
+    // saiu do vocabulario mas nao do Chatwoot: dizer isso e' melhor que fingir
+    return c.json({ ok: false, slug, error: `saiu do vocabulario, mas o Chatwoot recusou apagar: ${(e as Error).message}` }, 502);
+  }
+
+  console.log(JSON.stringify({ acao: 'apagar_etiqueta', por: c.get('identity').email, tenant_id: id, slug }));
+  return c.json({ ok: true, slug, no_chatwoot: 'apagada' });
+});
+
 // Padronizacoes — o catalogo de etiquetas e atributos que todo cliente recebe
 // ---------------------------------------------------------------------------
 
