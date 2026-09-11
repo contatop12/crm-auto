@@ -33,10 +33,12 @@ describe('buildLabels', () => {
     expect(r.slugs).toContain('formulario');
   });
 
-  test('faixa de valor de um digito vira r05', () => {
-    const v = [...vocab, { slug: 'r05', labelChatwoot: 'r05', labelWhatsapp: 'r05' }];
+  test('faixa de valor de um digito e r5, sem zero a esquerda', () => {
+    // o zero ordenava melhor na lista do Chatwoot, mas o nome que o time usa e'
+    // o que vale: etiqueta que ninguem reconhece ninguem aplica
+    const v = [...vocab, { slug: 'r5', labelChatwoot: 'r5', labelWhatsapp: 'r5' }];
     const r = buildLabels({ origem: 'formulario', plataforma: 'meta', quizValor: 5 }, v);
-    expect(r.slugs).toContain('r05');
+    expect(r.slugs).toContain('r5');
   });
 
   test('etiqueta fora do vocabulario e descartada e registrada', () => {

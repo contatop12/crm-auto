@@ -52,7 +52,10 @@ export function buildLabels(i: LabelInput, vocabulario: LabelVocabulary[]): Labe
   if (i.pagina) brutas.push(etiquetaSlug(i.pagina));
   if (i.campanhaSlug) brutas.push(i.campanhaSlug);
   if (i.quizVersion) brutas.push('quiz-' + i.quizVersion);
-  if (i.quizValor) brutas.push('r' + String(i.quizValor).padStart(2, '0'));
+  // Sem zero a esquerda: a etiqueta e' `r5`, nao `r05`. O zero ordenava melhor
+  // na lista do Chatwoot, mas o nome que o time usa e' o que vale — e uma
+  // etiqueta que ninguem reconhece nao e' aplicada por ninguem.
+  if (i.quizValor) brutas.push('r' + String(i.quizValor));
 
   const porSlug = new Map(vocabulario.map((v) => [v.slug, v]));
   const slugs: string[] = [];
