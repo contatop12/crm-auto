@@ -746,12 +746,27 @@
             <h2>Frases que movem os cards</h2>
             <div class="linha-acoes">
               <input id="g-frase" placeholder="segue a proposta" style="max-width:280px" />
+              <select id="g-tipo" style="max-width:130px" title="Contém: a frase aparece em qualquer ponto da mensagem. Fixo: a mensagem inteira é a frase.">
+                <option value="contem">Contém</option>
+                <option value="fixo">Fixo</option>
+              </select>
               <select id="g-etapa" style="max-width:220px"></select>
               <input id="g-emoji" placeholder="emoji (opcional)" style="max-width:150px" />
               <button id="btn-gatilho" class="principal">Adicionar</button>
               <span class="carregando" id="gatilho-estado"></span>
             </div>
             <div id="gatilhos"></div>
+          </section>
+
+          <section>
+            <h2>Cards sem conversa</h2>
+            <p class="mono">Cards do Kanban cuja conversa sumiu. Só leitura: nada é apagado daqui.</p>
+            <div class="linha-acoes">
+              <button id="btn-orfaos">Procurar</button>
+              <button id="btn-orfaos-csv" hidden>Baixar CSV</button>
+              <span class="carregando" id="orfaos-estado"></span>
+            </div>
+            <div id="orfaos"></div>
           </section>
 
           <section>
@@ -894,6 +909,7 @@
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
         document.getElementById('btn-meta-nova').addEventListener('click', () => adicionarMeta(id));
         document.getElementById('btn-gatilho').addEventListener('click', () => adicionarGatilho(id));
+        document.getElementById('btn-orfaos').addEventListener('click', () => procurarOrfaos(id));
         document.getElementById('btn-l-add').addEventListener('click', () => criarEtiqueta(id));
         document.getElementById('btn-reproc').addEventListener('click', () => reprocessar(id, false));
         document.getElementById('btn-reproc-aplicar').addEventListener('click', () => reprocessar(id, true));
@@ -1831,9 +1847,10 @@
           : '<option value="">sincronize as etapas antes</option>';
 
         alvo.innerHTML = gatilhos.length
-          ? '<table><thead><tr><th>Frase</th><th>Emoji</th><th>Move para</th><th></th></tr></thead><tbody>' +
+          ? '<table><thead><tr><th>Frase</th><th>Tipo</th><th>Emoji</th><th>Move para</th><th></th></tr></thead><tbody>' +
             gatilhos.map(function (g) {
               return '<tr><td>' + esc(g.frase) + '</td>' +
+                '<td>' + (g.tipo === 'fixo' ? 'Fixo' : 'Contém') + '</td>' +
                 '<td>' + esc(g.emoji_obrigatorio || '') + '</td>' +
                 '<td class="motivo">' + esc(g.stage_nome) + '</td>' +
                 '<td><button class="g-del" data-g="' + g.id + '">remover</button></td></tr>';
@@ -1856,6 +1873,58 @@
           gatilhos.length ? gatilhos.length + ' frases' : '';
       }
 
+      const SITUACAO_ORFAO = {
+        conversa_apagada: 'conversa apagada',
+        conversa_viva: 'conversa existe — dá para religar',
+        sem_referencia: 'sem número de conversa',
+      };
+
+      async function procurarOrfaos(id) {
+        const alvo = document.getElementById('orfaos');
+        const estado = document.getElementById('orfaos-estado');
+        const csv = document.getElementById('btn-orfaos-csv');
+        estado.textContent = 'procurando…';
+        csv.hidden = true;
+        try {
+          const r = await api('/tenants/' + id + '/cards-orfaos');
+          const resumo = r.resumo.map(function (b) {
+            return esc(b.board) + ': ' + b.orfaos + ' de ' + b.total;
+          }).join(' · ');
+          estado.textContent = '';
+          alvo.innerHTML =
+            (r.conversasCompletas ? '' : '<div class="aviso">A conta tem mais conversas do que foi lido: algum card marcado como "conversa apagada" pode ter a conversa viva.</div>') +
+            '<p class="mono">' + resumo + '</p>' +
+            (r.cards.length
+              ? '<table><thead><tr><th>Card</th><th>Board</th><th>Etapa</th><th>Título</th><th>Situação</th><th>Criado</th></tr></thead><tbody>' +
+                r.cards.map(function (o) {
+                  return '<tr><td class="mono">' + o.taskId + '</td><td>' + esc(o.board) + '</td><td>' + esc(o.etapa) + '</td>' +
+                    '<td>' + esc(o.titulo) + '</td><td class="motivo">' + SITUACAO_ORFAO[o.situacao] + '</td>' +
+                    '<td class="mono">' + esc((o.criadoEm || '').slice(0, 10)) + '</td></tr>';
+                }).join('') + '</tbody></table>'
+              : '<div class="vazio"><p>Nenhum card sem conversa.</p></div>');
+          if (r.cards.length) {
+            csv.hidden = false;
+            csv.onclick = function () { baixarOrfaosCsv(id, r.cards); };
+          }
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
+      }
+
+      function baixarOrfaosCsv(id, cards) {
+        const campo = function (v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; };
+        const linhas = [['card', 'board', 'etapa', 'titulo', 'conversa', 'situacao', 'criado_em']].concat(
+          cards.map(function (o) { return [o.taskId, o.board, o.etapa, o.titulo, o.conversa, o.situacao, o.criadoEm]; }),
+        );
+        // BOM + ponto e virgula: e' o que o Excel em portugues abre sem embaralhar acento e coluna
+        const blob = new Blob(['﻿' + linhas.map(function (l) { return l.map(campo).join(';'); }).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'cards-sem-conversa-' + id + '.csv';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
       async function adicionarGatilho(id) {
         const frase = document.getElementById('g-frase');
         const etapa = document.getElementById('g-etapa');
@@ -1866,6 +1935,7 @@
             frase: frase.value,
             stage_id: Number(etapa.value),
             emoji: emoji.value,
+            tipo: document.getElementById('g-tipo').value,
           });
           frase.value = '';
           emoji.value = '';

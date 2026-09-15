@@ -17,6 +17,22 @@ import type { Stage, StageMatch, Trigger } from './types';
  *
  * Nao decide SE o card pode mover — isso e' `canMove`, em ./movement.
  */
+/**
+ * `fixo` existe para frase curta. "Consulta realizada" como `contem` casaria
+ * com "sua consulta realizada ontem foi otima, agora...", que nao e' o aviso.
+ *
+ * As pontas perdem pontuacao antes de comparar: o ponto final digitado por
+ * habito nao pode ser o que impede o card de andar.
+ */
+function casa(conteudo: string, frase: string, tipo: Trigger['tipo']): boolean {
+  if (tipo !== 'fixo') return conteudo.includes(frase);
+  return semPontas(conteudo) === semPontas(frase);
+}
+
+function semPontas(s: string): string {
+  return s.replace(/^[\s\p{P}]+|[\s\p{P}]+$/gu, '');
+}
+
 export function matchStage(
   conteudoCru: string | null | undefined,
   stages: Stage[],
@@ -38,7 +54,7 @@ export function matchStage(
     if (!stage) continue;
     // emoji e' conferido no texto CRU: `limpa()` justamente remove emoji
     if (t.emojiObrigatorio && !cru.includes(t.emojiObrigatorio)) continue;
-    if (!conteudo.includes(limpa(t.frase))) continue;
+    if (!casa(conteudo, limpa(t.frase), t.tipo)) continue;
 
     return { stageId: stage.id, stageNome: stage.nome, byKeyword: true, matchedPhrase: t.frase };
   }

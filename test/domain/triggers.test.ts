@@ -67,3 +67,43 @@ describe('matchStage', () => {
     expect(matchStage('Bom dia', semAuto, triggers)).toBeNull();
   });
 });
+
+describe('matchStage — tipo de correspondencia', () => {
+  const vita: Stage[] = [
+    { id: 1, posicao: 1, nome: 'Novo Lead', isFinal: false, autoOnReply: false },
+    { id: 2, posicao: 2, nome: 'Qualificando', isFinal: false, autoOnReply: true },
+    { id: 3, posicao: 3, nome: 'Agendamento Realizado', isFinal: false, autoOnReply: false },
+    { id: 4, posicao: 4, nome: 'Compareceu à Consulta', isFinal: false, autoOnReply: false },
+  ];
+  const fixo: Trigger[] = [{ stageId: 4, frase: 'Consulta realizada ✅', emojiObrigatorio: null, tipo: 'fixo' }];
+
+  test('fixo casa com a mensagem inteira, apesar de caixa, acento e emoji', () => {
+    expect(matchStage('Consulta realizada ✅', vita, fixo)?.stageId).toBe(4);
+    expect(matchStage('CONSULTA REALIZADA', vita, fixo)?.stageId).toBe(4);
+  });
+
+  test('fixo ignora pontuacao e espaco nas pontas', () => {
+    expect(matchStage('  Consulta realizada. ', vita, fixo)?.stageId).toBe(4);
+    expect(matchStage('Consulta realizada!!', vita, fixo)?.stageId).toBe(4);
+  });
+
+  test('fixo nao casa com texto antes ou depois', () => {
+    expect(matchStage('Consulta realizada, ate breve!', vita, fixo)?.byKeyword).toBe(false);
+    expect(matchStage('Sua consulta realizada ontem foi otima', vita, fixo)?.byKeyword).toBe(false);
+  });
+
+  test('sem tipo continua sendo contem', () => {
+    const semTipo: Trigger[] = [{ stageId: 3, frase: 'ficou confirmada para', emojiObrigatorio: null }];
+    const r = matchStage('Perfeito Áurea! 💙\n\nA consulta do seu esposo ficou confirmada para:', vita, semTipo);
+    expect(r?.stageId).toBe(3);
+  });
+
+  test('fixo e contem disputando: vence a etapa mais avancada', () => {
+    const mistos: Trigger[] = [
+      { stageId: 3, frase: 'consulta', emojiObrigatorio: null, tipo: 'contem' },
+      ...fixo,
+    ];
+    expect(matchStage('Consulta realizada ✅', vita, mistos)?.stageId).toBe(4);
+    expect(matchStage('Sua consulta realizada ontem', vita, mistos)?.stageId).toBe(3);
+  });
+});

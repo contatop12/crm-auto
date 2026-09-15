@@ -185,10 +185,10 @@ async function etapas(env: Env, tenantId: number): Promise<Array<Stage & { cwSte
 
 async function frases(env: Env, tenantId: number): Promise<Trigger[]> {
   const { results } = await env.DB.prepare(
-    'SELECT stage_id AS stageId, frase, emoji_obrigatorio AS emojiObrigatorio FROM stage_triggers WHERE tenant_id = ?',
+    'SELECT stage_id AS stageId, frase, emoji_obrigatorio AS emojiObrigatorio, tipo FROM stage_triggers WHERE tenant_id = ?',
   )
     .bind(tenantId)
-    .all<{ stageId: number; frase: string; emojiObrigatorio: string | null }>();
+    .all<{ stageId: number; frase: string; emojiObrigatorio: string | null; tipo: 'contem' | 'fixo' }>();
   return results;
 }
 

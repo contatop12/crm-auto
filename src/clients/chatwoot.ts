@@ -345,4 +345,25 @@ export class ChatwootClient {
     );
     return { tasks: r.tasks ?? [], hasMore: !!r.meta?.has_more };
   }
+  /**
+   * Display ids de todas as conversas da conta, de qualquer status.
+   *
+   * `completo: false` quando bateu no teto de paginas: quem classifica orfaos
+   * precisa saber, senao conversa viva alem do teto apareceria como apagada.
+   */
+  async displayIdsDasConversas(acc: number, tetoPaginas = 40): Promise<{ ids: Set<number>; completo: boolean }> {
+    const ids = new Set<number>();
+    for (let page = 1; page <= tetoPaginas; page++) {
+      const r = await this.req<{ data?: { meta?: { all_count?: number }; payload?: Array<{ id: number }> } }>(
+        'GET',
+        `/api/v1/accounts/${acc}/conversations?status=all&page=${page}`,
+      );
+      const lote = r.data?.payload ?? [];
+      lote.forEach((c) => ids.add(c.id));
+      const total = r.data?.meta?.all_count ?? 0;
+      if (!lote.length || ids.size >= total) return { ids, completo: true };
+    }
+    return { ids, completo: false };
+  }
+
 }

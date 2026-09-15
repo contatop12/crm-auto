@@ -20,6 +20,11 @@ export interface Trigger {
   frase: string;
   /** Se preenchido, o emoji e' conferido no texto CRU da mensagem. */
   emojiObrigatorio?: string | null;
+  /**
+   * `contem` (padrao): a frase aparece em qualquer ponto da mensagem.
+   * `fixo`: a mensagem inteira e' a frase — pontuacao nas pontas nao conta.
+   */
+  tipo?: 'contem' | 'fixo';
 }
 
 /** Resultado de `matchStage`. */

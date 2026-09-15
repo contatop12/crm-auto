@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
 import { requireAccess, type AccessIdentity } from '../middleware/access';
-import { ChatwootClient } from '../clients/chatwoot';
+import { ChatwootClient, type CwTask } from '../clients/chatwoot';
 import { GoogleAdsClient, criarConversionActions } from '../clients/googleAds';
 import { EvolutionClient } from '../clients/evolution';
 import { PulseboardClient, ErroPulseboard } from '../clients/pulseboard';
@@ -22,6 +22,7 @@ import {
   type PadraoAtributo,
 } from '../domain/padroes';
 import { avaliarEtapa } from '../domain/fluxo';
+import { classificarCards } from '../domain/orfaos';
 
 /**
  * Cadastro de clientes, sincronizacao das etapas e geracao das metas de
@@ -783,7 +784,7 @@ admin.get('/tenants/:id/fluxo', async (c) => {
 
 admin.get('/tenants/:id/gatilhos', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT g.id, g.frase, g.emoji_obrigatorio, g.stage_id,
+    `SELECT g.id, g.frase, g.emoji_obrigatorio, g.tipo, g.stage_id,
             f.nome AS stage_nome, f.posicao
      FROM stage_triggers g
      JOIN funnel_stages f ON f.id = g.stage_id
@@ -797,12 +798,14 @@ admin.get('/tenants/:id/gatilhos', async (c) => {
 
 admin.post('/tenants/:id/gatilhos', async (c) => {
   const id = Number(c.req.param('id'));
-  const b = await c.req.json<{ frase?: string; stage_id?: number; emoji?: string }>();
+  const b = await c.req.json<{ frase?: string; stage_id?: number; emoji?: string; tipo?: string }>();
 
   const frase = String(b.frase ?? '').trim();
   const stageId = Number(b.stage_id);
   if (!frase) return c.json({ error: 'a frase é obrigatória' }, 400);
   if (!stageId) return c.json({ error: 'escolha a etapa de destino' }, 400);
+  const tipo = b.tipo ?? 'contem';
+  if (tipo !== 'contem' && tipo !== 'fixo') return c.json({ error: 'tipo deve ser contem ou fixo' }, 400);
 
   // A etapa precisa ser deste cliente: sem conferir, daria para apontar o
   // gatilho de um cliente para a etapa de outro.
@@ -814,9 +817,9 @@ admin.post('/tenants/:id/gatilhos', async (c) => {
   if (!etapa) return c.json({ error: 'etapa não pertence a este cliente' }, 400);
 
   await c.env.DB.prepare(
-    'INSERT INTO stage_triggers (tenant_id, stage_id, frase, emoji_obrigatorio) VALUES (?, ?, ?, ?)',
+    'INSERT INTO stage_triggers (tenant_id, stage_id, frase, emoji_obrigatorio, tipo) VALUES (?, ?, ?, ?, ?)',
   )
-    .bind(id, stageId, frase, String(b.emoji ?? '').trim() || null)
+    .bind(id, stageId, frase, String(b.emoji ?? '').trim() || null, tipo)
     .run();
 
   return c.json({ ok: true }, 201);
@@ -828,6 +831,65 @@ admin.delete('/tenants/:id/gatilhos/:gid', async (c) => {
     .run();
   return r.meta.changes ? c.json({ ok: true }) : c.json({ error: 'gatilho nao encontrado' }, 404);
 });
+
+/**
+ * Cards do Kanban sem conversa, dos dois boards do cliente.
+ *
+ * So' leitura. Apagar fica de fora de proposito: `DELETE` em kanban/tasks nao
+ * foi verificado contra a instancia, e a lista serve primeiro para decidir.
+ */
+admin.get('/tenants/:id/cards-orfaos', async (c) => {
+  const id = Number(c.req.param('id'));
+  const cfg = await c.env.DB.prepare(
+    'SELECT cw_account_id, cw_board_organico_id, cw_board_funil_id FROM tenant_config WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .first<{ cw_account_id: number | null; cw_board_organico_id: number | null; cw_board_funil_id: number | null }>();
+  if (!cfg?.cw_account_id) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+
+  const cw = ChatwootClient.fromEnv(c.env);
+  const acc = cfg.cw_account_id;
+  const boards = [cfg.cw_board_funil_id, cfg.cw_board_organico_id].filter((b): b is number => !!b);
+
+  const [vivas, todosOsBoards, porBoard] = await Promise.all([
+    cw.displayIdsDasConversas(acc),
+    cw.boards(acc),
+    Promise.all(boards.map(async (board) => {
+      const [steps, tasks] = await Promise.all([cw.steps(acc, board), todasAsTasks(cw, acc, board)]);
+      return { board, steps, tasks };
+    })),
+  ]);
+
+  const nomeBoard = new Map(todosOsBoards.map((b) => [b.id, b.name.trim()]));
+  const nomeEtapa = new Map(porBoard.flatMap((b) => b.steps.map((s) => [s.id, s.name] as const)));
+
+  const cards = porBoard.flatMap((b) => classificarCards(b.tasks, vivas.ids)).map((o) => ({
+    ...o,
+    board: nomeBoard.get(o.boardId) ?? String(o.boardId),
+    etapa: nomeEtapa.get(o.stepId) ?? String(o.stepId),
+  }));
+
+  return c.json({
+    conversasCompletas: vivas.completo,
+    resumo: porBoard.map((b) => ({
+      board: nomeBoard.get(b.board) ?? String(b.board),
+      total: b.tasks.length,
+      orfaos: cards.filter((o) => o.boardId === b.board).length,
+    })),
+    cards,
+  });
+});
+
+async function todasAsTasks(cw: ChatwootClient, acc: number, board: number): Promise<CwTask[]> {
+  const todas: CwTask[] = [];
+  // teto de seguranca: 30 paginas de 100 ja' e' muito mais que qualquer board de hoje
+  for (let page = 1; page <= 30; page++) {
+    const r = await cw.tasks(acc, board, page, 100);
+    todas.push(...r.tasks);
+    if (!r.hasMore) break;
+  }
+  return todas;
+}
 
 /** Ultimas movimentacoes de card, para ver o gatilho funcionando — ou nao. */
 admin.get('/tenants/:id/movimentacoes', async (c) => {
