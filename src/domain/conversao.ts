@@ -159,3 +159,24 @@ export function conferirEvento(ev: EventoDataManager | null): string[] {
   if (!ev.transactionId) faltas.push('sem transactionId: o Google não consegue deduplicar reenvios');
   return faltas;
 }
+
+/**
+ * O valor que a conversao leva, e se ela pode subir assim.
+ *
+ * `fixo` e' o `conversion_value` da etapa. NULL quer dizer etapa de valor real
+ * (a Compra): o valor sai do card e, sem ele, da proposta capturada na conversa.
+ *
+ * Compra sem valor nao pode subir. O dedup trava na primeira ida: o vendedor
+ * que move para Ganha e so' depois preenche o valor ficaria com a venda no
+ * Google sem valor nenhum, e o reenvio seria recusado como "ja enviada".
+ * Segurar ate' o valor existir e' o que deixa a correcao possivel.
+ */
+export function valorDaConversao(
+  fixo: number | null,
+  doCard: number | null,
+  proposta: number | null,
+): { valor: number | null; semValorReal: boolean } {
+  if (fixo !== null) return { valor: fixo, semValorReal: false };
+  const real = [doCard, proposta].find((v) => v !== null && v > 0) ?? null;
+  return { valor: real, semValorReal: real === null };
+}

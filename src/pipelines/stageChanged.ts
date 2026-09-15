@@ -1,6 +1,6 @@
 import type { Env } from '../env';
 import { GoogleAdsClient } from '../clients/googleAds';
-import { montarEvento, montarCorpo } from '../domain/conversao';
+import { montarEvento, montarCorpo, valorDaConversao } from '../domain/conversao';
 import { exigir } from '../domain/config';
 import { SheetsClient } from '../clients/sheets';
 import { montarLinha, type Coluna } from '../domain/planilha';
@@ -28,6 +28,8 @@ import { detectOrigin, detectPlatform } from '../domain/platform';
 interface Resultado {
   status: 'ok' | 'ignorado' | 'erro';
   motivo: string;
+  /** false = erro de cadastro: retentar nao muda nada ate alguem mexer no card. */
+  retentar?: boolean;
 }
 
 interface Config {
@@ -143,7 +145,17 @@ export async function enviarConversao(
     };
   }
 
-  const valor = etapa.conversion_value ?? num(p.value) ?? lead.valor_proposta;
+  const { valor, semValorReal } = valorDaConversao(etapa.conversion_value, num(p.value), lead.valor_proposta);
+  if (semValorReal) {
+    // Antes do INSERT de proposito: a linha em `conversions` e' o dedup, e
+    // grava-la agora recusaria o envio de quando o valor for preenchido.
+    return {
+      status: 'erro',
+      motivo: `${protocolo}: "${etapa.nome}" sem valor da venda — preencha o valor no card para a conversao subir`,
+      retentar: false,
+    };
+  }
+
   const quando = data(str(p.step_changed_at) ?? str(p.updated_at)) ?? Date.now();
   const sombra = cfg.validate_only === 1;
   const chave = `${protocolo}-${etapa.conversion_event}`;

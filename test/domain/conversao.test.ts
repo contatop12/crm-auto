@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { montarEvento, montarCorpo, hash, conferirEvento } from '../../src/domain/conversao';
+import { montarEvento, montarCorpo, hash, conferirEvento, valorDaConversao } from '../../src/domain/conversao';
 
 const BASE = {
   accountId: '6973821129',
@@ -112,5 +112,30 @@ describe('conferirEvento', () => {
 
   test('evento que nem chegou a ser montado', () => {
     expect(conferirEvento(null)[0]).toMatch(/sem gclid e sem dados do lead/);
+  });
+});
+
+describe('valorDaConversao', () => {
+  test('etapa de valor fixo usa o fixo, mesmo com valor no card', () => {
+    expect(valorDaConversao(100, 14900, null)).toEqual({ valor: 100, semValorReal: false });
+  });
+
+  test('etapa de valor real usa o valor do card', () => {
+    expect(valorDaConversao(null, 14900, 3000)).toEqual({ valor: 14900, semValorReal: false });
+  });
+
+  test('sem valor no card, cai no valor da proposta', () => {
+    expect(valorDaConversao(null, null, 3000)).toEqual({ valor: 3000, semValorReal: false });
+  });
+
+  test('card com valor zero nao conta como valor', () => {
+    expect(valorDaConversao(null, 0, 3000)).toEqual({ valor: 3000, semValorReal: false });
+  });
+
+  // A compra que sobe sem valor trava o dedup: preencher o valor depois nao
+  // reenvia, e a venda nunca chega ao ROAS.
+  test('etapa de valor real sem valor nenhum nao pode subir', () => {
+    expect(valorDaConversao(null, null, null)).toEqual({ valor: null, semValorReal: true });
+    expect(valorDaConversao(null, 0, 0)).toEqual({ valor: null, semValorReal: true });
   });
 });
