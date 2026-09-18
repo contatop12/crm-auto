@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { Env } from '../env';
 import { requireAccess, type AccessIdentity } from '../middleware/access';
 import { ChatwootClient, type CwTask } from '../clients/chatwoot';
@@ -1323,7 +1323,7 @@ admin.post('/tenants/:id/reprocessar', async (c) => {
  * Sai daqui, de dentro do Access, e nao de um link colado: e' isso que amarra o
  * callback a uma pessoa que ja provou quem e'.
  */
-admin.get('/oauth/google/start', async (c) => {
+async function iniciarConsentimento(c: Context<{ Bindings: Env; Variables: { identity: AccessIdentity } }>) {
   const state = crypto.randomUUID().replace(/-/g, '');
   const email = c.get('identity').email;
 
@@ -1338,8 +1338,19 @@ admin.get('/oauth/google/start', async (c) => {
     .run();
 
   const redirectUri = new URL(c.req.url).origin + CAMINHO_CALLBACK;
-  return c.json({ url: urlDeConsentimento(c.env, redirectUri, state), redirect_uri: redirectUri });
-});
+  return { url: urlDeConsentimento(c.env, redirectUri, state), redirect_uri: redirectUri };
+}
+
+admin.get('/oauth/google/start', async (c) => c.json(await iniciarConsentimento(c)));
+
+/**
+ * O mesmo consentimento, como link que se abre direto no navegador.
+ *
+ * O state nasce no clique, entao o link nao vence: pode ser guardado e
+ * mandado por mensagem. Continua atras do Access — quem abre precisa estar
+ * logado, que e' o que amarra a volta do Google a alguem conhecido.
+ */
+admin.get('/oauth/google/ir', async (c) => c.redirect((await iniciarConsentimento(c)).url, 302));
 
 /** O que ja foi autorizado, sem devolver o token. */
 admin.get('/oauth/google/status', async (c) => {
