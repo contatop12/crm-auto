@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -200,5 +200,62 @@ describe('urlDoWebhook', () => {
     expect(urlDoWebhook('')).toBeNull();
     expect(urlDoWebhook(null)).toBeNull();
     expect(urlDoWebhook('n8n.exemplo.com/webhook')).toBeNull();
+  });
+});
+
+describe('escrita direta: linha pelo cabecalho', () => {
+  const cab = ['protocol', 'lead_name', 'Observação', 'phone_number'];
+
+  test('cada dado vai para a coluna de mesmo nome', () => {
+    expect(montarLinhaPorCabecalho(cab, { protocol: 'P-1', lead_name: 'Ana', phone_number: '11999' }))
+      .toEqual(['P-1', 'Ana', '', '11999']);
+  });
+
+  test('na atualizacao, coluna sem dado nosso mantem o que o time escreveu', () => {
+    const atual = ['P-1', 'Ana antiga', 'ligar de tarde', '11888'];
+    expect(montarLinhaPorCabecalho(cab, { protocol: 'P-1', lead_name: 'Ana', phone_number: '' }, atual))
+      .toEqual(['P-1', 'Ana', 'ligar de tarde', '11888']);
+  });
+
+  test('cabecalho com espaco ou maiuscula ainda casa', () => {
+    expect(montarLinhaPorCabecalho([' Protocol '], { protocol: 'P-1' })).toEqual(['P-1']);
+  });
+});
+
+describe('escrita direta: colunas da planilha de leads', () => {
+  test('reconhece os nomes que os clientes usam', () => {
+    expect(campoDaColunaLeads('Link do WhatsApp')).toBe('link_whatsapp');
+    expect(campoDaColunaLeads('Link do Whatsapp')).toBe('link_whatsapp');
+    expect(campoDaColunaLeads('URL WHATSAPP')).toBe('link_whatsapp');
+    expect(campoDaColunaLeads('DATA')).toBe('data');
+    expect(campoDaColunaLeads('Página')).toBe('pagina');
+    expect(campoDaColunaLeads('Canal de Anuncio')).toBe('canal');
+    expect(campoDaColunaLeads('EMAIL')).toBe('email');
+  });
+
+  test('coluna do time fica de fora', () => {
+    expect(campoDaColunaLeads('Qualidade do Lead')).toBeNull();
+    expect(campoDaColunaLeads('Comprou aparelho?')).toBeNull();
+  });
+
+  test('linha da planilha de leads sai do registro pelo cabecalho', () => {
+    const r = montarRegistro(conversao, lead);
+    expect(linhaDeLeads(['Link do WhatsApp', 'DATA', 'HORA', 'NOME', 'TELEFONE', 'Status'], r))
+      .toEqual(['https://wa.me/5511971036500', '09/09/2026', '14:00:00', 'Amanda Constantino', '5511971036500', '']);
+  });
+});
+
+describe('idDaPlanilha e colunas', () => {
+  test('aceita a URL inteira ou so o id', () => {
+    const ID = '1tRG6GA_L2UqJVEkoriZ5Hm8oYXeNIvw8RooYPWSKhPM';
+    expect(idDaPlanilha(`https://docs.google.com/spreadsheets/d/${ID}/edit#gid=0`)).toBe(ID);
+    expect(idDaPlanilha(ID)).toBe(ID);
+    expect(idDaPlanilha('nao e planilha')).toBeNull();
+  });
+
+  test('indice vira letra de coluna', () => {
+    expect(indiceParaColuna(0)).toBe('A');
+    expect(indiceParaColuna(25)).toBe('Z');
+    expect(indiceParaColuna(26)).toBe('AA');
   });
 });

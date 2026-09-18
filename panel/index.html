@@ -886,11 +886,10 @@
           <div class="painel" data-painel="planilha" hidden>
           <section>
             <h2>Planilhas do cliente</h2>
-            <p class="dica">O <strong>n8n</strong> escreve nas planilhas; o CRM só entrega o lead pronto.
-            Cada <strong>clique</strong> vira a linha da aba Cliques do Banco de Dados. Cada
+            <p class="dica">Cada <strong>clique</strong> vira a linha da aba Cliques do Banco de Dados. Cada
             <strong>conversão enviada ao Google</strong> atualiza essa linha, entra na aba Conversoes e, se for
-            a de entrada, na planilha geral de leads. A coluna de cada dado é escolhida no nó do Google Sheets,
-            lá no n8n.</p>
+            a de entrada, vira uma linha na planilha geral de leads. As colunas casam pelo nome do cabeçalho;
+            coluna que o time preenche à mão nunca é apagada.</p>
             <div id="planilha"></div>
           </section>
           </div>
@@ -2588,11 +2587,11 @@
       let chavesVisiveis = {};
 
       /**
-       * Webhook do n8n que escreve na planilha geral de leads.
+       * Planilhas do cliente: quem escreve e onde.
        *
-       * A escolha de coluna mora no nó do Google Sheets dentro do n8n, que lê os
-       * cabeçalhos da planilha real. Aqui fica só o destino, o interruptor e a
-       * lista do que vai no corpo — que é o que se usa nas expressões de lá.
+       * No modo sistema não há mapa de colunas: o Banco de Dados casa pelo nome
+       * da coluna e a planilha de leads pelos nomes que os clientes já usam.
+       * "Conferir acesso" mostra, antes de ligar, o que cada coluna vai receber.
        */
       async function carregarPlanilha(id) {
         const alvo = document.getElementById('planilha');
@@ -2607,40 +2606,127 @@
           return;
         }
 
+        const url = function (doc) { return doc ? 'https://docs.google.com/spreadsheets/d/' + doc : ''; };
+
         alvo.innerHTML =
-          '<div class="campo"><label for="pl-url">URL do webhook do n8n</label>' +
-          '<input id="pl-url" value="' + esc(r.url || '') + '" placeholder="https://…/webhook/…" />' +
-          '<p class="dica">No n8n, é a <strong>Production URL</strong> do nó Webhook do fluxo da planilha. ' +
-          'O fluxo precisa estar <strong>ativo</strong>.</p></div>' +
-          '<div class="campo"><label><input type="checkbox" id="pl-ativo"' +
-          (r.ativo ? ' checked' : '') + ' /> Enviar ao n8n cada clique e cada conversão enviada ao Google</label>' +
-          '<p class="dica">Desligado, nada é enviado. Falha no n8n ou na planilha nunca derruba a conversão.</p></div>' +
+          '<div class="campo"><label>Quem escreve nas planilhas</label>' +
+            '<label><input type="radio" name="pl-modo" value="sistema"' + (r.modo !== 'n8n' ? ' checked' : '') + ' /> ' +
+              'O sistema <span class="carregando">(recomendado)</span></label>' +
+            '<label><input type="radio" name="pl-modo" value="n8n"' + (r.modo === 'n8n' ? ' checked' : '') + ' /> O n8n, por webhook</label>' +
+          '</div>' +
+
+          '<div id="pl-sistema">' +
+            '<div class="campo"><label for="pl-banco">Banco de Dados (abas Cliques e Conversoes)</label>' +
+            '<input id="pl-banco" value="' + esc(url(r.banco_doc)) + '" placeholder="cole a URL da planilha" /></div>' +
+            '<div class="grade">' +
+              '<div class="campo"><label for="pl-leads">Planilha geral de leads</label>' +
+              '<input id="pl-leads" value="' + esc(url(r.leads_doc)) + '" placeholder="cole a URL da planilha" /></div>' +
+              '<div class="campo"><label for="pl-aba">Aba</label>' +
+              '<select id="pl-aba"><option value="' + esc(r.leads_aba || '') + '">' + esc(r.leads_aba || '— confira o acesso —') + '</option></select></div>' +
+            '</div>' +
+            '<p class="dica">' + (r.conta_servico
+              ? 'Compartilhe as duas planilhas com <code>' + esc(r.conta_servico) + '</code> como <strong>Editor</strong>.'
+              : '<span class="st-erro">A service account não está configurada no Worker (GOOGLE_SA_KEY).</span>') + '</p>' +
+            '<div class="linha-acoes"><button id="pl-conferir">Conferir acesso</button></div>' +
+            '<div id="pl-conferencia"></div>' +
+          '</div>' +
+
+          '<div id="pl-n8n">' +
+            '<div class="campo"><label for="pl-url">URL do webhook do n8n</label>' +
+            '<input id="pl-url" value="' + esc(r.url || '') + '" placeholder="https://…/webhook/…" />' +
+            '<p class="dica">A <strong>Production URL</strong> do nó Webhook, com o fluxo <strong>ativo</strong>.</p></div>' +
+          '</div>' +
+
+          '<div class="campo"><label><input type="checkbox" id="pl-ativo"' + (r.ativo ? ' checked' : '') + ' /> ' +
+            'Escrever nas planilhas a cada clique e a cada conversão enviada ao Google</label>' +
+            '<p class="dica">Desligado, nada é escrito. Falha na planilha nunca derruba o lead nem a conversão.</p></div>' +
           '<div class="linha-acoes">' +
             '<button id="pl-salvar" class="principal">Salvar</button>' +
             '<button id="pl-teste">Enviar linha de teste</button>' +
             '<span class="carregando" id="pl-estado"></span>' +
-          '</div>' +
-          '<h2 style="margin-top:var(--e4)">O que vai no corpo</h2>' +
-          '<p class="dica" style="margin-bottom:var(--e2)">No n8n, cada coluna recebe ' +
-          '<code>{{ $json.body.campo }}</code>, trocando <code>campo</code> pelo nome abaixo.</p>' +
-          '<table><thead><tr><th>Campo</th><th>O que é</th></tr></thead><tbody>' +
-          r.campos.map(function (c) {
-            return '<tr><td><code>' + esc(c.campo) + '</code></td><td>' + esc(c.rotulo) + '</td></tr>';
-          }).join('') +
-          '</tbody></table>';
+          '</div>';
 
         const est = document.getElementById('pl-estado');
+        const modo = function () { return alvo.querySelector('input[name="pl-modo"]:checked').value; };
+        const mostrarModo = function () {
+          document.getElementById('pl-sistema').hidden = modo() !== 'sistema';
+          document.getElementById('pl-n8n').hidden = modo() !== 'n8n';
+        };
+        alvo.querySelectorAll('input[name="pl-modo"]').forEach(function (i) { i.addEventListener('change', mostrarModo); });
+        mostrarModo();
+
+        const valores = function () {
+          return {
+            modo: modo(),
+            url: document.getElementById('pl-url').value,
+            banco_doc: document.getElementById('pl-banco').value,
+            leads_doc: document.getElementById('pl-leads').value,
+            leads_aba: document.getElementById('pl-aba').value,
+          };
+        };
+
+        document.getElementById('pl-conferir').addEventListener('click', async function () {
+          const saida = document.getElementById('pl-conferencia');
+          saida.innerHTML = CARREGANDO;
+          const v = valores();
+          let c;
+          try {
+            c = await api('/tenants/' + id + '/planilha/conferir?banco=' + encodeURIComponent(v.banco_doc) +
+              '&leads=' + encodeURIComponent(v.leads_doc) + '&aba=' + encodeURIComponent(v.leads_aba));
+          } catch (e) {
+            saida.innerHTML = '<p class="st-erro">' + esc(e.message) + '</p>';
+            return;
+          }
+
+          const abaBanco = function (a, nome) {
+            if (!a) return '<li><span class="st-erro">sem a aba ' + nome + '</span></li>';
+            return '<li>' + nome + ': <strong>' + a.recebem + '</strong> de ' + a.colunas + ' colunas recebem dado' +
+              (a.tem_protocol ? '' : ' · <span class="st-erro">sem a coluna protocol</span>') + '</li>';
+          };
+
+          let html = '';
+          if (c.banco) {
+            html += c.banco.ok
+              ? '<p><span class="st-ok">abre</span> <strong>' + esc(c.banco.titulo) + '</strong></p><ul>' +
+                abaBanco(c.banco.cliques, 'Cliques') + abaBanco(c.banco.conversoes, 'Conversoes') + '</ul>'
+              : '<p class="st-erro">Banco de Dados: ' + esc(c.banco.erro) + '</p>';
+          }
+          if (c.leads) {
+            if (!c.leads.ok) {
+              html += '<p class="st-erro">Planilha de leads: ' + esc(c.leads.erro) + '</p>';
+            } else {
+              // as abas reais substituem o que estava salvo: digitar nome de aba erra
+              const sel = document.getElementById('pl-aba');
+              const antes = sel.value;
+              sel.innerHTML = '<option value="">— escolha a aba —</option>' + c.leads.abas.map(function (a) {
+                return '<option' + (a === antes ? ' selected' : '') + '>' + esc(a) + '</option>';
+              }).join('');
+              html += '<p><span class="st-ok">abre</span> <strong>' + esc(c.leads.titulo) + '</strong>' +
+                (c.leads.aba ? ' · aba ' + esc(c.leads.aba) : ' · <span class="st-erro">escolha a aba e confira de novo</span>') + '</p>';
+              if (c.leads.colunas.length) {
+                html += '<table><thead><tr><th>Coluna</th><th>Recebe</th></tr></thead><tbody>' +
+                  c.leads.colunas.map(function (col) {
+                    return '<tr><td>' + esc(col.nome) + '</td><td>' +
+                      (col.campo ? '<code>' + esc(col.campo) + '</code>' : '<span class="nada">preenchida pelo time</span>') +
+                      '</td></tr>';
+                  }).join('') + '</tbody></table>';
+              }
+            }
+          }
+          saida.innerHTML = html || '<p class="carregando">cole a URL de pelo menos uma planilha</p>';
+        });
 
         document.getElementById('pl-salvar').addEventListener('click', async function () {
           est.className = 'carregando';
           est.textContent = 'salvando…';
           try {
-            const res = await enviar('/tenants/' + id + '/planilha', 'PUT', {
-              ativo: document.getElementById('pl-ativo').checked,
-              url: document.getElementById('pl-url').value,
-            });
+            const v = valores();
+            v.ativo = document.getElementById('pl-ativo').checked;
+            const res = await enviar('/tenants/' + id + '/planilha', 'PUT', v);
             est.className = 'st-ok';
-            est.textContent = res.ativo ? 'salvo · enviando ao n8n' : 'salvo · desligado';
+            est.textContent = res.ativo
+              ? 'salvo · ' + (res.modo === 'n8n' ? 'o n8n escreve' : 'o sistema escreve')
+              : 'salvo · desligado';
           } catch (e) {
             est.className = 'st-erro';
             est.textContent = 'falhou: ' + e.message;
@@ -2648,30 +2734,22 @@
         });
 
         /**
-         * A linha de teste chega de verdade na planilha: é o jeito de ver cada
+         * A linha de teste chega de verdade nas planilhas: é o jeito de ver cada
          * dado na coluna certa. Por isso o aviso antes, e o nome que diz o que é.
          */
         document.getElementById('pl-teste').addEventListener('click', async function () {
-          const url = document.getElementById('pl-url').value.trim();
-          if (!url) {
-            est.className = 'st-erro';
-            est.textContent = 'cole a URL do webhook primeiro';
-            return;
-          }
           if (!confirm('Enviar uma linha de teste?' + '\n\n' +
             'Ela é gravada nas planilhas do cliente (Cliques, Conversoes e planilha de leads) com o nome "TESTE — pode apagar" e o protocolo TESTE-000000.')) return;
 
           est.className = 'carregando';
           est.textContent = 'enviando…';
           try {
-            const res = await enviar('/tenants/' + id + '/planilha/teste', 'POST', { url: url });
+            const res = await enviar('/tenants/' + id + '/planilha/teste', 'POST', valores());
             if (!res.ok) throw new Error(res.error);
             est.className = res.gravado === false ? 'st-erro' : 'st-ok';
-            est.textContent = res.gravado === true
-              ? 'gravada — confira as linhas TESTE nas planilhas e apague'
-              : res.gravado === false
-                ? 'o n8n recebeu, mas o fluxo não gravou: ' + res.resposta
-                : 'o n8n respondeu ok: ' + res.resposta;
+            est.textContent = res.gravado === false
+              ? 'não gravou: ' + res.resposta
+              : 'gravada (' + res.resposta + ') — confira as linhas TESTE e apague';
           } catch (e) {
             est.className = 'st-erro';
             est.textContent = 'falhou: ' + e.message;

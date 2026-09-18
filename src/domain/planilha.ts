@@ -4,15 +4,13 @@ import { detectOrigin, detectPlatform } from './platform';
 /**
  * O registro que vai para as planilhas do cliente.
  *
- * Quem escreve nas planilhas e' o n8n, nao nos. Escrever direto exigia autorizar
- * o escopo `spreadsheets` na conta Google, e o n8n ja' tem a credencial do Sheets
- * funcionando em todos os clientes. Aqui so' se monta o registro:
+ * Quem escreve e' o proprio sistema, pela service account, ou o n8n, por
+ * webhook — escolha por cliente. O registro e' o mesmo nos dois casos:
  *
- * - campos soltos (`data`, `nome`, `canal`...) para a planilha geral de leads,
- *   onde cada coluna do n8n escolhe um deles;
+ * - campos soltos (`data`, `nome`, `canal`...) para a planilha geral de leads;
  * - `cliques` e `conversoes`, ja' com os nomes de coluna do Banco de Dados, para
  *   as abas de mesmo nome. Os clientes nao tem exatamente as mesmas colunas, por
- *   isso vai o conjunto inteiro e cada fluxo mapeia so' as que a planilha dele tem.
+ *   isso vai o conjunto inteiro e so' as colunas que a planilha tem recebem dado.
  */
 
 /** O que vai no corpo, e como isso se chama na tela. */
@@ -67,6 +65,7 @@ export interface LeadDaPlanilha {
   whatsapp_url?: string | null;
   referrer?: string | null;
   user_agent?: string | null;
+  ip_address?: string | null;
   quiz_version?: string | null;
   quiz_valor?: number | null;
   quiz_form_id?: string | null;
@@ -179,6 +178,7 @@ export function montarRegistro(
     client_id: t(lead?.client_id),
     created_at: cliqueFormatado,
     referrer: t(lead?.referrer),
+    ip_address: t(lead?.ip_address),
     valido: 'TRUE',
     origem: t(lead?.origem),
     event: t(lead?.evento),
@@ -259,4 +259,93 @@ export function urlDoWebhook(entrada: string | null | undefined): string | null 
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Escrita direta, pela service account
+// ---------------------------------------------------------------------------
+
+/** Cabecalho comparavel: sem acento, sem caixa, sem espaco sobrando. */
+function normalizar(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * A linha na ordem das colunas da planilha, casando pelo nome do cabecalho.
+ *
+ * Coluna sem dado nosso — ou com dado vazio — fica com o que ja' estava la'
+ * (`atual`). Na aba Cliques o time anota coisas; atualizar o lead nao pode
+ * apagar a anotacao. E nome antigo vindo do n8n nao some porque o nosso ficou
+ * em branco.
+ */
+export function montarLinhaPorCabecalho(
+  cabecalho: string[],
+  dados: Record<string, unknown>,
+  atual: string[] = [],
+): string[] {
+  const porNome = new Map(Object.entries(dados).map(([k, v]) => [normalizar(k), v]));
+  return cabecalho.map((h, i) => {
+    const v = porNome.get(normalizar(h));
+    const texto = v === null || v === undefined ? '' : String(v);
+    return texto !== '' ? texto : (atual[i] ?? '');
+  });
+}
+
+/** Nome de coluna da planilha de leads -> campo solto do registro. */
+const COLUNAS_LEADS: Record<string, string> = {
+  'link do whatsapp': 'link_whatsapp',
+  'url whatsapp': 'link_whatsapp',
+  'whatsapp': 'link_whatsapp',
+  'data': 'data',
+  'hora': 'hora',
+  'nome': 'nome',
+  'telefone': 'telefone',
+  'email': 'email',
+  'e-mail': 'email',
+  'canal': 'canal',
+  'canal de anuncio': 'canal',
+  'pagina': 'pagina',
+  'campanha': 'campanha',
+  'protocolo': 'protocolo',
+};
+
+/** Qual campo vai numa coluna da planilha de leads, ou null se e' do time. */
+export function campoDaColunaLeads(nome: string): string | null {
+  return COLUNAS_LEADS[normalizar(nome)] ?? null;
+}
+
+/** A linha da planilha de leads, na ordem do cabecalho dela. */
+export function linhaDeLeads(cabecalho: string[], registro: Record<string, unknown>): string[] {
+  return cabecalho.map((h) => {
+    const campo = campoDaColunaLeads(h);
+    const v = campo ? registro[campo] : '';
+    return v === null || v === undefined ? '' : String(v);
+  });
+}
+
+/**
+ * O id do documento, dado o que a pessoa colou.
+ *
+ * Aceitar a URL inteira evita o erro mais provavel deste campo: pedir "o
+ * trecho entre /d/ e /edit" e' pedir para editar URL a mao.
+ */
+export function idDaPlanilha(entrada: string | null | undefined): string | null {
+  const v = (entrada ?? '').trim();
+  if (!v) return null;
+  const naUrl = v.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (naUrl) return naUrl[1]!;
+  return /^[a-zA-Z0-9_-]{20,}$/.test(v) ? v : null;
+}
+
+/** 0 -> `A`, 26 -> `AA`. */
+export function indiceParaColuna(i: number): string {
+  if (!Number.isInteger(i) || i < 0) return '';
+  let n = i + 1;
+  let s = '';
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }

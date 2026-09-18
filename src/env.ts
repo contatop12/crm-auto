@@ -18,6 +18,12 @@ export interface Env {
   GOOGLE_ADS_DEVELOPER_TOKEN: string;
   GOOGLE_ADS_MCC_ID: string;
 
+  /**
+   * JSON da service account `crm-api@crm-p12.iam.gserviceaccount.com`. Quando
+   * existe, e' a primeira credencial tentada em todas as APIs do Google.
+   */
+  GOOGLE_SA_KEY?: string;
+
   // Evolution (WhatsApp)
   EVOLUTION_SERVER_URL: string;
   EVOLUTION_API_KEY: string;

@@ -1,5 +1,9 @@
 import type { Env } from '../env';
 import { exigir } from '../domain/config';
+import { comConta, tokenDaConta } from './googleSa';
+
+const ESCOPO_ADS = ['https://www.googleapis.com/auth/adwords'];
+const ESCOPO_DM = ['https://www.googleapis.com/auth/datamanager'];
 
 /**
  * Cliente da Google Ads API.
@@ -93,17 +97,20 @@ export class GoogleAdsClient {
 
   /** Executa GAQL. `customerId` sem tracos. */
   async search<T = Record<string, unknown>>(customerId: string, query: string): Promise<T[]> {
-    const token = await this.accessToken();
-    const r = await fetch(`https://googleads.googleapis.com/${V}/customers/${customerId}/googleAds:search`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'developer-token': exigir(this.env, 'GOOGLE_ADS_DEVELOPER_TOKEN'),
-        'login-customer-id': exigir(this.env, 'GOOGLE_ADS_MCC_ID'),
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ query }),
-    });
+    const r = await comConta(
+      () => tokenDaConta(this.env, ESCOPO_ADS),
+      () => this.accessToken(),
+      (token) => fetch(`https://googleads.googleapis.com/${V}/customers/${customerId}/googleAds:search`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'developer-token': exigir(this.env, 'GOOGLE_ADS_DEVELOPER_TOKEN'),
+          'login-customer-id': exigir(this.env, 'GOOGLE_ADS_MCC_ID'),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+      }),
+    );
 
     const txt = await r.text();
     if (!r.ok) {
@@ -117,17 +124,22 @@ export class GoogleAdsClient {
 
   /** POST generico na Google Ads API, para os endpoints de escrita. */
   async mutate<T>(caminho: string, corpo: unknown): Promise<T> {
-    const token = await this.accessToken();
-    const r = await fetch(`https://googleads.googleapis.com/${V}/${caminho}`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'developer-token': exigir(this.env, 'GOOGLE_ADS_DEVELOPER_TOKEN'),
-        'login-customer-id': exigir(this.env, 'GOOGLE_ADS_MCC_ID'),
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(corpo),
-    });
+    // 403 quer dizer que o Google nao executou: repetir com a outra credencial
+    // nao duplica a escrita
+    const r = await comConta(
+      () => tokenDaConta(this.env, ESCOPO_ADS),
+      () => this.accessToken(),
+      (token) => fetch(`https://googleads.googleapis.com/${V}/${caminho}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'developer-token': exigir(this.env, 'GOOGLE_ADS_DEVELOPER_TOKEN'),
+          'login-customer-id': exigir(this.env, 'GOOGLE_ADS_MCC_ID'),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(corpo),
+      }),
+    );
 
     const txt = await r.text();
     if (!r.ok) {
@@ -227,16 +239,22 @@ export class GoogleAdsClient {
    * gclid dentro da janela, formato do hash — e NAO grava.
    */
   async ingestEvents(corpo: unknown): Promise<{ recebidos: number; erros: string[]; requestId?: string }> {
-    const r = await fetch('https://datamanager.googleapis.com/v1/events:ingest', {
-      method: 'POST',
-      // O MCC vai no CORPO, em `loginAccount`, nao em header: e' assim que a
-      // Data Manager entende que o acesso vem da conta gerenciadora.
-      headers: {
-        authorization: `Bearer ${await this.tokenDataManager()}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(corpo),
-    });
+    // 403 = o Google nao recebeu nada; repetir com o acesso antigo nao duplica
+    // conversao. Enquanto a service account nao estiver na MCC, e' o que acontece.
+    const r = await comConta(
+      () => tokenDaConta(this.env, ESCOPO_DM),
+      () => this.tokenDataManager(),
+      (token) => fetch('https://datamanager.googleapis.com/v1/events:ingest', {
+        method: 'POST',
+        // O MCC vai no CORPO, em `loginAccount`, nao em header: e' assim que a
+        // Data Manager entende que o acesso vem da conta gerenciadora.
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(corpo),
+      }),
+    );
 
     const txt = await r.text();
     if (!r.ok) {

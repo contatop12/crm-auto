@@ -14,7 +14,9 @@ import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { mascararSegredo } from '../domain/segredo';
 import { postarNaPlanilha } from '../clients/n8n';
 import { ESCOPOS_GOOGLE } from '../domain/escoposGoogle';
-import { CAMPOS_PLANILHA, montarRegistro, urlDoWebhook } from '../domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, urlDoWebhook, idDaPlanilha, campoDaColunaLeads } from '../domain/planilha';
+import { SheetsClient } from '../clients/sheets';
+import { escreverNasPlanilhas } from '../pipelines/planilha';
 import { etiquetaSlug } from '../domain/labels';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
@@ -97,63 +99,141 @@ admin.get('/tenants/:id/config', async (c) => {
 });
 
 /**
- * Planilha geral de leads: o webhook do n8n que escreve nela.
+ * Planilhas do cliente: quem escreve (o sistema ou o n8n) e onde.
  *
- * Quem escolhe a coluna de cada dado e' o no do Google Sheets dentro do n8n,
- * que le' os cabecalhos da planilha real. Aqui fica so' para onde mandar e se
- * esta' ligado.
+ * No modo `sistema` nao ha mapa de colunas para configurar: o Banco de Dados
+ * casa pelo nome da coluna (`protocol`, `lead_name`...) e a planilha de leads
+ * pelos nomes que os clientes usam (DATA, NOME, Link do WhatsApp...).
  */
 admin.get('/tenants/:id/planilha', async (c) => {
   const id = Number(c.req.param('id'));
   const cfg = await c.env.DB.prepare(
-    'SELECT sheets_ativo, planilha_webhook_url FROM tenant_config WHERE tenant_id = ?',
+    `SELECT sheets_ativo, planilha_modo, planilha_webhook_url, sheets_doc_id,
+            sheets_leads_doc_id, sheets_leads_aba
+     FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(id)
-    .first<{ sheets_ativo: number; planilha_webhook_url: string | null }>();
+    .first<{
+      sheets_ativo: number; planilha_modo: string; planilha_webhook_url: string | null;
+      sheets_doc_id: string | null; sheets_leads_doc_id: string | null; sheets_leads_aba: string | null;
+    }>();
 
   return c.json({
     ativo: Number(cfg?.sheets_ativo ?? 0) === 1,
+    modo: cfg?.planilha_modo ?? 'sistema',
     url: cfg?.planilha_webhook_url ?? null,
+    banco_doc: cfg?.sheets_doc_id ?? null,
+    leads_doc: cfg?.sheets_leads_doc_id ?? null,
+    leads_aba: cfg?.sheets_leads_aba ?? null,
+    conta_servico: SheetsClient.email(c.env),
     campos: CAMPOS_PLANILHA,
   });
 });
 
 admin.put('/tenants/:id/planilha', async (c) => {
   const id = Number(c.req.param('id'));
-  const b = await c.req.json<{ ativo?: boolean; url?: string }>();
+  const b = await c.req.json<{
+    ativo?: boolean; modo?: string; url?: string;
+    banco_doc?: string; leads_doc?: string; leads_aba?: string;
+  }>();
 
+  const modo = b.modo === 'n8n' ? 'n8n' : 'sistema';
   const bruta = String(b.url ?? '').trim();
   const url = urlDoWebhook(bruta);
   if (bruta && !url) {
     return c.json({ error: 'a URL precisa comecar com https:// — ela leva nome e telefone do lead' }, 400);
   }
-  // ligar sem destino encheria o log de falha a cada conversao
-  const ativo = b.ativo && url ? 1 : 0;
+  const banco = idDaPlanilha(b.banco_doc);
+  const leads = idDaPlanilha(b.leads_doc);
+  const aba = String(b.leads_aba ?? '').trim() || null;
+
+  // ligar sem destino encheria o log de falha a cada lead
+  const temDestino = modo === 'n8n' ? !!url : !!(banco || (leads && aba));
+  const ativo = b.ativo && temDestino ? 1 : 0;
 
   await c.env.DB.prepare(
     `UPDATE tenant_config
-     SET sheets_ativo = ?, planilha_webhook_url = ?, updated_at = datetime('now')
+     SET sheets_ativo = ?, planilha_modo = ?, planilha_webhook_url = ?, sheets_doc_id = ?,
+         sheets_leads_doc_id = ?, sheets_leads_aba = ?, updated_at = datetime('now')
      WHERE tenant_id = ?`,
   )
-    .bind(ativo, url, id)
+    .bind(ativo, modo, url, banco, leads, aba, id)
     .run();
 
-  console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, ativo }));
-  return c.json({ ok: true, ativo: ativo === 1 });
+  console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, modo, ativo }));
+  return c.json({ ok: true, ativo: ativo === 1, modo });
 });
 
 /**
- * Manda uma linha de teste ao n8n, para conferir a ponta inteira.
+ * Confere, pela service account, se as planilhas abrem e o que cada coluna vai
+ * receber — antes de ligar, para nao descobrir pela falta de linha.
+ */
+admin.get('/tenants/:id/planilha/conferir', async (c) => {
+  const banco = idDaPlanilha(c.req.query('banco'));
+  const leads = idDaPlanilha(c.req.query('leads'));
+  const aba = c.req.query('aba') || '';
+  const sheets = new SheetsClient(c.env);
+  const exemplo = montarRegistro(
+    { tipo: 'conversao', cliente: '', protocolo: 'X', ensaio: false,
+      conversao: { evento: 'conversa', etapa: '', valor: null, moeda: 'BRL', quando: 0, acao: '', requestId: null, match: 'click_id', enviadoEm: 0 } },
+    null,
+  );
+
+  const aba_ = async (doc: string, nome: string, conhecidas: string[]) => {
+    const cab = await sheets.cabecalho(doc, nome);
+    const k = new Set(conhecidas.map((x) => x.toLowerCase()));
+    return {
+      aba: nome,
+      colunas: cab.length,
+      recebem: cab.filter((h) => k.has(h.trim().toLowerCase())).length,
+      tem_protocol: cab.some((h) => h.trim().toLowerCase() === 'protocol'),
+    };
+  };
+
+  const saida: Record<string, unknown> = { conta_servico: SheetsClient.email(c.env) };
+
+  if (banco) {
+    try {
+      const info = await sheets.abas(banco);
+      saida.banco = {
+        ok: true, titulo: info.titulo, abas: info.abas,
+        cliques: info.abas.includes('Cliques')
+          ? await aba_(banco, 'Cliques', Object.keys(exemplo.cliques)) : null,
+        conversoes: info.abas.includes('Conversoes')
+          ? await aba_(banco, 'Conversoes', Object.keys(exemplo.conversoes ?? {})) : null,
+      };
+    } catch (e) {
+      saida.banco = { ok: false, erro: (e as Error).message };
+    }
+  }
+
+  if (leads) {
+    try {
+      const info = await sheets.abas(leads);
+      const escolhida = aba && info.abas.includes(aba) ? aba : null;
+      const cab = escolhida ? await sheets.cabecalho(leads, escolhida) : [];
+      saida.leads = {
+        ok: true, titulo: info.titulo, abas: info.abas, aba: escolhida,
+        colunas: cab.map((nome) => ({ nome, campo: campoDaColunaLeads(nome) })),
+      };
+    } catch (e) {
+      saida.leads = { ok: false, erro: (e as Error).message };
+    }
+  }
+
+  return c.json(saida);
+});
+
+/**
+ * Manda uma linha de teste pelo caminho escolhido na tela.
  *
- * A linha vai com `teste: true` e o nome "TESTE — pode apagar". Ela CHEGA na
- * planilha: o objetivo e' justamente ver a linha la', com cada dado na coluna
- * certa. Usa a URL da tela, nao a salva, para testar antes de ligar.
+ * A linha CHEGA nas planilhas (protocolo TESTE-000000, nome "TESTE — pode
+ * apagar"): o objetivo e' ver cada dado na coluna certa. Usa o que esta' na
+ * tela, nao o salvo, para testar antes de ligar.
  */
 admin.post('/tenants/:id/planilha/teste', async (c) => {
   const id = Number(c.req.param('id'));
-  const b = await c.req.json<{ url?: string }>();
-  const url = urlDoWebhook(b.url);
-  if (!url) return c.json({ error: 'informe a URL do webhook (https://...)' }, 400);
+  const b = await c.req.json<{ modo?: string; url?: string; banco_doc?: string; leads_doc?: string; leads_aba?: string }>();
 
   const t = await c.env.DB.prepare('SELECT nome FROM tenants WHERE id = ?')
     .bind(id)
@@ -182,8 +262,17 @@ admin.post('/tenants/:id/planilha/teste', async (c) => {
   );
 
   try {
-    const r = await postarNaPlanilha(url, registro);
-    return c.json({ ok: true, gravado: r.gravado, resposta: r.resposta });
+    if (b.modo === 'n8n') {
+      const url = urlDoWebhook(b.url);
+      if (!url) return c.json({ error: 'informe a URL do webhook (https://...)' }, 400);
+      const r = await postarNaPlanilha(url, registro);
+      return c.json({ ok: true, gravado: r.gravado, resposta: r.resposta });
+    }
+    const abas = await escreverNasPlanilhas(c.env, {
+      banco_doc: idDaPlanilha(b.banco_doc), aba_cliques: 'Cliques', aba_conversoes: 'Conversoes',
+      leads_doc: idDaPlanilha(b.leads_doc), leads_aba: String(b.leads_aba ?? '').trim() || null,
+    }, registro);
+    return c.json({ ok: true, gravado: abas.length > 0, resposta: abas.length ? 'abas: ' + abas.join(', ') : 'nenhuma planilha informada' });
   } catch (e) {
     return c.json({ ok: false, error: (e as Error).message }, 502);
   }

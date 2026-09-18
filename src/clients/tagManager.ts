@@ -1,5 +1,13 @@
 import type { Env } from '../env';
 import { exigir } from '../domain/config';
+import { comConta, lerChave, tokenDaConta } from './googleSa';
+
+const ESCOPOS_GTM = [
+  'https://www.googleapis.com/auth/tagmanager.readonly',
+  'https://www.googleapis.com/auth/tagmanager.edit.containers',
+  'https://www.googleapis.com/auth/tagmanager.edit.containerversions',
+  'https://www.googleapis.com/auth/tagmanager.publish',
+];
 
 /**
  * Google Tag Manager API v2.
@@ -23,20 +31,25 @@ export interface ContainerGtm {
 export class TagManagerClient {
   private constructor(
     private readonly env: Env,
-    private readonly refreshToken: string,
+    private readonly refreshToken: string | null,
   ) {}
 
-  /** Devolve null quando ninguem autorizou ainda — quem chama decide o que dizer. */
+  /**
+   * Devolve null quando nao ha credencial nenhuma — nem service account, nem
+   * consentimento — e quem chama decide o que dizer.
+   */
   static async deD1(env: Env): Promise<TagManagerClient | null> {
     const l = await env.DB.prepare(
       "SELECT valor FROM credenciais WHERE chave = 'gtm_refresh_token'",
     ).first<{ valor: string }>();
-    return l?.valor ? new TagManagerClient(env, l.valor) : null;
+    if (!l?.valor && !lerChave(env.GOOGLE_SA_KEY)) return null;
+    return new TagManagerClient(env, l?.valor ?? null);
   }
 
   private async token(): Promise<string> {
     const agora = Date.now();
     if (tokenNaMemoria && tokenNaMemoria.expiraEm > agora) return tokenNaMemoria.valor;
+    if (!this.refreshToken) throw new Error('Tag Manager sem consentimento — autorize em Acesso Google');
 
     const r = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -56,15 +69,24 @@ export class TagManagerClient {
     return j.access_token;
   }
 
-  private async req<T>(metodo: string, caminho: string, corpo?: unknown): Promise<T> {
-    const r = await fetch(BASE + caminho, {
-      method: metodo,
-      headers: {
-        authorization: `Bearer ${await this.token()}`,
-        ...(corpo === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body: corpo === undefined ? undefined : JSON.stringify(corpo),
-    });
+  /**
+   * O GTM responde 404 "not found or permission denied" quando a conta nao tem
+   * acesso ao container — por isso 404 tambem troca para o acesso antigo.
+   */
+  private async req<T>(metodo: string, caminho: string, corpo?: unknown, soAntigo = false): Promise<T> {
+    const r = await comConta(
+      () => (soAntigo ? Promise.resolve(null) : tokenDaConta(this.env, ESCOPOS_GTM)),
+      this.refreshToken ? () => this.token() : null,
+      (token) => fetch(BASE + caminho, {
+        method: metodo,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(corpo === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        body: corpo === undefined ? undefined : JSON.stringify(corpo),
+      }),
+      [401, 403, 404],
+    );
     const txt = await r.text();
     if (!r.ok) {
       // a mensagem do Google e' util; o HTML de 404 nao
@@ -75,10 +97,16 @@ export class TagManagerClient {
   }
 
   async containers(): Promise<ContainerGtm[]> {
-    const contas = await this.req<{ account?: Array<{ accountId: string; name: string }> }>(
+    let contas = await this.req<{ account?: Array<{ accountId: string; name: string }> }>(
       'GET',
       '/accounts',
     );
+    // Sem acesso a nenhuma conta, o GTM responde 200 com a lista vazia: nao
+    // e' recusa, e o recuo automatico nao pega. Enquanto a service account nao
+    // for adicionada no GTM, a lista vem do acesso antigo.
+    if (!contas.account?.length && this.refreshToken) {
+      contas = await this.req('GET', '/accounts', undefined, true);
+    }
     const saida: ContainerGtm[] = [];
     for (const a of contas.account ?? []) {
       const r = await this.req<{ container?: ContainerGtm[] }>(
