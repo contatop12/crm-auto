@@ -886,9 +886,9 @@
           <div class="painel" data-painel="planilha" hidden>
           <section>
             <h2>Planilha geral de leads</h2>
-            <p class="dica">Cada conversão enviada <strong>acrescenta uma linha no fim</strong> da aba —
-            nada existente é sobrescrito. Você escolhe para qual coluna vai cada dado, então a planilha
-            do cliente fica na ordem que o time dele já usa.</p>
+            <p class="dica">Cada conversão enviada ao Google vai para o <strong>n8n</strong>, que
+            acrescenta a linha no fim da planilha (Append Row). Nada existente é sobrescrito, e a coluna
+            de cada dado é escolhida no nó do Google Sheets, lá no n8n.</p>
             <div id="planilha"></div>
           </section>
           </div>
@@ -2586,10 +2586,11 @@
       let chavesVisiveis = {};
 
       /**
-       * Destino de cada dado na planilha do cliente.
+       * Webhook do n8n que escreve na planilha geral de leads.
        *
-       * A coluna é digitada como letra (`A`, `B`, `AA`) porque é assim que ela
-       * aparece no Sheets — pedir número obrigaria a contar, e contar erra.
+       * A escolha de coluna mora no nó do Google Sheets dentro do n8n, que lê os
+       * cabeçalhos da planilha real. Aqui fica só o destino, o interruptor e a
+       * lista do que vai no corpo — que é o que se usa nas expressões de lá.
        */
       async function carregarPlanilha(id) {
         const alvo = document.getElementById('planilha');
@@ -2604,138 +2605,71 @@
           return;
         }
 
-        const opcoes = function (sel) {
-          return '<option value="">— não enviar —</option>' + r.campos.map(function (c) {
-            return '<option value="' + esc(c.campo) + '"' +
-              (c.campo === sel ? ' selected' : '') + '>' + esc(c.rotulo) + '</option>';
-          }).join('');
-        };
-
-        // sempre uma linha vazia no fim, para acrescentar sem apertar "adicionar"
-        const linhas = r.colunas.concat([{ coluna: '', campo: '' }]);
-
         alvo.innerHTML =
-          '<div class="grade">' +
-            '<div class="campo"><label for="pl-doc">ID da planilha</label>' +
-            '<input id="pl-doc" value="' + esc(r.doc_id || '') + '" placeholder="cole a URL da planilha" />' +
-            '<p class="dica">Cole a URL inteira. Compartilhe a planilha com a conta Google autorizada, com permissão de edição.</p></div>' +
-            '<div class="campo"><label for="pl-aba">Aba</label>' +
-            '<input id="pl-aba" value="' + esc(r.aba || '') + '" placeholder="Leads" />' +
-            '<p class="dica">Em branco usa <code>Leads</code>.</p></div>' +
-          '</div>' +
+          '<div class="campo"><label for="pl-url">URL do webhook do n8n</label>' +
+          '<input id="pl-url" value="' + esc(r.url || '') + '" placeholder="https://…/webhook/…" />' +
+          '<p class="dica">No n8n, é a <strong>Production URL</strong> do nó Webhook do fluxo da planilha. ' +
+          'O fluxo precisa estar <strong>ativo</strong>.</p></div>' +
           '<div class="campo"><label><input type="checkbox" id="pl-ativo"' +
-          (r.ativo ? ' checked' : '') + ' /> Escrever na planilha a cada conversão enviada</label>' +
-          '<p class="dica">Desligado, nada é escrito. Falha na planilha nunca derruba a conversão.</p></div>' +
-          '<table><thead><tr><th style="width:88px">Coluna</th><th>Cabeçalho na planilha</th>' +
-          '<th>Dado que vai aqui</th><th></th></tr></thead><tbody id="pl-linhas">' +
-          linhas.map(function (l) { return linhaMapa(l, opcoes); }).join('') +
-          '</tbody></table>' +
-          '<div class="linha-acoes"><button id="pl-ler">' + ic('atualizar') + ' Ler colunas da planilha</button>' +
-          '<button id="pl-add">Adicionar coluna</button>' +
-          '<button id="pl-salvar" class="principal">Salvar</button>' +
-          '<span class="carregando" id="pl-estado"></span></div>';
+          (r.ativo ? ' checked' : '') + ' /> Enviar ao n8n a cada conversão enviada ao Google</label>' +
+          '<p class="dica">Desligado, nada é enviado. Falha no n8n ou na planilha nunca derruba a conversão.</p></div>' +
+          '<div class="linha-acoes">' +
+            '<button id="pl-salvar" class="principal">Salvar</button>' +
+            '<button id="pl-teste">Enviar linha de teste</button>' +
+            '<span class="carregando" id="pl-estado"></span>' +
+          '</div>' +
+          '<h2 style="margin-top:var(--e4)">O que vai no corpo</h2>' +
+          '<p class="dica" style="margin-bottom:var(--e2)">No n8n, cada coluna recebe ' +
+          '<code>{{ $json.body.campo }}</code>, trocando <code>campo</code> pelo nome abaixo.</p>' +
+          '<table><thead><tr><th>Campo</th><th>O que é</th></tr></thead><tbody>' +
+          r.campos.map(function (c) {
+            return '<tr><td><code>' + esc(c.campo) + '</code></td><td>' + esc(c.rotulo) + '</td></tr>';
+          }).join('') +
+          '</tbody></table>';
 
-        const corpo = document.getElementById('pl-linhas');
-
-        document.getElementById('pl-ler').addEventListener('click', async function () {
-          const est = document.getElementById('pl-estado');
-          const doc = document.getElementById('pl-doc').value.trim();
-          if (!doc) {
-            est.className = 'st-erro';
-            est.textContent = 'cole a URL da planilha primeiro';
-            return;
-          }
-          est.className = 'carregando';
-          est.textContent = 'lendo a primeira linha da planilha…';
-          try {
-            const h = await api('/tenants/' + id + '/planilha/cabecalhos?doc=' +
-              encodeURIComponent(doc) + '&aba=' + encodeURIComponent(document.getElementById('pl-aba').value || 'Leads'));
-            if (!h.colunas.length) {
-              est.className = 'st-erro';
-              est.textContent = 'a primeira linha da aba está vazia — é dela que saem os cabeçalhos';
-              return;
-            }
-            // o que ja' estava escolhido e' preservado: reler a planilha nao
-            // pode apagar um mapa que alguem montou
-            const antes = {};
-            corpo.querySelectorAll('tr').forEach(function (tr) {
-              const c = tr.querySelector('.pl-col').value.trim().toUpperCase();
-              if (c) antes[c] = tr.querySelector('.pl-campo').value;
-            });
-            corpo.innerHTML = h.colunas.map(function (c) {
-              return linhaMapa({ coluna: c.coluna, campo: antes[c.coluna] || '', nome: c.nome }, opcoes);
-            }).join('');
-            ligarRemover();
-            est.className = 'st-ok';
-            est.textContent = h.colunas.length + ' coluna(s) lidas da planilha';
-          } catch (e) {
-            est.className = 'st-erro';
-            est.textContent = 'não deu para ler: ' + e.message;
-          }
-        });
-
-        function linhaMapa(l, opcoes) {
-          return '<tr>' +
-            '<td><input class="pl-col" value="' + esc(l.coluna || '') + '" placeholder="A" style="width:64px" /></td>' +
-            '<td class="motivo">' + (l.nome ? esc(l.nome) : '<span class="nada">—</span>') + '</td>' +
-            '<td><select class="pl-campo">' + opcoes(l.campo) + '</select></td>' +
-            '<td><button class="pl-del">remover</button></td>' +
-            '</tr>';
-        }
-
-        function ligarRemover() {
-          corpo.querySelectorAll('.pl-del').forEach(function (b) {
-            if (b.dataset.ligado) return;
-            b.dataset.ligado = '1';
-            b.addEventListener('click', function () { b.closest('tr').remove(); });
-          });
-        }
-        ligarRemover();
-
-        document.getElementById('pl-add').addEventListener('click', function () {
-          const tr = document.createElement('tr');
-          tr.innerHTML = linhaMapa({}, opcoes).replace(/^<tr>|<\/tr>$/g, '');
-          corpo.appendChild(tr);
-          ligarRemover();
-        });
+        const est = document.getElementById('pl-estado');
 
         document.getElementById('pl-salvar').addEventListener('click', async function () {
-          const est = document.getElementById('pl-estado');
-          const colunas = [];
-          corpo.querySelectorAll('tr').forEach(function (tr) {
-            const col = tr.querySelector('.pl-col').value.trim();
-            const campo = tr.querySelector('.pl-campo').value;
-            if (col && campo) colunas.push({ coluna: col, campo: campo });
-          });
-
-          // duas colunas para o mesmo lugar seria silenciosamente destrutivo:
-          // a última gravada venceria e a outra sumiria sem aviso
-          const vistas = {};
-          const repetida = colunas.find(function (c) {
-            const k = c.coluna.toUpperCase();
-            if (vistas[k]) return true;
-            vistas[k] = 1;
-            return false;
-          });
-          if (repetida) {
-            est.className = 'st-erro';
-            est.textContent = 'a coluna ' + repetida.coluna.toUpperCase() + ' está repetida';
-            return;
-          }
-
           est.className = 'carregando';
           est.textContent = 'salvando…';
           try {
             const res = await enviar('/tenants/' + id + '/planilha', 'PUT', {
               ativo: document.getElementById('pl-ativo').checked,
-              doc_id: document.getElementById('pl-doc').value,
-              aba: document.getElementById('pl-aba').value,
-              colunas: colunas,
+              url: document.getElementById('pl-url').value,
             });
             est.className = 'st-ok';
-            est.textContent = res.colunas + ' coluna(s) salvas · ' +
-              (res.ativo ? 'escrevendo na planilha' : 'desligado');
-            carregarPlanilha(id);
+            est.textContent = res.ativo ? 'salvo · enviando ao n8n' : 'salvo · desligado';
+          } catch (e) {
+            est.className = 'st-erro';
+            est.textContent = 'falhou: ' + e.message;
+          }
+        });
+
+        /**
+         * A linha de teste chega de verdade na planilha: é o jeito de ver cada
+         * dado na coluna certa. Por isso o aviso antes, e o nome que diz o que é.
+         */
+        document.getElementById('pl-teste').addEventListener('click', async function () {
+          const url = document.getElementById('pl-url').value.trim();
+          if (!url) {
+            est.className = 'st-erro';
+            est.textContent = 'cole a URL do webhook primeiro';
+            return;
+          }
+          if (!confirm('Enviar uma linha de teste?' + '\n\n' +
+            'Ela é gravada na planilha do cliente com o nome "TESTE — pode apagar".')) return;
+
+          est.className = 'carregando';
+          est.textContent = 'enviando…';
+          try {
+            const res = await enviar('/tenants/' + id + '/planilha/teste', 'POST', { url: url });
+            if (!res.ok) throw new Error(res.error);
+            est.className = res.gravado === false ? 'st-erro' : 'st-ok';
+            est.textContent = res.gravado === true
+              ? 'gravada — confira a linha na planilha e apague'
+              : res.gravado === false
+                ? 'o n8n recebeu, mas o fluxo não gravou: ' + res.resposta
+                : 'o n8n respondeu ok: ' + res.resposta;
           } catch (e) {
             est.className = 'st-erro';
             est.textContent = 'falhou: ' + e.message;

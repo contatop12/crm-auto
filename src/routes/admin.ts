@@ -12,8 +12,8 @@ import {
 } from '../domain/gtm';
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { mascararSegredo } from '../domain/segredo';
-import { SheetsClient } from '../clients/sheets';
-import { CAMPOS_PLANILHA, colunaParaIndice, indiceParaColuna, idDaPlanilha } from '../domain/planilha';
+import { postarNaPlanilha } from '../clients/n8n';
+import { CAMPOS_PLANILHA, montarRegistro, urlDoWebhook } from '../domain/planilha';
 import { etiquetaSlug } from '../domain/labels';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
@@ -96,108 +96,87 @@ admin.get('/tenants/:id/config', async (c) => {
 });
 
 /**
- * Planilha geral de leads: destino de cada dado, e para onde escrever.
+ * Planilha geral de leads: o webhook do n8n que escreve nela.
  *
- * Le' e grava o mapa inteiro de uma vez. Editar coluna a coluna daria margem a
- * ficar com duas colunas apontando para o mesmo lugar entre um salvamento e
- * outro; substituir o conjunto e' mais simples e nao tem estado intermediario.
+ * Quem escolhe a coluna de cada dado e' o no do Google Sheets dentro do n8n,
+ * que le' os cabecalhos da planilha real. Aqui fica so' para onde mandar e se
+ * esta' ligado.
  */
 admin.get('/tenants/:id/planilha', async (c) => {
   const id = Number(c.req.param('id'));
   const cfg = await c.env.DB.prepare(
-    `SELECT sheets_ativo, sheets_leads_doc_id, sheets_leads_aba
-     FROM tenant_config WHERE tenant_id = ?`,
+    'SELECT sheets_ativo, planilha_webhook_url FROM tenant_config WHERE tenant_id = ?',
   )
     .bind(id)
-    .first<{ sheets_ativo: number; sheets_leads_doc_id: string | null; sheets_leads_aba: string | null }>();
-
-  const { results } = await c.env.DB.prepare(
-    'SELECT coluna, campo FROM sheet_columns WHERE tenant_id = ? ORDER BY coluna',
-  )
-    .bind(id)
-    .all<{ coluna: string; campo: string }>();
+    .first<{ sheets_ativo: number; planilha_webhook_url: string | null }>();
 
   return c.json({
     ativo: Number(cfg?.sheets_ativo ?? 0) === 1,
-    doc_id: cfg?.sheets_leads_doc_id ?? null,
-    aba: cfg?.sheets_leads_aba ?? null,
-    colunas: results,
+    url: cfg?.planilha_webhook_url ?? null,
     campos: CAMPOS_PLANILHA,
   });
 });
 
 admin.put('/tenants/:id/planilha', async (c) => {
   const id = Number(c.req.param('id'));
-  const b = await c.req.json<{
-    ativo?: boolean; doc_id?: string; aba?: string;
-    colunas?: Array<{ coluna?: string; campo?: string }>;
-  }>();
+  const b = await c.req.json<{ ativo?: boolean; url?: string }>();
 
-  // aceita a URL colada, nao so' o id: ninguem deveria editar URL a mao
-  const docId = idDaPlanilha(b.doc_id);
-  // ligar sem planilha escolhida encheria a tela de erro a cada conversao
-  const ativo = b.ativo && docId ? 1 : 0;
+  const bruta = String(b.url ?? '').trim();
+  const url = urlDoWebhook(bruta);
+  if (bruta && !url) {
+    return c.json({ error: 'a URL precisa comecar com https:// — ela leva nome e telefone do lead' }, 400);
+  }
+  // ligar sem destino encheria o log de falha a cada conversao
+  const ativo = b.ativo && url ? 1 : 0;
 
   await c.env.DB.prepare(
     `UPDATE tenant_config
-     SET sheets_ativo = ?, sheets_leads_doc_id = ?, sheets_leads_aba = ?, updated_at = datetime('now')
+     SET sheets_ativo = ?, planilha_webhook_url = ?, updated_at = datetime('now')
      WHERE tenant_id = ?`,
   )
-    .bind(ativo, docId, String(b.aba ?? '').trim() || null, id)
+    .bind(ativo, url, id)
     .run();
 
-  const validas = (b.colunas ?? [])
-    .map((x) => ({ coluna: String(x.coluna ?? '').trim().toUpperCase(), campo: String(x.campo ?? '').trim() }))
-    .filter((x) => colunaParaIndice(x.coluna) >= 0 && x.campo);
-
-  await c.env.DB.prepare('DELETE FROM sheet_columns WHERE tenant_id = ?').bind(id).run();
-  for (const v of validas) {
-    await c.env.DB.prepare(
-      'INSERT OR REPLACE INTO sheet_columns (tenant_id, coluna, campo) VALUES (?, ?, ?)',
-    )
-      .bind(id, v.coluna, v.campo)
-      .run();
-  }
-
-  console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, colunas: validas.length }));
-  return c.json({ ok: true, colunas: validas.length, ativo: ativo === 1 });
+  console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, ativo }));
+  return c.json({ ok: true, ativo: ativo === 1 });
 });
 
 /**
- * Cabecalhos da aba, com a letra de cada um.
+ * Manda uma linha de teste ao n8n, para conferir a ponta inteira.
  *
- * A tela usa isto para montar o mapa a partir da planilha REAL, em vez de pedir
- * para digitar letra de coluna — que exige contar e errar.
+ * A linha vai com `teste: true` e o nome "TESTE — pode apagar". Ela CHEGA na
+ * planilha: o objetivo e' justamente ver a linha la', com cada dado na coluna
+ * certa. Usa a URL da tela, nao a salva, para testar antes de ligar.
  */
-admin.get('/tenants/:id/planilha/cabecalhos', async (c) => {
-  const docId = idDaPlanilha(c.req.query('doc'));
-  if (!docId) return c.json({ error: 'informe a planilha (cole a URL ou o id)' }, 400);
+admin.post('/tenants/:id/planilha/teste', async (c) => {
+  const id = Number(c.req.param('id'));
+  const b = await c.req.json<{ url?: string }>();
+  const url = urlDoWebhook(b.url);
+  if (!url) return c.json({ error: 'informe a URL do webhook (https://...)' }, 400);
 
-  const sheets = await SheetsClient.deD1(c.env);
-  if (!sheets) return c.json({ error: 'Google sem autorizacao — veja Acesso Google' }, 400);
+  const t = await c.env.DB.prepare('SELECT nome FROM tenants WHERE id = ?')
+    .bind(id)
+    .first<{ nome: string }>();
+
+  const registro = montarRegistro(
+    {
+      cliente: t?.nome ?? '', protocolo: 'TESTE-000000', etapa: 'Novo Lead',
+      conversao: 'conversa', valor: null, moeda: 'BRL', quando: Date.now(),
+      ensaio: false, teste: true,
+    },
+    {
+      nome: 'TESTE — pode apagar', phone_e164: '+5511900000000',
+      email: 'teste@p12digital.com.br', gclid: 'TESTE', utm_source: 'google',
+      utm_medium: 'cpc', utm_campaign: 'teste', utm_term: 'teste',
+      origem: 'clique', evento: 'whatsapp_click',
+    },
+  );
 
   try {
-    const nomes = await sheets.cabecalhos(docId, c.req.query('aba') || 'Leads');
-    return c.json({
-      colunas: nomes.map((nome, i) => ({ coluna: indiceParaColuna(i), nome })),
-    });
+    const r = await postarNaPlanilha(url, registro);
+    return c.json({ ok: true, gravado: r.gravado, resposta: r.resposta });
   } catch (e) {
-    return c.json({ error: (e as Error).message }, 502);
-  }
-});
-
-/** Abas do documento, para a tela oferecer em vez de exigir digitar certo. */
-admin.get('/tenants/:id/planilha/abas', async (c) => {
-  const docId = c.req.query('doc');
-  if (!docId) return c.json({ error: 'informe o id da planilha' }, 400);
-
-  const sheets = await SheetsClient.deD1(c.env);
-  if (!sheets) return c.json({ error: 'Google sem autorizacao — veja Acesso Google' }, 400);
-
-  try {
-    return c.json({ abas: await sheets.abas(docId) });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 502);
+    return c.json({ ok: false, error: (e as Error).message }, 502);
   }
 });
 

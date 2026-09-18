@@ -1,146 +1,95 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarLinha, colunaParaIndice, indiceParaColuna, idDaPlanilha, type Mapa } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook } from '../../src/domain/planilha';
 
-const dados = {
-  timestamp: '2026-09-09 14:32:05',
-  data: '09/09/2026',
-  hora: '14:32:05',
-  canal: 'Google Ads · Search',
-  plataforma: 'google',
-  protocolo: 'PERSI-MTN0F6ANNIUP',
+const lead = {
   nome: 'Amanda Constantino',
-  telefone: '+5511971036500',
   email: 'amanda@teste.com',
-  campanha: 'cortinas_blackout',
-  etapa: 'Novo Lead',
-  conversao: 'conversa',
-  valor: '10',
+  phone_e164: '+5511971036500',
+  gclid: 'Cj0KCQ',
+  utm_source: 'google',
+  utm_medium: 'cpc',
+  utm_campaign: 'cortinas_blackout',
+  utm_term: 'cortina blackout',
+  origem: 'clique',
+  evento: 'whatsapp_click',
 };
 
-describe('colunaParaIndice', () => {
-  test('A e a primeira', () => expect(colunaParaIndice('A')).toBe(0));
-  test('Z e a vigesima sexta', () => expect(colunaParaIndice('Z')).toBe(25));
-  test('AA vem depois de Z', () => expect(colunaParaIndice('AA')).toBe(26));
-  test('AB vem depois de AA', () => expect(colunaParaIndice('AB')).toBe(27));
-  test('minuscula vale igual', () => expect(colunaParaIndice('c')).toBe(2));
-  test('o que nao e coluna devolve -1', () => {
-    expect(colunaParaIndice('')).toBe(-1);
-    expect(colunaParaIndice('A1')).toBe(-1);
-    expect(colunaParaIndice('3')).toBe(-1);
+const ctx = {
+  cliente: 'Persianas Paulista',
+  protocolo: 'PERSI-MTN0F6ANNIUP',
+  etapa: 'Novo Lead',
+  conversao: 'conversa',
+  valor: null,
+  moeda: 'BRL',
+  // 2026-09-09 17:32:05 UTC = 14:32:05 em Brasilia
+  quando: Date.UTC(2026, 8, 9, 17, 32, 5),
+  ensaio: false,
+};
+
+describe('dataHoraBrasilia', () => {
+  test('data e hora no fuso de Brasilia', () => {
+    expect(dataHoraBrasilia(Date.UTC(2026, 8, 9, 17, 32, 5))).toEqual({
+      data: '09/09/2026',
+      hora: '14:32:05',
+      timestamp: '09/09/2026 14:32:05',
+    });
+  });
+
+  test('antes das 3h UTC ainda e o dia anterior em Brasilia', () => {
+    expect(dataHoraBrasilia(Date.UTC(2026, 8, 10, 1, 0, 0)).data).toBe('09/09/2026');
   });
 });
 
-describe('montarLinha', () => {
-  test('cada campo vai para a coluna escolhida', () => {
-    const mapa: Mapa = [
-      { coluna: 'A', campo: 'timestamp' },
-      { coluna: 'B', campo: 'nome' },
-      { coluna: 'C', campo: 'telefone' },
-    ];
-    expect(montarLinha(mapa, dados)).toEqual([
-      '2026-09-09 14:32:05', 'Amanda Constantino', '+5511971036500',
-    ]);
+describe('montarRegistro', () => {
+  test('traz cada campo que a tela promete', () => {
+    const r = montarRegistro(ctx, lead);
+    for (const { campo } of CAMPOS_PLANILHA) expect(r).toHaveProperty(campo);
   });
 
-  test('coluna pulada vira vazio, nao desloca as outras', () => {
-    // sem isto o dado da coluna D apareceria na B, silenciosamente
-    const mapa: Mapa = [
-      { coluna: 'A', campo: 'nome' },
-      { coluna: 'D', campo: 'canal' },
-    ];
-    expect(montarLinha(mapa, dados)).toEqual(['Amanda Constantino', '', '', 'Google Ads · Search']);
+  test('telefone vai so com digitos, como a planilha ja usava', () => {
+    expect(montarRegistro(ctx, lead).telefone).toBe('5511971036500');
   });
 
-  test('a ordem do cadastro nao importa: a letra manda', () => {
-    const mapa: Mapa = [
-      { coluna: 'C', campo: 'telefone' },
-      { coluna: 'A', campo: 'nome' },
-    ];
-    expect(montarLinha(mapa, dados)).toEqual(['Amanda Constantino', '', '+5511971036500']);
+  test('link do WhatsApp aponta para o numero do lead', () => {
+    expect(montarRegistro(ctx, lead).link_whatsapp).toBe('https://wa.me/5511971036500');
   });
 
-  test('campo sem valor vira vazio, nunca "null" escrito', () => {
-    const mapa: Mapa = [{ coluna: 'A', campo: 'email' }];
-    expect(montarLinha(mapa, { ...dados, email: null })).toEqual(['']);
-    expect(montarLinha(mapa, {})).toEqual(['']);
+  test('canal diz de onde o lead veio', () => {
+    expect(montarRegistro(ctx, lead).canal).toBe('Campanha de Mensagem - Google');
   });
 
-  test('campo que nao existe nao derruba a linha', () => {
-    const mapa: Mapa = [{ coluna: 'A', campo: 'inventado' }, { coluna: 'B', campo: 'nome' }];
-    expect(montarLinha(mapa, dados)).toEqual(['', 'Amanda Constantino']);
+  test('valor com moeda quando existe, vazio quando nao', () => {
+    expect(montarRegistro(ctx, lead).valor).toBe('');
+    expect(montarRegistro({ ...ctx, valor: 2028 }, lead).valor).toBe('BRL 2028');
   });
 
-  test('coluna invalida e ignorada em vez de virar coluna 0', () => {
-    // cair no indice 0 sobrescreveria o primeiro campo do mapa
-    const mapa: Mapa = [{ coluna: 'A', campo: 'nome' }, { coluna: '??', campo: 'telefone' }];
-    expect(montarLinha(mapa, dados)).toEqual(['Amanda Constantino']);
+  test('lead sem dado vira texto vazio, nunca "null"', () => {
+    const r = montarRegistro(ctx, null);
+    expect(r.nome).toBe('');
+    expect(r.telefone).toBe('');
+    expect(r.link_whatsapp).toBe('');
+    expect(JSON.stringify(r)).not.toContain('null');
   });
 
-  test('mapa vazio nao escreve linha nenhuma', () => {
-    expect(montarLinha([], dados)).toEqual([]);
-  });
-
-  test('o mesmo campo pode ir para duas colunas', () => {
-    const mapa: Mapa = [{ coluna: 'A', campo: 'nome' }, { coluna: 'B', campo: 'nome' }];
-    expect(montarLinha(mapa, dados)).toEqual(['Amanda Constantino', 'Amanda Constantino']);
+  test('ensaio e teste sao sinalizados para o n8n poder filtrar', () => {
+    const r = montarRegistro({ ...ctx, ensaio: true }, lead);
+    expect(r.ensaio).toBe(true);
+    expect(r.teste).toBe(false);
   });
 });
 
-describe('CAMPOS_PLANILHA', () => {
-  test('oferece data e hora separadas, alem do timestamp', () => {
-    const nomes = CAMPOS_PLANILHA.map((c) => c.campo);
-    expect(nomes).toContain('timestamp');
-    expect(nomes).toContain('data');
-    expect(nomes).toContain('hora');
+describe('urlDoWebhook', () => {
+  test('aceita https', () => {
+    expect(urlDoWebhook(' https://n8n.exemplo.com/webhook/abc ')).toBe('https://n8n.exemplo.com/webhook/abc');
   });
 
-  test('oferece o canal do anuncio', () => {
-    expect(CAMPOS_PLANILHA.map((c) => c.campo)).toContain('canal');
+  test('recusa http: o corpo leva nome e telefone do lead', () => {
+    expect(urlDoWebhook('http://n8n.exemplo.com/webhook/abc')).toBeNull();
   });
 
-  test('todo campo tem rotulo legivel para a tela', () => {
-    for (const c of CAMPOS_PLANILHA) expect(c.rotulo.length).toBeGreaterThan(2);
-  });
-});
-
-describe('idDaPlanilha', () => {
-  const ID = '1_FUKAUvlr1O8O2jMJCVbcdsWXUdjRMvDJo8fSHmQPBw';
-
-  test('extrai da URL inteira, que e o que se cola', () => {
-    expect(idDaPlanilha(`https://docs.google.com/spreadsheets/d/${ID}/edit?gid=149#gid=149`)).toBe(ID);
-  });
-
-  test('URL sem o /edit tambem serve', () => {
-    expect(idDaPlanilha(`https://docs.google.com/spreadsheets/d/${ID}`)).toBe(ID);
-  });
-
-  test('o id sozinho passa direto', () => {
-    expect(idDaPlanilha(ID)).toBe(ID);
-  });
-
-  test('espaco em volta nao atrapalha', () => {
-    expect(idDaPlanilha(`  ${ID}  `)).toBe(ID);
-  });
-
-  test('o que nao e planilha devolve null em vez de virar id invalido', () => {
-    expect(idDaPlanilha('https://docs.google.com/document/d/abc/edit')).toBeNull();
-    expect(idDaPlanilha('planilha do cliente')).toBeNull();
-    expect(idDaPlanilha('')).toBeNull();
-    expect(idDaPlanilha(null)).toBeNull();
-  });
-});
-
-describe('indiceParaColuna', () => {
-  test('e o caminho de volta de colunaParaIndice', () => {
-    for (const letra of ['A', 'B', 'Z', 'AA', 'AB', 'AZ', 'BA']) {
-      expect(indiceParaColuna(colunaParaIndice(letra))).toBe(letra);
-    }
-  });
-
-  test('a primeira coluna e A, nao vazio', () => expect(indiceParaColuna(0)).toBe('A'));
-  test('a 27a e AA', () => expect(indiceParaColuna(26)).toBe('AA'));
-  test('indice invalido devolve vazio em vez de letra errada', () => {
-    expect(indiceParaColuna(-1)).toBe('');
-    expect(indiceParaColuna(1.5)).toBe('');
+  test('recusa o que nao e URL', () => {
+    expect(urlDoWebhook('')).toBeNull();
+    expect(urlDoWebhook(null)).toBeNull();
+    expect(urlDoWebhook('n8n.exemplo.com/webhook')).toBeNull();
   });
 });

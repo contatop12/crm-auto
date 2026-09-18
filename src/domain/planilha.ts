@@ -1,19 +1,17 @@
+import { montarCanal } from './canal';
+import { detectOrigin, detectPlatform } from './platform';
+
 /**
- * Para onde cada dado vai, na planilha geral de leads.
+ * O registro que vai para a planilha geral de leads.
  *
- * A coluna é escolhida por quem opera. Cada cliente já tem a planilha dele, com
- * as colunas na ordem que o time acostumou — impor uma ordem nossa obrigaria a
- * refazer a planilha ou a conviver com colunas trocadas.
+ * Quem escreve na planilha e' o n8n, nao nos. Escrever direto exigia autorizar
+ * o escopo `spreadsheets` na conta Google, e o n8n ja' tem a credencial do Sheets
+ * funcionando em todos os clientes. Aqui so' se monta o registro, com nomes
+ * estaveis; no n8n cada coluna da planilha escolhe um desses campos, com a lista
+ * de cabecalhos lida da planilha real.
  */
 
-export interface Coluna {
-  coluna: string;
-  campo: string;
-}
-
-export type Mapa = Coluna[];
-
-/** O que dá para mandar, e como isso se chama na tela. */
+/** O que vai no corpo, e como isso se chama na tela. */
 export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'timestamp', rotulo: 'Data e hora (junto)' },
   { campo: 'data', rotulo: 'Data' },
@@ -23,7 +21,8 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'campanha', rotulo: 'Campanha' },
   { campo: 'protocolo', rotulo: 'Protocolo' },
   { campo: 'nome', rotulo: 'Nome do lead' },
-  { campo: 'telefone', rotulo: 'Telefone' },
+  { campo: 'telefone', rotulo: 'Telefone (só dígitos)' },
+  { campo: 'link_whatsapp', rotulo: 'Link do WhatsApp' },
   { campo: 'email', rotulo: 'E-mail' },
   { campo: 'etapa', rotulo: 'Etapa do funil' },
   { campo: 'conversao', rotulo: 'Conversão enviada' },
@@ -33,77 +32,100 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'utm_medium', rotulo: 'utm_medium' },
   { campo: 'utm_term', rotulo: 'utm_term' },
   { campo: 'cliente', rotulo: 'Cliente' },
+  { campo: 'ensaio', rotulo: 'Modo sombra (true/false)' },
+  { campo: 'teste', rotulo: 'Linha de teste (true/false)' },
 ];
 
-/**
- * `'A'` → 0, `'Z'` → 25, `'AA'` → 26.
- *
- * Devolve -1 para o que não é coluna. Cair em 0 seria pior que recusar: a linha
- * seria escrita com o dado errado no primeiro campo, sem erro nenhum aparecer.
- */
-export function colunaParaIndice(letra: string): number {
-  const s = (letra ?? '').trim().toUpperCase();
-  if (!s || !/^[A-Z]+$/.test(s)) return -1;
+export interface LeadDaPlanilha {
+  nome?: string | null;
+  email?: string | null;
+  phone_e164?: string | null;
+  gclid?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_term?: string | null;
+  origem?: string | null;
+  evento?: string | null;
+}
 
-  let n = 0;
-  for (const c of s) n = n * 26 + (c.charCodeAt(0) - 64);
-  return n - 1;
+export interface ContextoPlanilha {
+  cliente: string;
+  protocolo: string;
+  etapa: string;
+  conversao: string;
+  valor: number | null;
+  moeda: string;
+  quando: number;
+  ensaio: boolean;
+  teste?: boolean;
 }
 
 /**
- * A linha pronta para o Sheets, na ordem das colunas.
+ * Data e hora de Brasilia, no formato que quem abre a planilha le.
  *
- * Coluna pulada vira célula vazia em vez de encolher a linha: sem isso o dado
- * da coluna D apareceria na B, e ninguém perceberia — a planilha continuaria
- * parecendo certa.
+ * Deslocamento fixo de -3h: o Brasil nao tem horario de verao desde 2019, e
+ * carregar uma base de fusos no Worker para isso seria peso sem ganho.
  */
-export function montarLinha(mapa: Mapa, dados: Record<string, unknown>): string[] {
-  const posicoes = mapa
-    .map((c) => ({ i: colunaParaIndice(c.coluna), campo: c.campo }))
-    .filter((c) => c.i >= 0);
+export function dataHoraBrasilia(ms: number): { data: string; hora: string; timestamp: string } {
+  const iso = new Date(ms - 3 * 3600 * 1000).toISOString();
+  const data = `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  const hora = iso.slice(11, 19);
+  return { data, hora, timestamp: `${data} ${hora}` };
+}
 
-  if (!posicoes.length) return [];
+export function montarRegistro(
+  ctx: ContextoPlanilha,
+  lead: LeadDaPlanilha | null,
+): Record<string, string | boolean> {
+  const t = (v: string | null | undefined) => v ?? '';
+  const digitos = t(lead?.phone_e164).replace(/\D/g, '');
 
-  const largura = Math.max(...posicoes.map((c) => c.i)) + 1;
-  const linha = new Array<string>(largura).fill('');
+  const plataforma = detectPlatform({
+    utmSource: lead?.utm_source, utmMedium: lead?.utm_medium,
+    utmCampaign: lead?.utm_campaign, gclid: lead?.gclid,
+  });
 
-  for (const { i, campo } of posicoes) {
-    const v = dados[campo];
-    // `null` e `undefined` viram vazio: a palavra "null" escrita na planilha
-    // seria lida como dado por quem abre
-    linha[i] = v === null || v === undefined ? '' : String(v);
-  }
-  return linha;
+  return {
+    ...dataHoraBrasilia(ctx.quando),
+    canal: montarCanal({
+      origem: detectOrigin({ origemClick: lead?.origem, eventClick: lead?.evento }),
+      plataforma,
+      quizVersion: null,
+    }),
+    plataforma,
+    campanha: t(lead?.utm_campaign),
+    protocolo: ctx.protocolo,
+    nome: t(lead?.nome),
+    // a planilha ja' guardava o numero assim (5511...), sem o `+`
+    telefone: digitos,
+    link_whatsapp: digitos ? `https://wa.me/${digitos}` : '',
+    email: t(lead?.email),
+    etapa: ctx.etapa,
+    conversao: ctx.conversao,
+    valor: ctx.valor === null ? '' : `${ctx.moeda} ${ctx.valor}`,
+    gclid: t(lead?.gclid),
+    utm_source: t(lead?.utm_source),
+    utm_medium: t(lead?.utm_medium),
+    utm_term: t(lead?.utm_term),
+    cliente: ctx.cliente,
+    ensaio: ctx.ensaio,
+    teste: ctx.teste === true,
+  };
 }
 
 /**
- * O id do documento, dado o que a pessoa colou.
+ * O endereco do webhook do n8n, ou null se nao servir.
  *
- * Pedir "o trecho entre /d/ e /edit" e' pedir para alguem editar uma URL a mao
- * antes de colar. Aceitar a URL inteira custa uma linha e evita o erro mais
- * provavel deste campo.
+ * So' https: o corpo leva nome, telefone e e-mail do lead.
  */
-export function idDaPlanilha(entrada: string | null | undefined): string | null {
+export function urlDoWebhook(entrada: string | null | undefined): string | null {
   const v = (entrada ?? '').trim();
   if (!v) return null;
-
-  const naUrl = v.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-  if (naUrl) return naUrl[1]!;
-
-  // ja' e' o id: os do Sheets sao longos e nao tem barra nem espaco
-  if (/^[a-zA-Z0-9_-]{20,}$/.test(v)) return v;
-  return null;
-}
-
-/** 0 → `'A'`, 26 → `'AA'`. O caminho de volta de `colunaParaIndice`. */
-export function indiceParaColuna(i: number): string {
-  if (!Number.isInteger(i) || i < 0) return '';
-  let n = i + 1;
-  let s = '';
-  while (n > 0) {
-    const r = (n - 1) % 26;
-    s = String.fromCharCode(65 + r) + s;
-    n = Math.floor((n - 1) / 26);
+  try {
+    const u = new URL(v);
+    return u.protocol === 'https:' ? u.toString() : null;
+  } catch {
+    return null;
   }
-  return s;
 }
