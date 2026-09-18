@@ -25,6 +25,59 @@ const clique = (over: Record<string, unknown> = {}) =>
     ...over,
   });
 
+describe('envio do formulario do quiz', () => {
+  // Payload REAL do quiz da Persianas (QUIZPE-MU692HAORVFA). Os campos do lead
+  // vem com prefixo `lead_`, e ate' aqui o pipeline procurava `telefone`,
+  // `email` e `lead_name` — um prefixo de diferenca. O telefone vinha no corpo
+  // e era descartado; sem ele o quiz nao casa com a conversa do WhatsApp, o lead
+  // nao e' promovido, e o grupo nao e' avisado.
+  const quiz = JSON.stringify({
+    client_id: 'persianas_paulista_quiz',
+    event: 'form_submit',
+    protocol: 'QUIZPE-MU692HAORVFA',
+    page_url: 'https://quiz.persianaspaulista.com.br/quiz/v1',
+    utm: { source: 'google', medium: 'cpc', campaign: '23513049590' },
+    gclid: 'EAIaIQobChMIufav',
+    lead_nome: 'marina',
+    lead_email: 'marinamussims@hotmail.com',
+    lead_telefone: '+5511982012944',
+    quiz_version: 'v1',
+    form_id: 'FORMR20',
+    quiz_valor: 20,
+  });
+
+  test('o telefone do quiz e gravado, com a chave de casamento', async () => {
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, quiz);
+    const l = consultar<Record<string, unknown>>('SELECT * FROM leads')[0]!;
+    expect(l.phone_e164).toBe('+5511982012944');
+    // e' por esta chave que o quiz encontra a conversa do WhatsApp
+    expect(l.phone_key).toBeTruthy();
+  });
+
+  test('nome e e-mail do quiz tambem entram', async () => {
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, quiz);
+    const l = consultar<Record<string, unknown>>('SELECT * FROM leads')[0]!;
+    expect(l.nome).toBe('marina');
+    expect(l.email).toBeTruthy();
+  });
+
+  test('envio de formulario e formulario, nao clique', async () => {
+    // o casamento prefere formulario a clique; gravado como clique ele perdia
+    // a prioridade que o fluxo antigo dava
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, quiz);
+    expect(consultar<Record<string, unknown>>('SELECT * FROM leads')[0]!.origem).toBe('formulario');
+  });
+
+  test('clique de WhatsApp continua sendo clique', async () => {
+    const { env, consultar } = cenario();
+    await registrarClique(env, 1, JSON.stringify({ event: 'whatsapp_click', protocol: 'PERSI-X1' }));
+    expect(consultar<Record<string, unknown>>('SELECT * FROM leads')[0]!.origem).toBe('clique');
+  });
+});
+
 describe('registrarClique', () => {
   test('grava o clique com telefone e e-mail normalizados', async () => {
     const { env, consultar } = cenario();

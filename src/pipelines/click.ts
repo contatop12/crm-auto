@@ -82,11 +82,18 @@ export async function registrarClique(
     return { status: 'ignorado', motivo: 'clique do modo de visualização do GTM, não de um site' };
   }
 
-  const fone = ler(p, 'phone_number', 'phone', 'telefone');
-  const email = normEmail(ler(p, 'email')) || null;
+  // O formulario do quiz manda os campos do lead com prefixo `lead_`. Sem estes
+  // nomes o telefone vinha no corpo e era DESCARTADO: 87 envios do quiz da
+  // Persianas gravados sem telefone entre 02/09 e 18/09. Sem telefone o quiz nao
+  // casa com a conversa do WhatsApp, o lead nao e' promovido, o grupo nao e'
+  // avisado e a conversao nao sobe — tudo em silencio, porque o envio em si
+  // era aceito com 200.
+  const evento = ler(p, 'event', 'evento') ?? 'whatsapp_click';
+  const fone = ler(p, 'phone_number', 'phone', 'telefone', 'lead_telefone', 'lead_phone');
+  const email = normEmail(ler(p, 'email', 'lead_email')) || null;
 
   const campos = {
-    nome: ler(p, 'lead_name', 'nome', 'name'),
+    nome: ler(p, 'lead_name', 'lead_nome', 'nome', 'name'),
     email,
     phone_raw: fone,
     phone_e164: normFone(fone) || null,
@@ -103,8 +110,11 @@ export async function registrarClique(
     fbp: ler(p, 'fbp'),
     fbc: ler(p, 'fbc'),
     client_id: ler(p, 'client_id', 'clientId'),
-    origem: ler(p, 'origem', 'origin') ?? 'clique',
-    evento: ler(p, 'event', 'evento') ?? 'whatsapp_click',
+    // Envio de formulario e' formulario. O casamento por telefone PREFERE
+    // formulario a clique — gravado como clique, o envio do quiz perdia a
+    // prioridade que o fluxo antigo dava a ele.
+    origem: ler(p, 'origem', 'origin') ?? (evento === 'form_submit' ? 'formulario' : 'clique'),
+    evento,
     // `landing_url` e' a pagina onde o lead entrou; `page_url` pode ser a do
     // renderizador do GTM em modo de teste, que nao diz nada sobre o lead
     page_url: ler(p, 'landing_url', 'landingUrl', 'page_url', 'pageUrl', 'url'),
