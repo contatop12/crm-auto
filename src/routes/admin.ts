@@ -160,15 +160,23 @@ admin.post('/tenants/:id/planilha/teste', async (c) => {
 
   const registro = montarRegistro(
     {
-      cliente: t?.nome ?? '', protocolo: 'TESTE-000000', etapa: 'Novo Lead',
-      conversao: 'conversa', valor: null, moeda: 'BRL', quando: Date.now(),
+      // conversao de entrada: passa pelas tres abas (Cliques, Conversoes e a
+      // planilha de leads), que e' o que o teste precisa mostrar
+      tipo: 'conversao', cliente: t?.nome ?? '', protocolo: 'TESTE-000000',
       ensaio: false, teste: true,
+      conversao: {
+        evento: 'conversa', etapa: 'Novo Lead', valor: null, moeda: 'BRL',
+        quando: Date.now(), acao: 'TESTE', requestId: 'TESTE',
+        match: 'click_id', enviadoEm: Date.now(),
+      },
     },
     {
       nome: 'TESTE — pode apagar', phone_e164: '+5511900000000',
       email: 'teste@p12digital.com.br', gclid: 'TESTE', utm_source: 'google',
       utm_medium: 'cpc', utm_campaign: 'teste', utm_term: 'teste',
       origem: 'clique', evento: 'whatsapp_click',
+      page_url: 'https://exemplo.com.br/teste',
+      created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
     },
   );
 

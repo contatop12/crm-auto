@@ -2,30 +2,36 @@ import { montarCanal } from './canal';
 import { detectOrigin, detectPlatform } from './platform';
 
 /**
- * O registro que vai para a planilha geral de leads.
+ * O registro que vai para as planilhas do cliente.
  *
- * Quem escreve na planilha e' o n8n, nao nos. Escrever direto exigia autorizar
+ * Quem escreve nas planilhas e' o n8n, nao nos. Escrever direto exigia autorizar
  * o escopo `spreadsheets` na conta Google, e o n8n ja' tem a credencial do Sheets
- * funcionando em todos os clientes. Aqui so' se monta o registro, com nomes
- * estaveis; no n8n cada coluna da planilha escolhe um desses campos, com a lista
- * de cabecalhos lida da planilha real.
+ * funcionando em todos os clientes. Aqui so' se monta o registro:
+ *
+ * - campos soltos (`data`, `nome`, `canal`...) para a planilha geral de leads,
+ *   onde cada coluna do n8n escolhe um deles;
+ * - `cliques` e `conversoes`, ja' com os nomes de coluna do Banco de Dados, para
+ *   as abas de mesmo nome. Os clientes nao tem exatamente as mesmas colunas, por
+ *   isso vai o conjunto inteiro e cada fluxo mapeia so' as que a planilha dele tem.
  */
 
 /** O que vai no corpo, e como isso se chama na tela. */
 export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
-  { campo: 'timestamp', rotulo: 'Data e hora (junto)' },
-  { campo: 'data', rotulo: 'Data' },
-  { campo: 'hora', rotulo: 'Hora' },
+  { campo: 'tipo', rotulo: 'clique (lead chegou) ou conversao (subiu para o Google)' },
+  { campo: 'timestamp', rotulo: 'Data e hora do clique (junto)' },
+  { campo: 'data', rotulo: 'Data do clique' },
+  { campo: 'hora', rotulo: 'Hora do clique' },
   { campo: 'canal', rotulo: 'Canal do anúncio' },
   { campo: 'plataforma', rotulo: 'Plataforma (google / meta)' },
   { campo: 'campanha', rotulo: 'Campanha' },
+  { campo: 'pagina', rotulo: 'Página de entrada, sem domínio' },
   { campo: 'protocolo', rotulo: 'Protocolo' },
   { campo: 'nome', rotulo: 'Nome do lead' },
-  { campo: 'telefone', rotulo: 'Telefone (só dígitos)' },
+  { campo: 'telefone', rotulo: 'Telefone (55 + DDD + número)' },
   { campo: 'link_whatsapp', rotulo: 'Link do WhatsApp' },
   { campo: 'email', rotulo: 'E-mail' },
-  { campo: 'etapa', rotulo: 'Etapa do funil' },
-  { campo: 'conversao', rotulo: 'Conversão enviada' },
+  { campo: 'etapa', rotulo: 'Etapa do funil (vazio no clique)' },
+  { campo: 'conversao', rotulo: 'Conversão enviada (vazio no clique)' },
   { campo: 'valor', rotulo: 'Valor' },
   { campo: 'gclid', rotulo: 'GCLID' },
   { campo: 'utm_source', rotulo: 'utm_source' },
@@ -34,31 +40,60 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'cliente', rotulo: 'Cliente' },
   { campo: 'ensaio', rotulo: 'Modo sombra (true/false)' },
   { campo: 'teste', rotulo: 'Linha de teste (true/false)' },
+  { campo: 'cliques', rotulo: 'Linha da aba Cliques do Banco de Dados, com os nomes de coluna dela' },
+  { campo: 'conversoes', rotulo: 'Linha da aba Conversoes do Banco de Dados (só na conversão)' },
 ];
 
+/** A linha de `leads`, com o que as planilhas usam. */
 export interface LeadDaPlanilha {
   nome?: string | null;
   email?: string | null;
   phone_e164?: string | null;
   gclid?: string | null;
+  gbraid?: string | null;
+  wbraid?: string | null;
   utm_source?: string | null;
   utm_medium?: string | null;
   utm_campaign?: string | null;
+  utm_id?: string | null;
   utm_term?: string | null;
+  utm_content?: string | null;
+  fbp?: string | null;
+  fbc?: string | null;
+  client_id?: string | null;
   origem?: string | null;
   evento?: string | null;
+  page_url?: string | null;
+  whatsapp_url?: string | null;
+  referrer?: string | null;
+  user_agent?: string | null;
+  quiz_version?: string | null;
+  quiz_valor?: number | null;
+  quiz_form_id?: string | null;
+  valor_proposta?: number | null;
+  /** `datetime('now')` do D1: UTC, `YYYY-MM-DD HH:MM:SS` */
+  created_at?: string | null;
 }
 
 export interface ContextoPlanilha {
+  tipo: 'clique' | 'conversao';
   cliente: string;
   protocolo: string;
-  etapa: string;
-  conversao: string;
-  valor: number | null;
-  moeda: string;
-  quando: number;
   ensaio: boolean;
   teste?: boolean;
+  /** so' quando `tipo` e' conversao */
+  conversao?: {
+    evento: string;
+    etapa: string;
+    valor: number | null;
+    moeda: string;
+    quando: number;
+    acao: string;
+    requestId: string | null;
+    /** `classificar()` do stageChanged: click_id | click_id+user_data | user_data_only */
+    match: string;
+    enviadoEm: number;
+  };
 }
 
 /**
@@ -74,20 +109,113 @@ export function dataHoraBrasilia(ms: number): { data: string; hora: string; time
   return { data, hora, timestamp: `${data} ${hora}` };
 }
 
+/** `2026-09-09 17:00:00` (UTC do D1) em milissegundos, ou null. */
+function doD1(v: string | null | undefined): number | null {
+  if (!v) return null;
+  const ms = Date.parse(v.replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(v) ? '' : 'Z'));
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Caminho da pagina, sem dominio e sem parametros: `/cortinas`. */
+function caminho(url: string | null | undefined): string {
+  if (!url) return '';
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url.split('?')[0]!.replace(/^https?:\/\/[^/]+/, '');
+  }
+}
+
 export function montarRegistro(
   ctx: ContextoPlanilha,
   lead: LeadDaPlanilha | null,
-): Record<string, string | boolean> {
-  const t = (v: string | null | undefined) => v ?? '';
+): Record<string, unknown> & {
+  cliques: Record<string, string>;
+  conversoes: Record<string, string> | null;
+} {
+  const t = (v: string | number | null | undefined) => (v === null || v === undefined ? '' : String(v));
   const digitos = t(lead?.phone_e164).replace(/\D/g, '');
+  // a aba Cliques sempre guardou o numero nacional: 11971036500
+  const nacional = digitos.startsWith('55') && digitos.length >= 12 ? digitos.slice(2) : digitos;
+  const cv = ctx.conversao;
+
+  const cliqueEm = doD1(lead?.created_at);
+  const quandoChegou = dataHoraBrasilia(cliqueEm ?? cv?.quando ?? Date.now());
+  const cliqueFormatado = cliqueEm === null ? '' : dataHoraBrasilia(cliqueEm).timestamp;
 
   const plataforma = detectPlatform({
     utmSource: lead?.utm_source, utmMedium: lead?.utm_medium,
     utmCampaign: lead?.utm_campaign, gclid: lead?.gclid,
   });
 
+  const atribuicao = {
+    gclid: t(lead?.gclid),
+    gbraid: t(lead?.gbraid),
+    wbraid: t(lead?.wbraid),
+    utm_source: t(lead?.utm_source),
+    utm_medium: t(lead?.utm_medium),
+    utm_campaign: t(lead?.utm_campaign),
+    utm_id: t(lead?.utm_id),
+    utm_term: t(lead?.utm_term),
+    utm_content: t(lead?.utm_content),
+    // o fluxo antigo tirava o nome real da campanha da API do Google Ads; aqui
+    // nao ha essa consulta, entao as colunas existem mas ficam vazias
+    campanha_nome: '',
+    campanha_tipo: '',
+  };
+
+  const cliques = {
+    protocol: ctx.protocolo,
+    phone_number: nacional,
+    lead_name: t(lead?.nome),
+    email: t(lead?.email),
+    status: cv ? cv.etapa : 'pendente',
+    ...atribuicao,
+    page_url: t(lead?.page_url),
+    whatsapp_url: t(lead?.whatsapp_url),
+    fbp: t(lead?.fbp),
+    fbc: t(lead?.fbc),
+    user_agent: t(lead?.user_agent),
+    client_id: t(lead?.client_id),
+    created_at: cliqueFormatado,
+    referrer: t(lead?.referrer),
+    valido: 'TRUE',
+    origem: t(lead?.origem),
+    event: t(lead?.evento),
+    valor_proposta: t(lead?.valor_proposta),
+    quiz_version: t(lead?.quiz_version),
+    quiz_valor: t(lead?.quiz_valor),
+    form_id: t(lead?.quiz_form_id),
+  };
+
+  const conversoes = cv
+    ? {
+        protocol: `${ctx.protocolo}-${cv.evento}`,
+        event_type: cv.evento,
+        origem: t(lead?.origem),
+        qualified_at: new Date(cv.quando).toISOString(),
+        click_created_at: cliqueFormatado,
+        lead_name: t(lead?.nome),
+        email: t(lead?.email),
+        phone_number: nacional,
+        ...atribuicao,
+        conversion_action: cv.acao,
+        conversion_time: new Date(cv.quando).toISOString(),
+        conversion_value: t(cv.valor),
+        currency: cv.moeda,
+        // vocabulario da aba: gclid quando houve clique, enhanced_only quando
+        // o Google so' recebeu e-mail e telefone
+        match_type: cv.match.startsWith('click_id') ? 'gclid' : 'enhanced_only',
+        google_ads_uploaded_at: new Date(cv.enviadoEm).toISOString(),
+        request_id: t(cv.requestId),
+        status: 'enviado',
+        google_ads_error: '',
+      }
+    : null;
+
   return {
-    ...dataHoraBrasilia(ctx.quando),
+    tipo: ctx.tipo,
+    ...quandoChegou,
     canal: montarCanal({
       origem: detectOrigin({ origemClick: lead?.origem, eventClick: lead?.evento }),
       plataforma,
@@ -95,15 +223,16 @@ export function montarRegistro(
     }),
     plataforma,
     campanha: t(lead?.utm_campaign),
+    pagina: caminho(lead?.page_url),
     protocolo: ctx.protocolo,
     nome: t(lead?.nome),
-    // a planilha ja' guardava o numero assim (5511...), sem o `+`
+    // a planilha de leads ja' guardava o numero assim (5511...), sem o `+`
     telefone: digitos,
     link_whatsapp: digitos ? `https://wa.me/${digitos}` : '',
     email: t(lead?.email),
-    etapa: ctx.etapa,
-    conversao: ctx.conversao,
-    valor: ctx.valor === null ? '' : `${ctx.moeda} ${ctx.valor}`,
+    etapa: cv?.etapa ?? '',
+    conversao: cv?.evento ?? '',
+    valor: cv && cv.valor !== null ? `${cv.moeda} ${cv.valor}` : '',
     gclid: t(lead?.gclid),
     utm_source: t(lead?.utm_source),
     utm_medium: t(lead?.utm_medium),
@@ -111,6 +240,8 @@ export function montarRegistro(
     cliente: ctx.cliente,
     ensaio: ctx.ensaio,
     teste: ctx.teste === true,
+    cliques,
+    conversoes,
   };
 }
 

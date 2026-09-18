@@ -885,10 +885,12 @@
 
           <div class="painel" data-painel="planilha" hidden>
           <section>
-            <h2>Planilha geral de leads</h2>
-            <p class="dica">Cada conversão enviada ao Google vai para o <strong>n8n</strong>, que
-            acrescenta a linha no fim da planilha (Append Row). Nada existente é sobrescrito, e a coluna
-            de cada dado é escolhida no nó do Google Sheets, lá no n8n.</p>
+            <h2>Planilhas do cliente</h2>
+            <p class="dica">O <strong>n8n</strong> escreve nas planilhas; o CRM só entrega o lead pronto.
+            Cada <strong>clique</strong> vira a linha da aba Cliques do Banco de Dados. Cada
+            <strong>conversão enviada ao Google</strong> atualiza essa linha, entra na aba Conversoes e, se for
+            a de entrada, na planilha geral de leads. A coluna de cada dado é escolhida no nó do Google Sheets,
+            lá no n8n.</p>
             <div id="planilha"></div>
           </section>
           </div>
@@ -2611,7 +2613,7 @@
           '<p class="dica">No n8n, é a <strong>Production URL</strong> do nó Webhook do fluxo da planilha. ' +
           'O fluxo precisa estar <strong>ativo</strong>.</p></div>' +
           '<div class="campo"><label><input type="checkbox" id="pl-ativo"' +
-          (r.ativo ? ' checked' : '') + ' /> Enviar ao n8n a cada conversão enviada ao Google</label>' +
+          (r.ativo ? ' checked' : '') + ' /> Enviar ao n8n cada clique e cada conversão enviada ao Google</label>' +
           '<p class="dica">Desligado, nada é enviado. Falha no n8n ou na planilha nunca derruba a conversão.</p></div>' +
           '<div class="linha-acoes">' +
             '<button id="pl-salvar" class="principal">Salvar</button>' +
@@ -2657,7 +2659,7 @@
             return;
           }
           if (!confirm('Enviar uma linha de teste?' + '\n\n' +
-            'Ela é gravada na planilha do cliente com o nome "TESTE — pode apagar".')) return;
+            'Ela é gravada nas planilhas do cliente (Cliques, Conversoes e planilha de leads) com o nome "TESTE — pode apagar" e o protocolo TESTE-000000.')) return;
 
           est.className = 'carregando';
           est.textContent = 'enviando…';
@@ -2666,7 +2668,7 @@
             if (!res.ok) throw new Error(res.error);
             est.className = res.gravado === false ? 'st-erro' : 'st-ok';
             est.textContent = res.gravado === true
-              ? 'gravada — confira a linha na planilha e apague'
+              ? 'gravada — confira as linhas TESTE nas planilhas e apague'
               : res.gravado === false
                 ? 'o n8n recebeu, mas o fluxo não gravou: ' + res.resposta
                 : 'o n8n respondeu ok: ' + res.resposta;

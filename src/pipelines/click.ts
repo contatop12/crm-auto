@@ -1,6 +1,7 @@
 import type { Env } from '../env';
 import { normFone, phoneKey } from '../domain/phone';
 import { normEmail } from '../domain/email';
+import { espelharNaPlanilha } from './planilha';
 
 /**
  * Clique no anuncio, vindo do GTM.
@@ -157,6 +158,15 @@ export async function registrarClique(
       Number.isFinite(valorProposta) && valorProposta ? valorProposta : null,
     )
     .run();
+
+  // A linha da aba Cliques do Banco de Dados nasce aqui, e nao so' quando vira
+  // conversao: a aba sempre teve todo clique, inclusive o que nunca conversou.
+  // Depois do INSERT de proposito — o n8n le' o lead ja' mesclado com o que a
+  // repeticao do beacon trouxe.
+  await espelharNaPlanilha(env, tenantId, { tipo: 'clique', protocolo: protocol, ensaio: false })
+    .catch((e: Error) => {
+      console.log(JSON.stringify({ acao: 'planilha_falhou', tipo: 'clique', protocolo: protocol, erro: e.message }));
+    });
 
   const plataforma = campos.gclid || campos.gbraid || campos.wbraid ? 'google' : campos.fbc ? 'meta' : 'sem plataforma';
   return {

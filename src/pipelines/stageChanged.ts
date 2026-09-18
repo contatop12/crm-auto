@@ -2,8 +2,7 @@ import type { Env } from '../env';
 import { GoogleAdsClient } from '../clients/googleAds';
 import { montarEvento, montarCorpo, valorDaConversao } from '../domain/conversao';
 import { exigir } from '../domain/config';
-import { postarNaPlanilha } from '../clients/n8n';
-import { montarRegistro, type LeadDaPlanilha } from '../domain/planilha';
+import { espelharNaPlanilha } from './planilha';
 
 /**
  * Mudança de etapa no Kanban vira conversão no Google Ads.
@@ -244,8 +243,12 @@ export async function enviarConversao(
     // Espelho, depois do envio. Falhar aqui nao desfaz a conversao: a planilha
     // e' onde o time do cliente trabalha, nao a fonte da verdade.
     await espelharNaPlanilha(env, tenantId, {
-      protocolo, etapa: etapa.nome, conversao: etapa.conversion_event,
-      valor, moeda: cfg.ga_currency, quando, ensaio: sombra,
+      tipo: 'conversao', protocolo, ensaio: sombra,
+      conversao: {
+        evento: etapa.conversion_event, etapa: etapa.nome, valor, moeda: cfg.ga_currency,
+        quando, acao: etapa.conversion_action_id, requestId: r.requestId ?? null,
+        match: tipo, enviadoEm: Date.now(),
+      },
     }).catch((e: Error) => {
       console.log(JSON.stringify({ acao: 'planilha_falhou', protocolo, erro: e.message }));
     });
@@ -379,46 +382,4 @@ function data(v: string | null): number | null {
   if (!v) return null;
   const t = Date.parse(v);
   return Number.isFinite(t) ? t : null;
-}
-
-/**
- * Entrega a linha do lead ao n8n, que escreve na planilha geral.
- *
- * So' o que teve conversao enviada chega aqui, que e' o recorte pedido: a
- * planilha geral e' de leads que viraram alguma coisa, nao de todo clique. Vai
- * uma chamada por conversao; o fluxo do n8n decide quais viram linha (o da
- * Persianas grava so' a de entrada, uma linha por lead).
- *
- * O canal e' montado com o mesmo vocabulario do aviso no grupo — quem le' a
- * planilha e quem le' o WhatsApp veem a mesma palavra para a mesma coisa.
- */
-async function espelharNaPlanilha(
-  env: Env,
-  tenantId: number,
-  ctx: {
-    protocolo: string; etapa: string; conversao: string;
-    valor: number | null; moeda: string; quando: number; ensaio: boolean;
-  },
-): Promise<void> {
-  const cfg = await env.DB.prepare(
-    `SELECT c.sheets_ativo, c.planilha_webhook_url, t.nome AS cliente
-     FROM tenant_config c JOIN tenants t ON t.id = c.tenant_id WHERE c.tenant_id = ?`,
-  )
-    .bind(tenantId)
-    .first<{ sheets_ativo: number; planilha_webhook_url: string | null; cliente: string }>();
-
-  if (!cfg || cfg.sheets_ativo !== 1 || !cfg.planilha_webhook_url) return;
-
-  const lead = await env.DB.prepare(
-    `SELECT nome, email, phone_e164, gclid, utm_source, utm_medium, utm_campaign, utm_term, origem, evento
-     FROM leads WHERE tenant_id = ? AND protocol = ?`,
-  )
-    .bind(tenantId, ctx.protocolo)
-    .first<LeadDaPlanilha>();
-
-  const r = await postarNaPlanilha(
-    cfg.planilha_webhook_url,
-    montarRegistro({ ...ctx, cliente: cfg.cliente }, lead),
-  );
-  console.log(JSON.stringify({ acao: 'planilha_ok', protocolo: ctx.protocolo, gravado: r.gravado }));
 }
