@@ -93,3 +93,48 @@ describe('protocoloMeta', () => {
     expect(protocoloMeta('', '55')).toBe('META-55');
   });
 });
+
+describe('parseMetaLead — formato do Make', () => {
+  // formato real do modulo "Watch Leads" do Make, com dados ficticios
+  const make = {
+    platform: 'fb',
+    leadgenId: '1234567890123427',
+    formId: '987654321098714',
+    isOrganic: false,
+    adName: '[AD001] Carrossel - Principais Modelos',
+    adsetName: '[FORMULARIO META] [VALIDANDO] GEO=SP-CAP',
+    campaignName: '[P12] [ABO] [LEAD] FORM.COND.',
+    dateCreated: '2026-09-18T19:54:03.000Z',
+    data: {
+      'Modelo': ['Persiana Vertical'],
+      'phone': '+5511912345678',
+      'email': 'maria@exemplo.com',
+      'full_name': 'Maria Exemplo',
+    },
+    mappable_field_data: [
+      { name: 'phone', value: '+5511912345678' },
+      { name: 'full_name', value: 'Maria Exemplo' },
+    ],
+  };
+
+  test('le o telefone de dentro de `data`', () => {
+    const l = parseMetaLead(make);
+    expect(l?.telefone).toBe('+5511912345678');
+    expect(l?.nome).toBe('Maria Exemplo');
+    expect(l?.email).toBe('maria@exemplo.com');
+  });
+
+  test('le os nomes em camelCase do Make', () => {
+    const l = parseMetaLead(make);
+    expect(l?.leadgenId).toBe('1234567890123427');
+    expect(l?.formId).toBe('987654321098714');
+    expect(l?.campanha).toBe('[P12] [ABO] [LEAD] FORM.COND.');
+    expect(l?.conjunto).toBe('[FORMULARIO META] [VALIDANDO] GEO=SP-CAP');
+    expect(l?.anuncio).toBe('[AD001] Carrossel - Principais Modelos');
+  });
+
+  test('so `mappable_field_data` tambem serve', () => {
+    const { data: _data, ...semData } = make;
+    expect(parseMetaLead(semData)?.telefone).toBe('+5511912345678');
+  });
+});

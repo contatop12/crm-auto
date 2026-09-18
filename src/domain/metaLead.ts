@@ -43,21 +43,35 @@ function str(v: unknown): string | null {
 }
 
 /**
- * Achata o `field_data` do webhook do Meta.
+ * Achata os campos do formulario num objeto so'.
  *
- * O formato nativo é `[{name, values: [...]}]`. A automação pode entregar já
- * achatado ou repassar cru, e as duas formas chegam aqui.
+ * Tres formatos chegam aqui, e todos precisam ser lidos:
+ * - nativo do Meta: `field_data: [{name, values: [...]}]`;
+ * - Make ("Watch Leads"): `data: {phone, full_name, Modelo: [...]}` e
+ *   `mappable_field_data: [{name, value}]`;
+ * - ja' achatado pela automacao.
+ *
+ * O do Make ficou de fora no comeco, e o telefone dentro de `data` nao era
+ * encontrado: todo lead do Make era descartado como "sem telefone utilizavel".
  */
 function achatar(p: Rec): Rec {
-  const campos = p.field_data;
-  if (!Array.isArray(campos)) return p;
-
   const plano: Rec = { ...p };
-  for (const c of campos) {
-    const o = obj(c);
-    const nome = str(o?.name);
-    const valor = Array.isArray(o?.values) ? str(o!.values[0]) : str(o?.value);
+  const por = (nome: string | null, valor: string | null) => {
     if (nome && valor && plano[nome] === undefined) plano[nome] = valor;
+  };
+
+  for (const lista of [p.field_data, p.mappable_field_data]) {
+    if (!Array.isArray(lista)) continue;
+    for (const c of lista) {
+      const o = obj(c);
+      por(str(o?.name), Array.isArray(o?.values) ? str(o!.values[0]) : str(o?.value));
+    }
+  }
+
+  const dados = obj(p.data);
+  if (dados) {
+    // resposta de multipla escolha vem como lista: vale a primeira
+    for (const [k, v] of Object.entries(dados)) por(k, Array.isArray(v) ? str(v[0]) : str(v));
   }
   return plano;
 }
@@ -85,17 +99,17 @@ export function parseMetaLead(raw: unknown): MetaLead | null {
   if (!chave) return null;
 
   return {
-    leadgenId: primeiro(p, ['leadgen_id', 'lead_id', 'id']),
+    leadgenId: primeiro(p, ['leadgen_id', 'leadgenId', 'lead_id', 'id']),
     nome: primeiro(p, ['full_name', 'nome', 'name', 'nome_completo']),
     telefone,
     phoneKey: chave,
     // `normEmail` devolve string vazia para o que nao e' e-mail; vazio no banco
     // e' pior que ausente, porque parece dado
     email: normEmail(primeiro(p, ['email', 'e_mail', 'e-mail'])) || null,
-    campanha: primeiro(p, ['campaign_name', 'campanha', 'campaign']),
-    conjunto: primeiro(p, ['adset_name', 'conjunto', 'adset']),
-    anuncio: primeiro(p, ['ad_name', 'anuncio', 'ad']),
-    formId: primeiro(p, ['form_id', 'formulario_id', 'form']),
+    campanha: primeiro(p, ['campaign_name', 'campaignName', 'campanha', 'campaign']),
+    conjunto: primeiro(p, ['adset_name', 'adsetName', 'conjunto', 'adset']),
+    anuncio: primeiro(p, ['ad_name', 'adName', 'anuncio', 'ad']),
+    formId: primeiro(p, ['form_id', 'formId', 'formulario_id', 'form']),
   };
 }
 

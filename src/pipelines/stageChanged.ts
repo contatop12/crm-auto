@@ -195,9 +195,11 @@ export async function enviarConversao(
     if (ensaio) {
       // a linha passa a valer de verdade
       await env.DB.prepare(
-        'UPDATE conversions SET validate_only = 0 WHERE tenant_id = ? AND dedupe_key = ?',
+        // e passa a registrar a meta que recebe AGORA: a importada do n8n
+        // podia estar apontando para a meta errada
+        'UPDATE conversions SET validate_only = 0, conversion_action = ? WHERE tenant_id = ? AND dedupe_key = ?',
       )
-        .bind(tenantId, chave)
+        .bind(etapa.conversion_action_id, tenantId, chave)
         .run();
     }
   }

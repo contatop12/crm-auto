@@ -2,7 +2,7 @@ import type { Env } from '../env';
 import { postarNaPlanilha } from '../clients/n8n';
 import { SheetsClient } from '../clients/sheets';
 import {
-  montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna,
+  montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna, campoDaColunaLeads, jaTemTelefone,
   type ContextoPlanilha, type LeadDaPlanilha,
 } from '../domain/planilha';
 
@@ -102,21 +102,50 @@ export async function escreverNasPlanilhas(
 ): Promise<string[]> {
   const sheets = new SheetsClient(env);
   const feitas: string[] = [];
+  const falhas: string[] = [];
+
+  // Cada planilha por si: o Banco de Dados sem compartilhar nao pode impedir
+  // a linha da planilha de leads, que o time le todo dia.
+  const tentar = async (nome: string, fazer: () => Promise<void>) => {
+    try {
+      await fazer();
+      feitas.push(nome);
+    } catch (e) {
+      falhas.push(`${nome}: ${(e as Error).message}`);
+    }
+  };
 
   if (destino.banco_doc) {
+    const banco = destino.banco_doc;
     if (registro.conversoes) {
-      await gravarPorProtocolo(sheets, destino.banco_doc, destino.aba_conversoes, registro.conversoes);
-      feitas.push(destino.aba_conversoes);
+      const conversoes = registro.conversoes;
+      await tentar(destino.aba_conversoes, () => gravarPorProtocolo(sheets, banco, destino.aba_conversoes, conversoes));
     }
-    await gravarPorProtocolo(sheets, destino.banco_doc, destino.aba_cliques, registro.cliques);
-    feitas.push(destino.aba_cliques);
+    await tentar(destino.aba_cliques, () => gravarPorProtocolo(sheets, banco, destino.aba_cliques, registro.cliques));
   }
 
   if (destino.leads_doc && destino.leads_aba && registro.conversao === 'conversa') {
-    const cab = await sheets.cabecalho(destino.leads_doc, destino.leads_aba);
-    if (!cab.length) throw new Error(`a aba "${destino.leads_aba}" esta sem cabecalho na primeira linha`);
-    await sheets.acrescentar(destino.leads_doc, destino.leads_aba, linhaDeLeads(cab, registro));
-    feitas.push(destino.leads_aba);
+    const doc = destino.leads_doc;
+    const aba = destino.leads_aba;
+    await tentar(aba, async () => {
+      const cab = await sheets.cabecalho(doc, aba);
+      if (!cab.length) throw new Error(`a aba "${aba}" esta sem cabecalho na primeira linha`);
+
+      // uma linha por lead: quem ja' esta' na planilha (reenvio, ou gravado
+      // pelo n8n antes) nao ganha outra
+      const telefone = String(registro.telefone ?? '');
+      const iFone = cab.findIndex((h) => campoDaColunaLeads(h) === 'telefone');
+      const iLink = cab.findIndex((h) => campoDaColunaLeads(h) === 'link_whatsapp');
+      const iCol = iFone >= 0 ? iFone : iLink;
+      if (telefone && iCol >= 0 && jaTemTelefone(await sheets.coluna(doc, aba, indiceParaColuna(iCol)), telefone)) {
+        return;
+      }
+      await sheets.acrescentar(doc, aba, linhaDeLeads(cab, registro));
+    });
+  }
+
+  if (falhas.length) {
+    throw new Error(`${falhas.join(' | ')}${feitas.length ? ` (gravou: ${feitas.join(', ')})` : ''}`);
   }
   return feitas;
 }

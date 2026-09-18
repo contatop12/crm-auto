@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -257,5 +257,25 @@ describe('idDaPlanilha e colunas', () => {
     expect(indiceParaColuna(0)).toBe('A');
     expect(indiceParaColuna(25)).toBe('Z');
     expect(indiceParaColuna(26)).toBe('AA');
+  });
+});
+
+describe('planilha de leads: uma linha por lead', () => {
+  test('acha o telefone em qualquer formato que a planilha tenha', () => {
+    const coluna = ['https://wa.me/5511971036500', '', '(11) 98888-7777'];
+    expect(jaTemTelefone(coluna, '5511971036500')).toBe(true);
+    expect(jaTemTelefone(coluna, '11988887777')).toBe(true);
+  });
+
+  test('nono digito e DDI nao atrapalham', () => {
+    expect(jaTemTelefone(['1171036500'], '5511971036500')).toBe(true);
+  });
+
+  test('telefone novo nao esta na planilha', () => {
+    expect(jaTemTelefone(['5511971036500'], '5521999990000')).toBe(false);
+  });
+
+  test('sem telefone nao ha como saber: nao bloqueia', () => {
+    expect(jaTemTelefone(['5511971036500'], '')).toBe(false);
   });
 });

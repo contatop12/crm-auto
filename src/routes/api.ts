@@ -220,18 +220,38 @@ api.post('/tenants/:id/conversoes/reenviar', async (c) => {
   if (!dedupe_key) return c.json({ error: 'informe a conversao' }, 400);
 
   const v = await c.env.DB.prepare(
-    `SELECT v.status, v.protocol, v.conversion_action, v.event_at, f.cw_step_id
+    `SELECT v.status, v.validate_only, v.protocol, v.conversion_action, v.event_at, f.cw_step_id
      FROM conversions v
+     -- pelo evento, nao pela meta: a conversa que o n8n mandou para a meta da
+     -- Tainã e' da etapa Novo Lead da Persianas mesmo assim
      LEFT JOIN funnel_stages f
-       ON f.tenant_id = v.tenant_id AND f.conversion_action_id = v.conversion_action
+       ON f.tenant_id = v.tenant_id AND f.conversion_event = v.conversion_event
      WHERE v.tenant_id = ? AND v.dedupe_key = ?`,
   )
     .bind(id, dedupe_key)
-    .first<{ status: string; protocol: string; conversion_action: string; event_at: string | null; cw_step_id: number | null }>();
+    .first<{ status: string; validate_only: number; protocol: string; conversion_action: string; event_at: string | null; cw_step_id: number | null }>();
 
   if (!v) return c.json({ error: 'conversao nao encontrada' }, 404);
-  if (v.status === 'enviado') {
+
+  /**
+   * Ensaio pode subir de verdade: o Google so' validou, nao contou nada.
+   *
+   * E' o caso das conversas que o n8n mandou com validateOnly e que foram
+   * importadas como ensaio. O pipeline ja' trata a linha de ensaio como nao
+   * enviada; faltava a tela deixar pedir. Com o cliente ainda em modo sombra,
+   * sairia ensaio de novo — por isso recusa.
+   */
+  const ensaio = v.status === 'enviado' && v.validate_only === 1;
+  if (v.status === 'enviado' && !ensaio) {
     return c.json({ error: 'esta conversao ja subiu; reenviar contaria duas vezes no Google' }, 409);
+  }
+  if (ensaio) {
+    const cfg = await c.env.DB.prepare('SELECT validate_only FROM tenant_config WHERE tenant_id = ?')
+      .bind(id)
+      .first<{ validate_only: number }>();
+    if (cfg?.validate_only === 1) {
+      return c.json({ error: 'o cliente esta em modo sombra: sairia ensaio de novo' }, 409);
+    }
   }
   if (!v.cw_step_id) {
     return c.json({ error: 'a meta desta conversao nao esta mais ligada a nenhuma etapa do funil' }, 400);
@@ -287,8 +307,14 @@ api.get('/tenants/:id/conversoes', async (c) => {
     .bind(id)
     .first<Record<string, number | null>>();
 
+  const cfg = await c.env.DB.prepare('SELECT validate_only FROM tenant_config WHERE tenant_id = ?')
+    .bind(id)
+    .first<{ validate_only: number }>();
+
   return c.json({
     linhas: results,
+    // em modo sombra o ensaio nao pode subir de verdade: a tela esconde o botao
+    sombra: cfg?.validate_only === 1,
     total: Number(t?.total ?? 0),
     limite,
     offset,

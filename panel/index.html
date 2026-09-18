@@ -1059,7 +1059,7 @@
             '<table><thead><tr>' +
               '<th>Quando</th><th>Lead</th><th>Etapa e meta</th>' +
               '<th>Valor</th><th>Atribuição</th><th>Resultado</th><th></th>' +
-            '</tr></thead><tbody>' + r.linhas.map(linhaConversao).join('') + '</tbody></table>' +
+            '</tr></thead><tbody>' + r.linhas.map(function (v) { return linhaConversao(v, r.sombra); }).join('') + '</tbody></table>' +
             paginacao('conversoes', r.total, r.limite, r.offset)
           : '<div class="vazio"><p>Nenhuma conversão enviada ainda.</p>' +
             '<p class="mono">Sobe quando um card entra numa etapa marcada como conversão. ' +
@@ -1067,6 +1067,11 @@
 
         ligarPaginacao(alvo, function (o) { carregarConversoes(id, o); });
         ligarReenvio(alvo, '.reenviar-conv', function (b) {
+          // subir um ensaio passa a contar nas campanhas do cliente: pede certeza
+          if (b.dataset.ensaio && !confirm(
+            'Enviar esta conversão ao Google Ads DE VERDADE?' + '\n\n' +
+            'Hoje ela é só um ensaio (o Google validou, não contou). Enviada, passa a contar ' +
+            'nas campanhas do cliente, com a data original.')) return null;
           return {
             rota: '/tenants/' + id + '/conversoes/reenviar',
             corpo: { dedupe_key: b.dataset.chave },
@@ -1088,7 +1093,7 @@
         user_data_only: ['só o lead', 'sem gclid: depende do e-mail/telefone casarem'],
       };
 
-      function linhaConversao(v) {
+      function linhaConversao(v, sombra) {
         const nada = '<span class="nada">—</span>';
         const a = ATRIBUICAO[v.match_type] || null;
 
@@ -1113,7 +1118,9 @@
           // novo com o mesmo lead da' no mesmo. So' 'erro' e' recuperavel.
           '<td>' + (v.status === 'erro'
             ? '<button class="reenviar-conv" data-chave="' + esc(v.dedupe_key) + '">Reenviar</button>'
-            : '') + '</td>' +
+            : v.status === 'enviado' && v.validate_only && !sombra
+              ? '<button class="reenviar-conv" data-ensaio="1" data-chave="' + esc(v.dedupe_key) + '">Enviar de verdade</button>'
+              : '') + '</td>' +
           '</tr>';
       }
 
@@ -1175,6 +1182,7 @@
         raiz.querySelectorAll(seletor).forEach(function (b) {
           b.addEventListener('click', async function () {
             const alvo = montar(b);
+            if (!alvo) return;
             const antes = b.textContent;
             b.disabled = true;
             b.textContent = 'reenviando…';

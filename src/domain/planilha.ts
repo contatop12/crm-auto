@@ -1,5 +1,6 @@
 import { montarCanal } from './canal';
 import { detectOrigin, detectPlatform } from './platform';
+import { phoneKey } from './phone';
 
 /**
  * O registro que vai para as planilhas do cliente.
@@ -348,4 +349,18 @@ export function indiceParaColuna(i: number): string {
     n = Math.floor((n - 1) / 26);
   }
   return s;
+}
+
+/**
+ * O telefone ja' tem linha na planilha de leads?
+ *
+ * "Uma linha por lead" precisa valer mesmo quando a conversao de entrada sobe
+ * de novo — reenvio, ou lead que o n8n ja' tinha gravado. Casa pela chave de
+ * telefone (DDD + 8 ultimos), entao `https://wa.me/55...`, `(11) 9...` e o
+ * numero sem o nono digito sao o mesmo lead.
+ */
+export function jaTemTelefone(coluna: string[], telefone: string): boolean {
+  const alvo = phoneKey(telefone);
+  if (!alvo) return false;
+  return coluna.some((v) => phoneKey(v) === alvo);
 }
