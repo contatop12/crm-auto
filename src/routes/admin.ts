@@ -13,6 +13,7 @@ import {
 import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { mascararSegredo } from '../domain/segredo';
 import { postarNaPlanilha } from '../clients/n8n';
+import { ESCOPOS_GOOGLE } from '../domain/escoposGoogle';
 import { CAMPOS_PLANILHA, montarRegistro, urlDoWebhook } from '../domain/planilha';
 import { etiquetaSlug } from '../domain/labels';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
@@ -1346,12 +1347,16 @@ admin.get('/oauth/google/status', async (c) => {
     "SELECT obtido_por, escopos, atualizado_em FROM credenciais WHERE chave = 'gtm_refresh_token'",
   ).first<{ obtido_por: string; escopos: string; atualizado_em: string }>();
 
-  if (!l) return c.json({ autorizado: false });
+  const tem = new Set((l?.escopos ?? '').split(/\s+/));
+  const permissoes = ESCOPOS_GOOGLE.map((e) => ({ nome: e.nome, concedida: tem.has(e.escopo) }));
+
+  if (!l) return c.json({ autorizado: false, permissoes });
   return c.json({
     autorizado: true,
     por: l.obtido_por,
     em: l.atualizado_em,
     tag_manager: (l.escopos ?? '').includes('tagmanager'),
+    permissoes,
   });
 });
 

@@ -3167,45 +3167,69 @@
        *
        * O `state` sai daqui, autenticado pelo Access, e é o que amarra a volta
        * do Google a alguém que já provou quem é. Link colado de fora não serve.
+       *
+       * O link é gerado NO CLIQUE, não ao abrir a tela: ele vale 10 minutos, e
+       * gerado antes vencia enquanto a pessoa lia a página — a volta do Google
+       * caía em "state inválido ou vencido".
        */
       async function verGoogle() {
         tela.innerHTML = CARREGANDO;
         rodape.textContent = '';
 
-        const st = await api('/oauth/google/status').catch(function () { return { autorizado: false }; });
-        // o erro daqui e' o que impede autorizar: engoli-lo deixava a tela
-        // dizendo "nao foi possivel" sem dizer por que
-        let inicio = null;
-        let falha = '';
-        try {
-          inicio = await api('/oauth/google/start');
-        } catch (e) {
-          falha = e.message;
-        }
+        const st = await api('/oauth/google/status').catch(function () { return { autorizado: false, permissoes: [] }; });
+        const permissoes = st.permissoes || [];
+        const faltam = permissoes.filter(function (p) { return !p.concedida; });
+        const retorno = location.origin + '/ingest/oauth/google/callback';
 
         tela.innerHTML =
           '<div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>' +
           '<h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.02em">Acesso Google</h2>' +
-          '<p class="carregando" style="margin:0 0 24px">Tag Manager e Google Ads no mesmo consentimento.</p>' +
+          '<p class="carregando" style="margin:0 0 24px">Tag Manager, Google Ads e Planilhas no mesmo consentimento.</p>' +
 
           '<section><h2>Situação</h2>' +
           (st.autorizado
-            ? '<p><span class="tag tag-novo">autorizado</span> por <strong>' + esc(st.por || '?') + '</strong>' +
-              ' · ' + haQuanto(st.em) + (st.tag_manager ? ' · inclui Tag Manager' : ' · <span class="st-erro">sem escopo do Tag Manager</span>') + '</p>'
+            ? '<p><span class="tag tag-novo">autorizado</span> por <strong>' + esc(st.por || '?') + '</strong> · ' + haQuanto(st.em) + '</p>'
             : '<p><span class="tag">ainda não autorizado</span></p>') +
+          '<table><thead><tr><th>Permissão</th><th></th></tr></thead><tbody>' +
+          permissoes.map(function (p) {
+            return '<tr><td>' + esc(p.nome) + '</td><td>' +
+              (p.concedida ? '<span class="st-ok">concedida</span>' : '<span class="st-erro">falta</span>') +
+              '</td></tr>';
+          }).join('') +
+          '</tbody></table>' +
           '</section>' +
 
           '<section><h2>Autorizar</h2>' +
-          (inicio
-            ? '<p class="dica">O link abaixo vale <strong>10 minutos</strong> e serve uma vez. Entre com a conta que administra os containers dos clientes.</p>' +
-              '<div class="linha-acoes"><a class="botao-link" id="link-google" href="' + esc(inicio.url) + '">Abrir consentimento do Google</a></div>' +
-              '<p class="dica" style="margin-top:16px">Este endereço precisa estar cadastrado como <strong>URI de redirecionamento autorizado</strong> no cliente OAuth do Google Cloud:</p>' +
-              '<div class="endereco"><div class="linha"><code>' + esc(inicio.redirect_uri) + '</code>' +
-              '<button class="copiar" data-url="' + esc(inicio.redirect_uri) + '">copiar</button></div></div>'
-            : '<div class="erro">não foi possível gerar o link: ' + esc(falha || 'sem detalhe') + '</div>') +
+          '<p class="dica">' + (faltam.length
+            ? 'Falta ' + faltam.length + ' permissão(ões). '
+            : 'Tudo concedido; autorize de novo só se trocar de conta. ') +
+          'Entre com a conta que administra os containers dos clientes. Na tela do Google, ' +
+          '<strong>deixe todas as caixas marcadas</strong>. Se aparecer "O Google não verificou este app", ' +
+          'clique em <strong>Avançado</strong> e depois em <strong>Acessar</strong>.</p>' +
+          '<div class="linha-acoes"><button id="btn-consentir" class="principal">Abrir consentimento do Google</button>' +
+          '<span class="carregando" id="consentir-estado"></span></div>' +
+          '<p class="dica" style="margin-top:16px">Este endereço precisa estar cadastrado como <strong>URI de redirecionamento autorizado</strong> no cliente OAuth do Google Cloud:</p>' +
+          '<div class="endereco"><div class="linha"><code>' + esc(retorno) + '</code>' +
+          '<button class="copiar" data-url="' + esc(retorno) + '">copiar</button></div></div>' +
           '</section>';
         menuAtivo('btn-google');
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
+
+        document.getElementById('btn-consentir').addEventListener('click', async function () {
+          const est = document.getElementById('consentir-estado');
+          this.disabled = true;
+          est.className = 'carregando';
+          est.textContent = 'gerando o link…';
+          try {
+            const inicio = await api('/oauth/google/start');
+            location.href = inicio.url;
+          } catch (e) {
+            this.disabled = false;
+            est.className = 'st-erro';
+            est.textContent = 'não foi possível gerar o link: ' + e.message;
+          }
+        });
+
         tela.querySelectorAll('.copiar').forEach(function (b) {
           b.addEventListener('click', async function () {
             try { await navigator.clipboard.writeText(b.dataset.url); b.textContent = 'copiado'; }

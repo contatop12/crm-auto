@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
 import { exigir } from '../domain/config';
+import { ESCOPOS_GOOGLE, escoposFaltando, escoposPerdidos } from '../domain/escoposGoogle';
 
 /**
  * Consentimento do Google feito pelo proprio painel.
@@ -17,25 +18,7 @@ import { exigir } from '../domain/config';
 
 export const oauth = new Hono<{ Bindings: Env }>();
 
-const ESCOPOS = [
-  'https://www.googleapis.com/auth/tagmanager.readonly',
-  'https://www.googleapis.com/auth/tagmanager.edit.containers',
-  // Publicar sao DOIS passos e dois escopos: criar a versao e por no ar. Sem o
-  // primeiro, `create_version` volta 403 "insufficient authentication scopes" —
-  // que parece falta de permissao na conta e nao e'.
-  'https://www.googleapis.com/auth/tagmanager.edit.containerversions',
-  'https://www.googleapis.com/auth/tagmanager.publish',
-  // junto porque o refresh token novo substitui o antigo no mesmo cliente:
-  // sem isto, autorizar o GTM poderia derrubar o acesso ao Google Ads
-  'https://www.googleapis.com/auth/adwords',
-  // A conversao offline sobe pela Data Manager API, nao pela API do Google
-  // Ads: `UploadClickConversions` esta fechada para integracao nova
-  // ("Usage ... is limited to existing users"). Sem este escopo, a chamada
-  // volta 403 "insufficient authentication scopes".
-  'https://www.googleapis.com/auth/datamanager',
-  // Sem `spreadsheets`: quem escreve na planilha geral e' o n8n, com a
-  // credencial dele. Pedir escopo que nao se usa e' permissao sobrando.
-].join(' ');
+const ESCOPOS = ESCOPOS_GOOGLE.map((e) => e.escopo).join(' ');
 
 const TTL_STATE = 600; // 10 min: o consentimento e' um ato continuo
 
@@ -47,6 +30,9 @@ export function urlDeConsentimento(env: Env, redirectUri: string, state: string)
   u.searchParams.set('scope', ESCOPOS);
   u.searchParams.set('access_type', 'offline');
   u.searchParams.set('prompt', 'consent');
+  // o token novo carrega tambem o que ja foi concedido antes a este cliente:
+  // autorizar de novo acrescenta, em vez de trocar por um conjunto menor
+  u.searchParams.set('include_granted_scopes', 'true');
   u.searchParams.set('state', state);
   return u.toString();
 }
@@ -114,6 +100,26 @@ oauth.get('/oauth/google/callback', async (c) => {
     );
   }
 
+  const atual = await c.env.DB.prepare(
+    "SELECT escopos FROM credenciais WHERE chave = 'gtm_refresh_token'",
+  ).first<{ escopos: string | null }>();
+
+  // Desmarcar uma caixa na tela do Google nao da' erro: o token volta sem
+  // aquela permissao. Gravar por cima do atual trocaria algo que funciona por
+  // algo que nao funciona.
+  const perdidos = escoposPerdidos(atual?.escopos, j.scope);
+  if (perdidos.length) {
+    return c.html(
+      pagina(
+        'Nada foi alterado',
+        'Esta autorização veio sem permissões que o acesso atual já tem: ' +
+          lista(perdidos) +
+          'Comece de novo pelo painel e deixe <strong>todas as caixas marcadas</strong> na tela do Google.',
+      ),
+      400,
+    );
+  }
+
   await c.env.DB.prepare(
     `INSERT INTO credenciais (chave, valor, obtido_por, escopos, atualizado_em)
      VALUES ('gtm_refresh_token', ?, ?, ?, datetime('now'))
@@ -123,14 +129,23 @@ oauth.get('/oauth/google/callback', async (c) => {
     .bind(j.refresh_token, guardado, j.scope ?? null)
     .run();
 
-  console.log(JSON.stringify({ acao: 'oauth_gtm_concluido', por: guardado }));
+  const faltando = escoposFaltando(j.scope);
+  console.log(JSON.stringify({ acao: 'oauth_gtm_concluido', por: guardado, faltando: faltando.map((e) => e.escopo) }));
   return c.html(
-    pagina(
-      'Pronto',
-      'O acesso ao Tag Manager foi gravado. Pode fechar esta aba e voltar ao painel.',
-    ),
+    faltando.length
+      ? pagina(
+          'Gravado, mas faltou marcar',
+          'O acesso foi atualizado sem estas permissões: ' +
+            lista(faltando.map((e) => e.nome)) +
+            'Comece de novo pelo painel e marque todas as caixas na tela do Google.',
+        )
+      : pagina('Pronto', 'Todas as permissões foram concedidas. Pode fechar esta aba e voltar ao painel.'),
   );
 });
+
+function lista(itens: string[]): string {
+  return '<ul>' + itens.map((i) => `<li>${escapar(i)}</li>`).join('') + '</ul>';
+}
 
 function escapar(s: string): string {
   return s.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]!);
@@ -139,6 +154,6 @@ function escapar(s: string): string {
 function pagina(titulo: string, corpo: string): string {
   return `<!doctype html><meta charset="utf-8"><title>${titulo}</title>
 <style>body{font:15px/1.6 ui-sans-serif,system-ui,sans-serif;max-width:520px;margin:80px auto;padding:0 24px;color:#14181d}
-h1{font-size:20px;margin:0 0 8px}p{color:#5a646e}</style>
-<h1>${titulo}</h1><p>${corpo}</p>`;
+h1{font-size:20px;margin:0 0 8px}.c{color:#5a646e}</style>
+<h1>${titulo}</h1><div class="c">${corpo}</div>`;
 }
