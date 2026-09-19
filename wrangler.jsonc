@@ -39,7 +39,12 @@
     "consumers": [
       {
         "queue": "crm-auto-events",
-        "max_batch_size": 10,
+        // UM evento por execucao. O limite de chamadas externas e' por
+        // execucao, e uma conversao sozinha ja' faz ~15 (token, Data Manager,
+        // tres planilhas). Com lote de 10, a partir da quarta conversao do lote
+        // tudo falhava com "Too many subrequests". O volume e' baixo: o lote
+        // nao ganhava nada e custava conversoes.
+        "max_batch_size": 1,
         "max_batch_timeout": 5,
         // substitui o `Wait 25s` do n8n: o card do board Organico pode ainda nao
         // existir na primeira tentativa. Backoff exponencial ate 5 tentativas.
