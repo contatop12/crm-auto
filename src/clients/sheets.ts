@@ -1,12 +1,13 @@
 import type { Env } from '../env';
 import { comConta, lerChave, tokenDaConta } from './googleSa';
+import { tokenDoConsentimento } from './googleOAuth';
 
 /**
- * Google Sheets API v4, pela service account.
+ * Google Sheets API v4.
  *
- * Nao ha acesso antigo para planilhas: o consentimento OAuth nunca chegou a ter
- * o escopo `spreadsheets`. Sem acesso, o erro diz com qual e-mail a planilha
- * precisa ser compartilhada — e' a unica coisa que resolve.
+ * Primeiro pela service account; planilha que nao foi compartilhada com ela
+ * cai no consentimento OAuth, que enxerga o que a pessoa que autorizou enxerga.
+ * Sem nenhum dos dois, o erro diz com qual e-mail compartilhar.
  */
 
 const BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -28,7 +29,7 @@ export class SheetsClient {
   private async req<T>(metodo: string, caminho: string, corpo?: unknown): Promise<T> {
     const r = await comConta(
       () => tokenDaConta(this.env, ESCOPO),
-      null,
+      () => tokenDoConsentimento(this.env),
       (token) => fetch(BASE + caminho, {
         method: metodo,
         headers: {
