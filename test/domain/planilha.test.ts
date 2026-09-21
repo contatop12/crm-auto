@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, proximaSequencia, telefoneEmLink } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -304,20 +304,6 @@ describe('planilha de leads: aba Geral e aba do canal', () => {
   });
 });
 
-describe('planilha de leads: SEQUENCIA do mes', () => {
-  test('conta os leads do mesmo mes e ano e soma um', () => {
-    expect(proximaSequencia(['05/08/2026', '06/08/2026', '30/07/2026'], '07/08/2026')).toBe('03AGO');
-  });
-
-  test('mes novo recomeca do 01', () => {
-    expect(proximaSequencia(['05/08/2026'], '01/09/2026')).toBe('01SET');
-  });
-
-  test('mesmo mes de outro ano nao conta', () => {
-    expect(proximaSequencia(['05/08/2025'], '07/08/2026')).toBe('01AGO');
-  });
-});
-
 describe('planilha de leads: formato do TELEFONE', () => {
   test('coluna que o time usa como link continua link', () => {
     expect(telefoneEmLink(['https://wa.me/5511999990000', 'https://wa.me/5511888880000', '11977770000'])).toBe(true);
@@ -340,9 +326,9 @@ describe('planilha de leads: colunas que cada cliente usa', () => {
     expect(campoDaColunaLeads('FORM ID')).toBe('form_id');
   });
 
-  test('SEQUENCIA e TELEFONE em link entram na linha', () => {
+  test('SEQUENCIA fica em branco para o script da planilha; TELEFONE em link', () => {
     const r = montarRegistro(conversao, lead);
-    expect(linhaDeLeads(['SEQUENCIA', 'TELEFONE', 'NOME'], r, { sequencia: '03AGO', telefoneComoLink: true }))
-      .toEqual(['03AGO', 'https://wa.me/5511971036500', 'Amanda Constantino']);
+    expect(linhaDeLeads(['SEQUENCIA', 'TELEFONE', 'NOME'], r, { telefoneComoLink: true }))
+      .toEqual(['', 'https://wa.me/5511971036500', 'Amanda Constantino']);
   });
 });

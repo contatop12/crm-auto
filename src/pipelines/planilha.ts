@@ -3,7 +3,7 @@ import { postarNaPlanilha } from '../clients/n8n';
 import { SheetsClient } from '../clients/sheets';
 import {
   montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna, campoDaColunaLeads, jaTemTelefone,
-  abasDoLead, proximaSequencia, telefoneEmLink,
+  abasDoLead, telefoneEmLink,
   type ContextoPlanilha, type LeadDaPlanilha,
 } from '../domain/planilha';
 
@@ -83,8 +83,7 @@ export async function espelharNaPlanilha(
       aba_conversoes: cfg.sheets_aba_conversoes,
       leads_doc: cfg.sheets_leads_doc_id,
       leads_abas: {
-        // cliente configurado antes das abas por canal: a aba unica vira a Geral
-        geral: cfg.sheets_aba_geral ?? cfg.sheets_leads_aba,
+        geral: cfg.sheets_aba_geral,
         google: cfg.sheets_aba_google,
         meta: cfg.sheets_aba_meta,
       },
@@ -155,8 +154,12 @@ export async function escreverNasPlanilhas(
  * Acrescenta o lead no fim da aba, se ele ainda nao estiver nela.
  *
  * Le' a aba inteira uma vez so': dela sai o cabecalho, o teste de quem ja'
- * esta' la' (reenvio, ou gravado pelo n8n antes), a SEQUENCIA do mes e o
- * formato que o time usa no TELEFONE.
+ * esta' la' (reenvio, ou gravado pelo n8n antes) e o formato que o time usa
+ * no TELEFONE.
+ *
+ * A SEQUENCIA fica em branco de proposito: quem numera e' o script da propria
+ * planilha, o mesmo que avisa o grupo pelo fluxo "Notificacoes de Lead -
+ * Central". Escrever um numero aqui disputaria com ele.
  */
 async function acrescentarLead(
   sheets: SheetsClient,
@@ -175,12 +178,7 @@ async function acrescentarLead(
   const telefone = String(registro.telefone ?? '');
   if (telefone && jaTemTelefone([...coluna(iFone), ...coluna(iLink)], telefone)) return;
 
-  const iSeq = cab.findIndex((h) => h.trim().toLowerCase() === 'sequencia');
-  const iData = cab.findIndex((h) => campoDaColunaLeads(h) === 'data');
-  const sequencia = iSeq >= 0 ? proximaSequencia(coluna(iData), String(registro.data ?? '')) : undefined;
-
   await sheets.acrescentar(doc, aba, linhaDeLeads(cab, registro, {
-    sequencia,
     telefoneComoLink: telefoneEmLink(coluna(iFone)),
   }));
 }

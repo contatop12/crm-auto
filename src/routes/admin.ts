@@ -126,7 +126,7 @@ admin.get('/tenants/:id/planilha', async (c) => {
     banco_doc: cfg?.sheets_doc_id ?? null,
     leads_doc: cfg?.sheets_leads_doc_id ?? null,
     leads_abas: {
-      geral: cfg?.sheets_aba_geral ?? cfg?.sheets_leads_aba ?? null,
+      geral: cfg?.sheets_aba_geral ?? null,
       google: cfg?.sheets_aba_google ?? null,
       meta: cfg?.sheets_aba_meta ?? null,
     },

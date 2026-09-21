@@ -343,16 +343,17 @@ export function campoDaColunaLeads(nome: string): string | null {
 /**
  * A linha da planilha de leads, na ordem do cabecalho dela.
  *
- * `extra` traz o que depende do que ja' esta' na aba: a SEQUENCIA do mes e se
- * o time guarda o TELEFONE como link.
+ * `extra` traz o que depende do que ja' esta' na aba: se o time guarda o
+ * TELEFONE como link.
  */
 export function linhaDeLeads(
   cabecalho: string[],
   registro: Record<string, unknown>,
-  extra: { sequencia?: string; telefoneComoLink?: boolean } = {},
+  extra: { telefoneComoLink?: boolean } = {},
 ): string[] {
   return cabecalho.map((h) => {
-    if (normalizar(h) === 'sequencia') return extra.sequencia ?? '';
+    // SEQUENCIA: quem numera e' o script da planilha
+    if (normalizar(h) === 'sequencia') return '';
     const campo = campoDaColunaLeads(h);
     const usado = campo === 'telefone' && extra.telefoneComoLink ? 'link_whatsapp' : campo;
     const v = usado ? registro[usado] : '';
@@ -380,21 +381,6 @@ export function abasDoLead(
   const doCanal = plataforma === 'google' ? abas.google : plataforma === 'meta' ? abas.meta : null;
   const geral = origem === 'formulario' ? null : abas.geral;
   return [geral, doCanal].filter((a): a is string => !!a);
-}
-
-const MESES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
-
-/**
- * A SEQUENCIA do lead no mes, no formato que o time usa: `03AGO` e' o terceiro
- * lead de agosto. Conta pela coluna DATA da propria aba, no mesmo mes e ano.
- */
-export function proximaSequencia(datas: string[], data: string): string {
-  const [, mes, ano] = data.split('/');
-  const n = datas.filter((d) => {
-    const [, m, a] = String(d ?? '').trim().split('/');
-    return m === mes && a === ano;
-  }).length;
-  return String(n + 1).padStart(2, '0') + (MESES[Number(mes) - 1] ?? '');
 }
 
 /**
