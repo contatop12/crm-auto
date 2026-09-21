@@ -198,8 +198,6 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
     nome: nomeUtil(str(sender.name), { telefone, nomesProprios: [cfg.cliente] }),
     telefone,
     chave,
-    // a frase prova a origem; sem gravar, a planilha e o aviso liam 'outro'
-    plataformaDaFrase: porFrase ? porFrase.plataforma : null,
   });
 
   // A conversa ganha o protocolo AGORA, antes de mexer no Chatwoot. Gravar
@@ -583,16 +581,20 @@ async function frasesDoTenant(env: Env, tenantId: number): Promise<FraseEntrada[
 }
 
 /**
- * Preenche nome, telefone e (quando a frase provou) a plataforma do lead.
+ * Preenche nome e telefone do lead.
  *
  * `COALESCE`/vazio: o que ja' estava gravado vence. Nome ruim (emoji, o
  * telefone, o perfil da propria empresa) chega aqui como null e nao grava.
+ *
+ * A plataforma NAO e' gravada a partir da frase: o botao do site da Vita manda
+ * "vim pelo google" para qualquer visitante — a Zenaide (08/09) chegou pelo
+ * Facebook (referrer m.facebook.com) com essa mesma frase.
  */
 async function gravarContatoNoLead(
   env: Env,
   tenantId: number,
   protocolo: string,
-  c: { nome: string | null; telefone: string | null; chave: string; plataformaDaFrase: string | null },
+  c: { nome: string | null; telefone: string | null; chave: string },
 ): Promise<void> {
   const fone = normFone(c.telefone) || null;
   await env.DB.prepare(
@@ -601,13 +603,11 @@ async function gravarContatoNoLead(
        phone_raw  = COALESCE(phone_raw, ?),
        phone_e164 = COALESCE(phone_e164, ?),
        phone_key  = COALESCE(phone_key, ?),
-       utm_source = CASE WHEN (utm_source IS NULL OR utm_source = '') AND ? IS NOT NULL THEN ? ELSE utm_source END,
        updated_at = datetime('now')
      WHERE tenant_id = ? AND protocol = ?`,
   )
     .bind(
       c.nome, c.telefone, fone, c.chave || null,
-      c.plataformaDaFrase, c.plataformaDaFrase,
       tenantId, protocolo,
     )
     .run()
