@@ -24,6 +24,11 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'plataforma', rotulo: 'Plataforma (google / meta)' },
   { campo: 'campanha', rotulo: 'Campanha' },
   { campo: 'pagina', rotulo: 'Página de entrada, sem domínio' },
+  { campo: 'pagina_slug', rotulo: 'Página de entrada, sem a barra (coluna URL)' },
+  { campo: 'quiz_version', rotulo: 'Versão do quiz' },
+  { campo: 'form_id', rotulo: 'FORM ID do quiz' },
+  { campo: 'anuncio', rotulo: 'Anúncio do Meta (título)' },
+  { campo: 'link_anuncio', rotulo: 'Link do anúncio do Meta (post)' },
   { campo: 'protocolo', rotulo: 'Protocolo' },
   { campo: 'nome', rotulo: 'Nome do lead' },
   { campo: 'telefone', rotulo: 'Telefone (55 + DDD + número)' },
@@ -76,7 +81,12 @@ export interface LeadDaPlanilha {
 }
 
 export interface ContextoPlanilha {
-  tipo: 'clique' | 'conversao';
+  /**
+   * `entrada`: o lead entrou no funil sem conversao do Google — o da campanha
+   * de mensagem do Meta. Vai para a planilha de leads na hora, porque nao ha'
+   * conversao depois para levar ele ate' la'.
+   */
+  tipo: 'clique' | 'conversao' | 'entrada';
   cliente: string;
   protocolo: string;
   ensaio: boolean;
@@ -225,6 +235,14 @@ export function montarRegistro(
     plataforma,
     campanha: t(lead?.utm_campaign),
     pagina: caminho(lead?.page_url),
+    pagina_slug: caminho(lead?.page_url).replace(/^\/+|\/+$/g, ''),
+    quiz_version: t(lead?.quiz_version),
+    form_id: t(lead?.quiz_form_id),
+    // o lead da campanha de mensagem do Meta guarda o anuncio: titulo em
+    // utm_content e o post em page_url
+    anuncio: plataforma === 'meta' ? t(lead?.utm_content) : '',
+    link_anuncio: plataforma === 'meta' && /instagram\.com|fb\.me|facebook\.com/i.test(t(lead?.page_url))
+      ? t(lead?.page_url) : '',
     protocolo: ctx.protocolo,
     nome: t(lead?.nome),
     // a planilha de leads ja' guardava o numero assim (5511...), sem o `+`
@@ -308,6 +326,13 @@ const COLUNAS_LEADS: Record<string, string> = {
   'pagina': 'pagina',
   'campanha': 'campanha',
   'protocolo': 'protocolo',
+  // Locadora: a coluna URL guarda a pagina de entrada, `landing-page-andaimes-itaquera`
+  'url': 'pagina_slug',
+  // Persianas: a Geral nasceu para o quiz
+  'versao do quiz': 'quiz_version',
+  'form id': 'form_id',
+  'anuncio': 'anuncio',
+  'link do anuncio': 'link_anuncio',
 };
 
 /** Qual campo vai numa coluna da planilha de leads, ou null se e' do time. */
@@ -315,13 +340,73 @@ export function campoDaColunaLeads(nome: string): string | null {
   return COLUNAS_LEADS[normalizar(nome)] ?? null;
 }
 
-/** A linha da planilha de leads, na ordem do cabecalho dela. */
-export function linhaDeLeads(cabecalho: string[], registro: Record<string, unknown>): string[] {
+/**
+ * A linha da planilha de leads, na ordem do cabecalho dela.
+ *
+ * `extra` traz o que depende do que ja' esta' na aba: a SEQUENCIA do mes e se
+ * o time guarda o TELEFONE como link.
+ */
+export function linhaDeLeads(
+  cabecalho: string[],
+  registro: Record<string, unknown>,
+  extra: { sequencia?: string; telefoneComoLink?: boolean } = {},
+): string[] {
   return cabecalho.map((h) => {
+    if (normalizar(h) === 'sequencia') return extra.sequencia ?? '';
     const campo = campoDaColunaLeads(h);
-    const v = campo ? registro[campo] : '';
+    const usado = campo === 'telefone' && extra.telefoneComoLink ? 'link_whatsapp' : campo;
+    const v = usado ? registro[usado] : '';
     return v === null || v === undefined ? '' : String(v);
   });
+}
+
+/**
+ * Em quais abas da planilha de leads o lead entra: a Geral e a do canal dele.
+ *
+ * Lead do Google vai para a Geral e para a "Google Mensagem"; o da campanha de
+ * mensagem do Meta, para a Geral e para a do Meta. Cliente sem a aba do canal
+ * (a Vita so' tem a Geral) fica so' com a Geral.
+ *
+ * Lead de FORMULARIO nao entra na Geral: quem grava ele la' e' a automacao do
+ * formulario (quiz da Persianas, formularios do site da Tainã), com as
+ * respostas que o sistema nao tem. Gravar de novo aqui duplicaria a linha.
+ * Ele so' entra na aba do canal quando chama no WhatsApp, como sempre foi.
+ */
+export function abasDoLead(
+  abas: { geral: string | null; google: string | null; meta: string | null },
+  plataforma: string,
+  origem: string = 'mensagem',
+): string[] {
+  const doCanal = plataforma === 'google' ? abas.google : plataforma === 'meta' ? abas.meta : null;
+  const geral = origem === 'formulario' ? null : abas.geral;
+  return [geral, doCanal].filter((a): a is string => !!a);
+}
+
+const MESES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+
+/**
+ * A SEQUENCIA do lead no mes, no formato que o time usa: `03AGO` e' o terceiro
+ * lead de agosto. Conta pela coluna DATA da propria aba, no mesmo mes e ano.
+ */
+export function proximaSequencia(datas: string[], data: string): string {
+  const [, mes, ano] = data.split('/');
+  const n = datas.filter((d) => {
+    const [, m, a] = String(d ?? '').trim().split('/');
+    return m === mes && a === ano;
+  }).length;
+  return String(n + 1).padStart(2, '0') + (MESES[Number(mes) - 1] ?? '');
+}
+
+/**
+ * O time guarda o TELEFONE como link (`https://wa.me/55...`) nesta aba?
+ *
+ * Decide pelas ultimas linhas: a Geral da Locadora e a da Persianas usam o
+ * link, que abre a conversa com um clique; as outras abas usam o numero.
+ */
+export function telefoneEmLink(valores: string[]): boolean {
+  const ultimos = valores.map((v) => String(v ?? '').trim()).filter(Boolean).slice(-20);
+  if (!ultimos.length) return false;
+  return ultimos.filter((v) => /wa\.me\//i.test(v)).length * 2 > ultimos.length;
 }
 
 /**

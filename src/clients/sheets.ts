@@ -65,6 +65,12 @@ export class SheetsClient {
     };
   }
 
+  /** A aba inteira, linha a linha. Uma chamada so' em vez de cabecalho + colunas. */
+  async tudo(doc: string, aba: string): Promise<string[][]> {
+    const j = await this.req<{ values?: string[][] }>('GET', `/${doc}/values/${intervalo(aba, 'A:ZZ')}`);
+    return (j.values ?? []).map((l) => l.map((v) => String(v)));
+  }
+
   /** A primeira linha da aba. */
   async cabecalho(doc: string, aba: string): Promise<string[]> {
     const j = await this.req<{ values?: string[][] }>('GET', `/${doc}/values/${intervalo(aba, '1:1')}`);

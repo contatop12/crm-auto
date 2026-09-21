@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, proximaSequencia, telefoneEmLink } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -277,5 +277,72 @@ describe('planilha de leads: uma linha por lead', () => {
 
   test('sem telefone nao ha como saber: nao bloqueia', () => {
     expect(jaTemTelefone(['5511971036500'], '')).toBe(false);
+  });
+});
+
+describe('planilha de leads: aba Geral e aba do canal', () => {
+  const abas = { geral: 'Geral', google: 'Google Mensagem', meta: 'Meta Mensagem' };
+
+  test('lead do Google vai para a Geral e para a do Google', () => {
+    expect(abasDoLead(abas, 'google')).toEqual(['Geral', 'Google Mensagem']);
+  });
+
+  test('lead do Meta vai para a Geral e para a do Meta', () => {
+    expect(abasDoLead(abas, 'meta')).toEqual(['Geral', 'Meta Mensagem']);
+  });
+
+  test('cliente sem aba do canal fica so na Geral', () => {
+    expect(abasDoLead({ geral: 'Geral', google: null, meta: null }, 'google')).toEqual(['Geral']);
+  });
+
+  test('lead de formulario nao entra na Geral: a automacao do formulario ja grava la', () => {
+    expect(abasDoLead(abas, 'google', 'formulario')).toEqual(['Google Mensagem']);
+  });
+
+  test('sem Geral configurada, so a do canal', () => {
+    expect(abasDoLead({ geral: null, google: 'Google Mensagem', meta: null }, 'google')).toEqual(['Google Mensagem']);
+  });
+});
+
+describe('planilha de leads: SEQUENCIA do mes', () => {
+  test('conta os leads do mesmo mes e ano e soma um', () => {
+    expect(proximaSequencia(['05/08/2026', '06/08/2026', '30/07/2026'], '07/08/2026')).toBe('03AGO');
+  });
+
+  test('mes novo recomeca do 01', () => {
+    expect(proximaSequencia(['05/08/2026'], '01/09/2026')).toBe('01SET');
+  });
+
+  test('mesmo mes de outro ano nao conta', () => {
+    expect(proximaSequencia(['05/08/2025'], '07/08/2026')).toBe('01AGO');
+  });
+});
+
+describe('planilha de leads: formato do TELEFONE', () => {
+  test('coluna que o time usa como link continua link', () => {
+    expect(telefoneEmLink(['https://wa.me/5511999990000', 'https://wa.me/5511888880000', '11977770000'])).toBe(true);
+  });
+
+  test('coluna de numero continua numero', () => {
+    expect(telefoneEmLink(['5511999990000', '5511888880000'])).toBe(false);
+    expect(telefoneEmLink([])).toBe(false);
+  });
+});
+
+describe('planilha de leads: colunas que cada cliente usa', () => {
+  test('URL da Locadora e a pagina, sem a barra', () => {
+    expect(campoDaColunaLeads('URL')).toBe('pagina_slug');
+    expect(montarRegistro(conversao, lead).pagina_slug).toBe('cortinas');
+  });
+
+  test('versao do quiz e form id da Persianas', () => {
+    expect(campoDaColunaLeads('Versão do Quiz')).toBe('quiz_version');
+    expect(campoDaColunaLeads('FORM ID')).toBe('form_id');
+  });
+
+  test('SEQUENCIA e TELEFONE em link entram na linha', () => {
+    const r = montarRegistro(conversao, lead);
+    expect(linhaDeLeads(['SEQUENCIA', 'TELEFONE', 'NOME'], r, { sequencia: '03AGO', telefoneComoLink: true }))
+      .toEqual(['03AGO', 'https://wa.me/5511971036500', 'Amanda Constantino']);
   });
 });

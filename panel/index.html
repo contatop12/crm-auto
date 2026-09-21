@@ -2601,6 +2601,12 @@
        * da coluna e a planilha de leads pelos nomes que os clientes já usam.
        * "Conferir acesso" mostra, antes de ligar, o que cada coluna vai receber.
        */
+      function seletorDeAba(idSel, rotulo, atual) {
+        return '<div class="campo"><label for="' + idSel + '">' + esc(rotulo) + '</label>' +
+          '<select id="' + idSel + '"><option value="' + esc(atual || '') + '">' +
+          esc(atual || '— nenhuma —') + '</option></select></div>';
+      }
+
       async function carregarPlanilha(id) {
         const alvo = document.getElementById('planilha');
         if (!alvo) return;
@@ -2626,11 +2632,13 @@
           '<div id="pl-sistema">' +
             '<div class="campo"><label for="pl-banco">Banco de Dados (abas Cliques e Conversoes)</label>' +
             '<input id="pl-banco" value="' + esc(url(r.banco_doc)) + '" placeholder="cole a URL da planilha" /></div>' +
+            '<div class="campo"><label for="pl-leads">Planilha geral de leads</label>' +
+            '<input id="pl-leads" value="' + esc(url(r.leads_doc)) + '" placeholder="cole a URL da planilha" /></div>' +
+            // o lead entra na Geral e na aba do canal de onde veio
             '<div class="grade">' +
-              '<div class="campo"><label for="pl-leads">Planilha geral de leads</label>' +
-              '<input id="pl-leads" value="' + esc(url(r.leads_doc)) + '" placeholder="cole a URL da planilha" /></div>' +
-              '<div class="campo"><label for="pl-aba">Aba</label>' +
-              '<select id="pl-aba"><option value="' + esc(r.leads_aba || '') + '">' + esc(r.leads_aba || '— confira o acesso —') + '</option></select></div>' +
+              seletorDeAba('pl-aba-geral', 'Aba Geral (todo lead)', r.leads_abas.geral) +
+              seletorDeAba('pl-aba-google', 'Aba do Google (mensagem)', r.leads_abas.google) +
+              seletorDeAba('pl-aba-meta', 'Aba do Meta (mensagem)', r.leads_abas.meta) +
             '</div>' +
             '<p class="dica">' + (r.conta_servico
               ? 'Compartilhe as duas planilhas com <code>' + esc(r.conta_servico) + '</code> como <strong>Editor</strong>.'
@@ -2646,7 +2654,7 @@
           '</div>' +
 
           '<div class="campo"><label><input type="checkbox" id="pl-ativo"' + (r.ativo ? ' checked' : '') + ' /> ' +
-            'Escrever nas planilhas a cada clique e a cada conversão enviada ao Google</label>' +
+            'Escrever nas planilhas a cada clique, a cada conversão enviada ao Google e a cada lead do Meta</label>' +
             '<p class="dica">Desligado, nada é escrito. Falha na planilha nunca derruba o lead nem a conversão.</p></div>' +
           '<div class="linha-acoes">' +
             '<button id="pl-salvar" class="principal">Salvar</button>' +
@@ -2669,7 +2677,11 @@
             url: document.getElementById('pl-url').value,
             banco_doc: document.getElementById('pl-banco').value,
             leads_doc: document.getElementById('pl-leads').value,
-            leads_aba: document.getElementById('pl-aba').value,
+            leads_abas: {
+              geral: document.getElementById('pl-aba-geral').value,
+              google: document.getElementById('pl-aba-google').value,
+              meta: document.getElementById('pl-aba-meta').value,
+            },
           };
         };
 
@@ -2680,7 +2692,8 @@
           let c;
           try {
             c = await api('/tenants/' + id + '/planilha/conferir?banco=' + encodeURIComponent(v.banco_doc) +
-              '&leads=' + encodeURIComponent(v.leads_doc) + '&aba=' + encodeURIComponent(v.leads_aba));
+              '&leads=' + encodeURIComponent(v.leads_doc) + '&abas=' +
+              encodeURIComponent([v.leads_abas.geral, v.leads_abas.google, v.leads_abas.meta].filter(Boolean).join(',')));
           } catch (e) {
             saida.innerHTML = '<p class="st-erro">' + esc(e.message) + '</p>';
             return;
@@ -2704,21 +2717,26 @@
               html += '<p class="st-erro">Planilha de leads: ' + esc(c.leads.erro) + '</p>';
             } else {
               // as abas reais substituem o que estava salvo: digitar nome de aba erra
-              const sel = document.getElementById('pl-aba');
-              const antes = sel.value;
-              sel.innerHTML = '<option value="">— escolha a aba —</option>' + c.leads.abas.map(function (a) {
-                return '<option' + (a === antes ? ' selected' : '') + '>' + esc(a) + '</option>';
-              }).join('');
-              html += '<p><span class="st-ok">abre</span> <strong>' + esc(c.leads.titulo) + '</strong>' +
-                (c.leads.aba ? ' · aba ' + esc(c.leads.aba) : ' · <span class="st-erro">escolha a aba e confira de novo</span>') + '</p>';
-              if (c.leads.colunas.length) {
-                html += '<table><thead><tr><th>Coluna</th><th>Recebe</th></tr></thead><tbody>' +
-                  c.leads.colunas.map(function (col) {
+              ['pl-aba-geral', 'pl-aba-google', 'pl-aba-meta'].forEach(function (idSel) {
+                const sel = document.getElementById(idSel);
+                const antes = sel.value;
+                sel.innerHTML = '<option value="">— nenhuma —</option>' + c.leads.abas.map(function (a) {
+                  return '<option' + (a === antes ? ' selected' : '') + '>' + esc(a) + '</option>';
+                }).join('');
+              });
+              html += '<p><span class="st-ok">abre</span> <strong>' + esc(c.leads.titulo) + '</strong></p>';
+              if (c.leads.faltando.length) {
+                html += '<p class="st-erro">abas que não existem na planilha: ' + esc(c.leads.faltando.join(', ')) + '</p>';
+              }
+              c.leads.por_aba.forEach(function (a) {
+                html += '<h3 style="margin:var(--e2) 0 var(--e1);font-size:13px">' + esc(a.aba) + '</h3>' +
+                  '<table><thead><tr><th>Coluna</th><th>Recebe</th></tr></thead><tbody>' +
+                  a.colunas.map(function (col) {
                     return '<tr><td>' + esc(col.nome) + '</td><td>' +
                       (col.campo ? '<code>' + esc(col.campo) + '</code>' : '<span class="nada">preenchida pelo time</span>') +
                       '</td></tr>';
                   }).join('') + '</tbody></table>';
-              }
+              });
             }
           }
           saida.innerHTML = html || '<p class="carregando">cole a URL de pelo menos uma planilha</p>';

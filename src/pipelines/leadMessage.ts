@@ -9,7 +9,9 @@ import { detectPlatform, detectOrigin, classifyCampaign } from '../domain/platfo
 import { buildLabels } from '../domain/labels';
 import { utmsDoCard, precisaResolverNome } from '../domain/padroes';
 import { casarFraseDeEntrada, protocoloDaFrase, type FraseEntrada } from '../domain/frasesEntrada';
+import { anuncioDoMeta, protocoloDoAnuncio, type AnuncioMeta } from '../domain/anuncioMeta';
 import { enviarConversao } from './stageChanged';
+import { espelharNaPlanilha } from './planilha';
 import type { LabelVocabulary, LeadCandidate } from '../domain/types';
 
 /**
@@ -46,6 +48,7 @@ interface Config {
   ga_customer_id: string | null;
   janela_match_dias: number | null;
   gtm_prefixo: string | null;
+  rastrear_meta_mensagem: number | null;
 }
 
 interface LinhaLead {
@@ -80,7 +83,8 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   if (!conversaId) return { status: 'ignorado', motivo: 'payload sem conversa' };
 
   const cfg = await env.DB.prepare(
-    `SELECT cw_account_id, evo_instancia, ga_customer_id, janela_match_dias, gtm_prefixo
+    `SELECT cw_account_id, evo_instancia, ga_customer_id, janela_match_dias, gtm_prefixo,
+            rastrear_meta_mensagem
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(tenantId)
@@ -101,11 +105,18 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   const telefone = str(sender.phone_number) ?? str(attrs.phone_lead);
   const chave = phoneKey(telefone);
 
-  // 1) protocolo na mensagem  2) telefone dentro da janela
+  // 1) protocolo na mensagem  2) cartao do anuncio do Meta  3) telefone na janela
+  //
+  // O cartao do anuncio vem antes do telefone: ele prova de onde a conversa
+  // veio AGORA. Casar pelo telefone atribuiria ao Google quem clicou num
+  // anuncio do Google meses atras e hoje chegou pelo Instagram.
   const protocoloDito = findProtocol(texto);
+  const anuncio = !protocoloDito && cfg.rastrear_meta_mensagem === 1 ? anuncioDoMeta(texto) : null;
   const leadDoClique = protocoloDito
     ? await porProtocolo(env, tenantId, protocoloDito)
-    : await porTelefone(env, tenantId, chave, cfg.janela_match_dias ?? 90);
+    : anuncio
+      ? await leadDoAnuncio(env, tenantId, anuncio, { telefone, chave, conversaId, prefixo: cfg.gtm_prefixo })
+      : await porTelefone(env, tenantId, chave, cfg.janela_match_dias ?? 90);
 
   /**
    * Ultimo recurso: a frase do anuncio.
@@ -230,11 +241,22 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
     await dispararConversaoDeEntrada(env, tenantId, lead.protocol, conversaId);
   }
 
+  // O lead do Meta nao tem conversao do Google para leva-lo ate' as planilhas
+  // (e' a conversao de entrada que grava a linha do Google). Entra aqui, na
+  // Geral e na aba do Meta.
+  if (promover && plataforma === 'meta' && cfg.rastrear_meta_mensagem === 1) {
+    await espelharNaPlanilha(env, tenantId, { tipo: 'entrada', protocolo: lead.protocol, ensaio: false })
+      .catch((e: Error) => {
+        console.log(JSON.stringify({ acao: 'planilha_falhou', tipo: 'entrada', protocolo: lead.protocol, erro: e.message }));
+      });
+  }
+
   const vocab = await vocabulario(env, tenantId);
   const etiquetas = buildLabels(
     {
       origem,
       plataforma,
+      utmSource: lead.utm_source,
       campanhaSlug: campanha.slug,
       quizVersion: lead.quiz_version,
       quizValor: lead.quiz_valor,
@@ -453,6 +475,48 @@ async function leadDaFrase(
     origem: casou.origem, evento: 'frase_entrada',
     email: null, quiz_version: null, quiz_valor: null,
   } as LinhaLead;
+}
+
+/**
+ * Cria o lead da campanha de mensagem do Meta a partir do cartao do anuncio.
+ *
+ * `utm_source` guarda a rede (instagram/facebook): e' o que a trava do Google
+ * reconhece como Meta — a conversao do Google nao recebe este lead — e o que
+ * vira a etiqueta. O anuncio fica no lead: titulo em `utm_content`, post em
+ * `page_url`, para a planilha e para quem quiser saber qual criativo trouxe.
+ */
+async function leadDoAnuncio(
+  env: Env,
+  tenantId: number,
+  anuncio: AnuncioMeta,
+  ctx: { telefone: string | null; chave: string | null; conversaId: number; prefixo: string | null },
+): Promise<LinhaLead> {
+  const protocolo = protocoloDoAnuncio(ctx.prefixo ?? '', ctx.conversaId);
+  await env.DB.prepare(
+    `INSERT INTO leads (tenant_id, protocol, phone_raw, phone_e164, phone_key,
+                        utm_source, utm_medium, utm_content, page_url, origem, evento)
+     VALUES (?, ?, ?, ?, ?, ?, 'mensagem', ?, ?, 'mensagem', 'anuncio_meta')
+     ON CONFLICT (tenant_id, protocol) DO UPDATE SET
+       phone_e164 = COALESCE(excluded.phone_e164, leads.phone_e164),
+       phone_key  = COALESCE(excluded.phone_key, leads.phone_key),
+       updated_at = datetime('now')`,
+  )
+    .bind(tenantId, protocolo, ctx.telefone, normFone(ctx.telefone) || null, ctx.chave || null,
+      anuncio.rede, anuncio.titulo, anuncio.link)
+    .run();
+
+  console.log(JSON.stringify({ acao: 'lead_do_anuncio_meta', protocolo, rede: anuncio.rede }));
+
+  return {
+    protocol: protocolo,
+    nome: null,
+    gclid: null, gbraid: null, wbraid: null,
+    utm_source: anuncio.rede, utm_medium: 'mensagem', utm_campaign: null,
+    utm_id: null, utm_term: null, utm_content: anuncio.titulo,
+    fbc: null,
+    origem: 'mensagem', evento: 'anuncio_meta',
+    quiz_version: null, quiz_valor: null,
+  };
 }
 
 /** Frases de entrada do cliente. Lista curta; ler duas vezes nao doi. */

@@ -3,6 +3,7 @@ import { postarNaPlanilha } from '../clients/n8n';
 import { SheetsClient } from '../clients/sheets';
 import {
   montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna, campoDaColunaLeads, jaTemTelefone,
+  abasDoLead, proximaSequencia, telefoneEmLink,
   type ContextoPlanilha, type LeadDaPlanilha,
 } from '../domain/planilha';
 
@@ -27,7 +28,8 @@ export interface DestinoPlanilha {
   aba_cliques: string;
   aba_conversoes: string;
   leads_doc: string | null;
-  leads_aba: string | null;
+  /** Geral e a aba de cada canal. O lead entra na Geral e na do canal dele. */
+  leads_abas: { geral: string | null; google: string | null; meta: string | null };
 }
 
 interface ConfigPlanilha {
@@ -39,6 +41,9 @@ interface ConfigPlanilha {
   sheets_aba_conversoes: string;
   sheets_leads_doc_id: string | null;
   sheets_leads_aba: string | null;
+  sheets_aba_geral: string | null;
+  sheets_aba_google: string | null;
+  sheets_aba_meta: string | null;
   cliente: string;
 }
 
@@ -50,7 +55,8 @@ export async function espelharNaPlanilha(
   const cfg = await env.DB.prepare(
     `SELECT c.sheets_ativo, c.planilha_modo, c.planilha_webhook_url, c.sheets_doc_id,
             c.sheets_aba_cliques, c.sheets_aba_conversoes, c.sheets_leads_doc_id,
-            c.sheets_leads_aba, t.nome AS cliente
+            c.sheets_leads_aba, c.sheets_aba_geral, c.sheets_aba_google, c.sheets_aba_meta,
+            t.nome AS cliente
      FROM tenant_config c JOIN tenants t ON t.id = c.tenant_id WHERE c.tenant_id = ?`,
   )
     .bind(tenantId)
@@ -76,7 +82,12 @@ export async function espelharNaPlanilha(
       aba_cliques: cfg.sheets_aba_cliques,
       aba_conversoes: cfg.sheets_aba_conversoes,
       leads_doc: cfg.sheets_leads_doc_id,
-      leads_aba: cfg.sheets_leads_aba,
+      leads_abas: {
+        // cliente configurado antes das abas por canal: a aba unica vira a Geral
+        geral: cfg.sheets_aba_geral ?? cfg.sheets_leads_aba,
+        google: cfg.sheets_aba_google,
+        meta: cfg.sheets_aba_meta,
+      },
     }, registro);
     console.log(JSON.stringify({ acao: 'planilha_ok', modo: 'sistema', tipo: ctx.tipo, protocolo: ctx.protocolo, abas: gravado }));
     return;
@@ -124,30 +135,54 @@ export async function escreverNasPlanilhas(
     await tentar(destino.aba_cliques, () => gravarPorProtocolo(sheets, banco, destino.aba_cliques, registro.cliques));
   }
 
-  if (destino.leads_doc && destino.leads_aba && registro.conversao === 'conversa') {
+  // Planilha de leads: uma linha por lead, quando ele entra — a conversao de
+  // entrada do Google, ou a entrada do lead do Meta, que nao tem conversao.
+  const entrou = registro.conversao === 'conversa' || registro.tipo === 'entrada';
+  if (destino.leads_doc && entrou) {
     const doc = destino.leads_doc;
-    const aba = destino.leads_aba;
-    await tentar(aba, async () => {
-      const cab = await sheets.cabecalho(doc, aba);
-      if (!cab.length) throw new Error(`a aba "${aba}" esta sem cabecalho na primeira linha`);
-
-      // uma linha por lead: quem ja' esta' na planilha (reenvio, ou gravado
-      // pelo n8n antes) nao ganha outra
-      const telefone = String(registro.telefone ?? '');
-      const iFone = cab.findIndex((h) => campoDaColunaLeads(h) === 'telefone');
-      const iLink = cab.findIndex((h) => campoDaColunaLeads(h) === 'link_whatsapp');
-      const iCol = iFone >= 0 ? iFone : iLink;
-      if (telefone && iCol >= 0 && jaTemTelefone(await sheets.coluna(doc, aba, indiceParaColuna(iCol)), telefone)) {
-        return;
-      }
-      await sheets.acrescentar(doc, aba, linhaDeLeads(cab, registro));
-    });
+    for (const aba of abasDoLead(destino.leads_abas, String(registro.plataforma ?? ''), registro.cliques.origem)) {
+      await tentar(aba, () => acrescentarLead(sheets, doc, aba, registro));
+    }
   }
 
   if (falhas.length) {
     throw new Error(`${falhas.join(' | ')}${feitas.length ? ` (gravou: ${feitas.join(', ')})` : ''}`);
   }
   return feitas;
+}
+
+/**
+ * Acrescenta o lead no fim da aba, se ele ainda nao estiver nela.
+ *
+ * Le' a aba inteira uma vez so': dela sai o cabecalho, o teste de quem ja'
+ * esta' la' (reenvio, ou gravado pelo n8n antes), a SEQUENCIA do mes e o
+ * formato que o time usa no TELEFONE.
+ */
+async function acrescentarLead(
+  sheets: SheetsClient,
+  doc: string,
+  aba: string,
+  registro: Record<string, unknown>,
+): Promise<void> {
+  const linhas = await sheets.tudo(doc, aba);
+  const cab = linhas[0] ?? [];
+  if (!cab.length) throw new Error(`a aba "${aba}" esta sem cabecalho na primeira linha`);
+  const corpo = linhas.slice(1);
+  const coluna = (i: number) => (i < 0 ? [] : corpo.map((l) => l[i] ?? ''));
+
+  const iFone = cab.findIndex((h) => campoDaColunaLeads(h) === 'telefone');
+  const iLink = cab.findIndex((h) => campoDaColunaLeads(h) === 'link_whatsapp');
+  const telefone = String(registro.telefone ?? '');
+  if (telefone && jaTemTelefone([...coluna(iFone), ...coluna(iLink)], telefone)) return;
+
+  const iSeq = cab.findIndex((h) => h.trim().toLowerCase() === 'sequencia');
+  const iData = cab.findIndex((h) => campoDaColunaLeads(h) === 'data');
+  const sequencia = iSeq >= 0 ? proximaSequencia(coluna(iData), String(registro.data ?? '')) : undefined;
+
+  await sheets.acrescentar(doc, aba, linhaDeLeads(cab, registro, {
+    sequencia,
+    telefoneComoLink: telefoneEmLink(coluna(iFone)),
+  }));
 }
 
 /**

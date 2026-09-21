@@ -109,13 +109,14 @@ admin.get('/tenants/:id/planilha', async (c) => {
   const id = Number(c.req.param('id'));
   const cfg = await c.env.DB.prepare(
     `SELECT sheets_ativo, planilha_modo, planilha_webhook_url, sheets_doc_id,
-            sheets_leads_doc_id, sheets_leads_aba
+            sheets_leads_doc_id, sheets_leads_aba, sheets_aba_geral, sheets_aba_google, sheets_aba_meta
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(id)
     .first<{
       sheets_ativo: number; planilha_modo: string; planilha_webhook_url: string | null;
       sheets_doc_id: string | null; sheets_leads_doc_id: string | null; sheets_leads_aba: string | null;
+      sheets_aba_geral: string | null; sheets_aba_google: string | null; sheets_aba_meta: string | null;
     }>();
 
   return c.json({
@@ -124,7 +125,11 @@ admin.get('/tenants/:id/planilha', async (c) => {
     url: cfg?.planilha_webhook_url ?? null,
     banco_doc: cfg?.sheets_doc_id ?? null,
     leads_doc: cfg?.sheets_leads_doc_id ?? null,
-    leads_aba: cfg?.sheets_leads_aba ?? null,
+    leads_abas: {
+      geral: cfg?.sheets_aba_geral ?? cfg?.sheets_leads_aba ?? null,
+      google: cfg?.sheets_aba_google ?? null,
+      meta: cfg?.sheets_aba_meta ?? null,
+    },
     conta_servico: SheetsClient.email(c.env),
     campos: CAMPOS_PLANILHA,
   });
@@ -134,7 +139,8 @@ admin.put('/tenants/:id/planilha', async (c) => {
   const id = Number(c.req.param('id'));
   const b = await c.req.json<{
     ativo?: boolean; modo?: string; url?: string;
-    banco_doc?: string; leads_doc?: string; leads_aba?: string;
+    banco_doc?: string; leads_doc?: string;
+    leads_abas?: { geral?: string; google?: string; meta?: string };
   }>();
 
   const modo = b.modo === 'n8n' ? 'n8n' : 'sistema';
@@ -145,19 +151,25 @@ admin.put('/tenants/:id/planilha', async (c) => {
   }
   const banco = idDaPlanilha(b.banco_doc);
   const leads = idDaPlanilha(b.leads_doc);
-  const aba = String(b.leads_aba ?? '').trim() || null;
+  const nomeDaAba = (v: string | undefined) => String(v ?? '').trim() || null;
+  const abas = {
+    geral: nomeDaAba(b.leads_abas?.geral),
+    google: nomeDaAba(b.leads_abas?.google),
+    meta: nomeDaAba(b.leads_abas?.meta),
+  };
 
   // ligar sem destino encheria o log de falha a cada lead
-  const temDestino = modo === 'n8n' ? !!url : !!(banco || (leads && aba));
+  const temDestino = modo === 'n8n' ? !!url : !!(banco || (leads && (abas.geral || abas.google || abas.meta)));
   const ativo = b.ativo && temDestino ? 1 : 0;
 
   await c.env.DB.prepare(
     `UPDATE tenant_config
      SET sheets_ativo = ?, planilha_modo = ?, planilha_webhook_url = ?, sheets_doc_id = ?,
-         sheets_leads_doc_id = ?, sheets_leads_aba = ?, updated_at = datetime('now')
+         sheets_leads_doc_id = ?, sheets_aba_geral = ?, sheets_aba_google = ?, sheets_aba_meta = ?,
+         updated_at = datetime('now')
      WHERE tenant_id = ?`,
   )
-    .bind(ativo, modo, url, banco, leads, aba, id)
+    .bind(ativo, modo, url, banco, leads, abas.geral, abas.google, abas.meta, id)
     .run();
 
   console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, modo, ativo }));
@@ -171,7 +183,8 @@ admin.put('/tenants/:id/planilha', async (c) => {
 admin.get('/tenants/:id/planilha/conferir', async (c) => {
   const banco = idDaPlanilha(c.req.query('banco'));
   const leads = idDaPlanilha(c.req.query('leads'));
-  const aba = c.req.query('aba') || '';
+  // as abas escolhidas na tela, separadas por virgula: Geral, Google, Meta
+  const escolhidas = (c.req.query('abas') || '').split(',').map((a) => a.trim()).filter(Boolean);
   const sheets = new SheetsClient(c.env);
   const exemplo = montarRegistro(
     { tipo: 'conversao', cliente: '', protocolo: 'X', ensaio: false,
@@ -210,11 +223,20 @@ admin.get('/tenants/:id/planilha/conferir', async (c) => {
   if (leads) {
     try {
       const info = await sheets.abas(leads);
-      const escolhida = aba && info.abas.includes(aba) ? aba : null;
-      const cab = escolhida ? await sheets.cabecalho(leads, escolhida) : [];
+      const porAba = [];
+      for (const aba of escolhidas.filter((a) => info.abas.includes(a))) {
+        const cab = await sheets.cabecalho(leads, aba);
+        porAba.push({
+          aba,
+          colunas: cab.map((nome) => ({
+            nome,
+            campo: nome.trim().toLowerCase() === 'sequencia' ? 'sequencia' : campoDaColunaLeads(nome),
+          })),
+        });
+      }
       saida.leads = {
-        ok: true, titulo: info.titulo, abas: info.abas, aba: escolhida,
-        colunas: cab.map((nome) => ({ nome, campo: campoDaColunaLeads(nome) })),
+        ok: true, titulo: info.titulo, abas: info.abas, por_aba: porAba,
+        faltando: escolhidas.filter((a) => !info.abas.includes(a)),
       };
     } catch (e) {
       saida.leads = { ok: false, erro: (e as Error).message };
@@ -233,7 +255,10 @@ admin.get('/tenants/:id/planilha/conferir', async (c) => {
  */
 admin.post('/tenants/:id/planilha/teste', async (c) => {
   const id = Number(c.req.param('id'));
-  const b = await c.req.json<{ modo?: string; url?: string; banco_doc?: string; leads_doc?: string; leads_aba?: string }>();
+  const b = await c.req.json<{
+    modo?: string; url?: string; banco_doc?: string; leads_doc?: string;
+    leads_abas?: { geral?: string; google?: string; meta?: string };
+  }>();
 
   const t = await c.env.DB.prepare('SELECT nome FROM tenants WHERE id = ?')
     .bind(id)
@@ -270,7 +295,12 @@ admin.post('/tenants/:id/planilha/teste', async (c) => {
     }
     const abas = await escreverNasPlanilhas(c.env, {
       banco_doc: idDaPlanilha(b.banco_doc), aba_cliques: 'Cliques', aba_conversoes: 'Conversoes',
-      leads_doc: idDaPlanilha(b.leads_doc), leads_aba: String(b.leads_aba ?? '').trim() || null,
+      leads_doc: idDaPlanilha(b.leads_doc),
+      leads_abas: {
+        geral: String(b.leads_abas?.geral ?? '').trim() || null,
+        google: String(b.leads_abas?.google ?? '').trim() || null,
+        meta: String(b.leads_abas?.meta ?? '').trim() || null,
+      },
     }, registro);
     return c.json({ ok: true, gravado: abas.length > 0, resposta: abas.length ? 'abas: ' + abas.join(', ') : 'nenhuma planilha informada' });
   } catch (e) {
