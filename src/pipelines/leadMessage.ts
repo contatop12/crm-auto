@@ -11,7 +11,9 @@ import { utmsDoCard, precisaResolverNome } from '../domain/padroes';
 import { casarFraseDeEntrada, protocoloDaFrase, type FraseEntrada } from '../domain/frasesEntrada';
 import { anuncioDoMeta, protocoloDoAnuncio, type AnuncioMeta } from '../domain/anuncioMeta';
 import { enviarConversao } from './stageChanged';
-import { espelharNaPlanilha } from './planilha';
+import { espelharNaPlanilha, gravarLeadDireto } from './planilha';
+import { nomeUtil, nomeParaExibir, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLead';
+import { decidirLeadDireto, paraMs } from '../domain/leadDireto';
 import type { LabelVocabulary, LeadCandidate } from '../domain/types';
 
 /**
@@ -49,6 +51,9 @@ interface Config {
   janela_match_dias: number | null;
   gtm_prefixo: string | null;
   rastrear_meta_mensagem: number | null;
+  numeros_proprios: string | null;
+  sheets_aba_direto: string | null;
+  cliente: string | null;
 }
 
 interface LinhaLead {
@@ -83,9 +88,9 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   if (!conversaId) return { status: 'ignorado', motivo: 'payload sem conversa' };
 
   const cfg = await env.DB.prepare(
-    `SELECT cw_account_id, evo_instancia, ga_customer_id, janela_match_dias, gtm_prefixo,
-            rastrear_meta_mensagem
-     FROM tenant_config WHERE tenant_id = ?`,
+    `SELECT c.cw_account_id, c.evo_instancia, c.ga_customer_id, c.janela_match_dias, c.gtm_prefixo,
+            c.rastrear_meta_mensagem, c.numeros_proprios, c.sheets_aba_direto, t.nome AS cliente
+     FROM tenant_config c JOIN tenants t ON t.id = c.tenant_id WHERE c.tenant_id = ?`,
   )
     .bind(tenantId)
     .first<Config>();
@@ -104,6 +109,12 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   const sender = obj(obj(conv?.meta)?.sender) ?? {};
   const telefone = str(sender.phone_number) ?? str(attrs.phone_lead);
   const chave = phoneKey(telefone);
+
+  // O segundo numero da propria clinica conversa com o principal e virou "lead"
+  // (Vita, 27/08). Mensagem de numero proprio nao e' lead, nem atribuicao.
+  if (ehNumeroProprio(telefone, lerNumerosProprios(cfg.numeros_proprios))) {
+    return { status: 'ignorado', motivo: `conversa ${conversaId} e' de um numero da propria empresa` };
+  }
 
   // 1) protocolo na mensagem  2) cartao do anuncio do Meta  3) telefone na janela
   //
@@ -131,12 +142,15 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   }));
 
   if (!lead) {
-    return {
-      status: 'ignorado',
-      motivo: protocoloDito
-        ? `protocolo ${protocoloDito} nao esta na base de cliques`
-        : `sem protocolo na mensagem, sem clique para o telefone e sem frase de entrada`,
-    };
+    const semLead = protocoloDito
+      ? `protocolo ${protocoloDito} nao esta na base de cliques`
+      : `sem protocolo na mensagem, sem clique para o telefone e sem frase de entrada`;
+    // Todo lead na planilha: quem chamou direto entra na Geral e na aba de lead
+    // direto — so' no cliente que tem essa aba, e sem aviso no grupo.
+    if (!cfg.sheets_aba_direto) return { status: 'ignorado', motivo: semLead };
+    return registrarLeadDireto(env, tenantId, p, conv, conversaId, {
+      telefone, chave, cliente: cfg.cliente, semLead,
+    });
   }
 
   const sinais = {
@@ -175,6 +189,34 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
       acao: 'origem_pela_frase', protocolo: lead.protocol, plataforma: porFrase.plataforma,
     }));
   }
+
+  // Nome e telefone do lead ficam NO LEAD. Sem isto a linha da Geral, a aba
+  // Cliques e a Conversoes saiam sem nome e sem telefone (os 12 leads da Vita de
+  // setembro estavam com os dois NULL), e a trava de duplicata por telefone era
+  // pulada. So' preenche o que esta' vazio: nao desfaz o que ja' estava certo.
+  await gravarContatoNoLead(env, tenantId, lead.protocol, {
+    nome: nomeUtil(str(sender.name), { telefone, nomesProprios: [cfg.cliente] }),
+    telefone,
+    chave,
+    // a frase prova a origem; sem gravar, a planilha e o aviso liam 'outro'
+    plataformaDaFrase: porFrase ? porFrase.plataforma : null,
+  });
+
+  // A conversa ganha o protocolo AGORA, antes de mexer no Chatwoot. Gravar
+  // atributo dispara a regra que cria o card no funil de Ads, e o webhook do
+  // card chegava antes da linha de `conversations` (gravada so' no fim) — o
+  // aviso saia "Campanha de Mensagem - Direto", sem URL, para lead do Google.
+  await env.DB.prepare(
+    `INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, phone_key, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT (tenant_id, cw_conversation_id) DO UPDATE SET
+       protocol = excluded.protocol,
+       phone_key = COALESCE(excluded.phone_key, conversations.phone_key),
+       updated_at = datetime('now')`,
+  )
+    .bind(tenantId, conversaId, lead.protocol, chave || null)
+    .run()
+    .catch(() => undefined);
 
   const cw = ChatwootClient.fromEnv(env);
   const acc = cfg.cw_account_id;
@@ -237,6 +279,16 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
   // esperar por um webhook que nao vem. O dedup de `conversions` continua
   // sendo a unica guarda contra duplicata: se o webhook um dia vier, ele
   // encontra a linha e para.
+  // Lead com protocolo mas sem anuncio (clique do site sem gclid nem UTM):
+  // nao sobe conversao, entao nada levava ele a planilha. No cliente que tem a
+  // aba de lead direto ele entra na Geral e nela; o Banco recebe o clique.
+  if (!daAds && cfg.sheets_aba_direto) {
+    await espelharNaPlanilha(env, tenantId, { tipo: 'entrada', protocolo: lead.protocol, ensaio: false })
+      .catch((e: Error) => {
+        console.log(JSON.stringify({ acao: 'planilha_falhou', tipo: 'entrada', protocolo: lead.protocol, erro: e.message }));
+      });
+  }
+
   if (promover) {
     await dispararConversaoDeEntrada(env, tenantId, lead.protocol, conversaId);
   }
@@ -528,4 +580,108 @@ async function frasesDoTenant(env: Env, tenantId: number): Promise<FraseEntrada[
     .all<FraseEntrada>()
     .catch(() => ({ results: [] as FraseEntrada[] }));
   return results;
+}
+
+/**
+ * Preenche nome, telefone e (quando a frase provou) a plataforma do lead.
+ *
+ * `COALESCE`/vazio: o que ja' estava gravado vence. Nome ruim (emoji, o
+ * telefone, o perfil da propria empresa) chega aqui como null e nao grava.
+ */
+async function gravarContatoNoLead(
+  env: Env,
+  tenantId: number,
+  protocolo: string,
+  c: { nome: string | null; telefone: string | null; chave: string; plataformaDaFrase: string | null },
+): Promise<void> {
+  const fone = normFone(c.telefone) || null;
+  await env.DB.prepare(
+    `UPDATE leads SET
+       nome       = CASE WHEN nome IS NULL OR trim(nome) = '' THEN ? ELSE nome END,
+       phone_raw  = COALESCE(phone_raw, ?),
+       phone_e164 = COALESCE(phone_e164, ?),
+       phone_key  = COALESCE(phone_key, ?),
+       utm_source = CASE WHEN (utm_source IS NULL OR utm_source = '') AND ? IS NOT NULL THEN ? ELSE utm_source END,
+       updated_at = datetime('now')
+     WHERE tenant_id = ? AND protocol = ?`,
+  )
+    .bind(
+      c.nome, c.telefone, fone, c.chave || null,
+      c.plataformaDaFrase, c.plataformaDaFrase,
+      tenantId, protocolo,
+    )
+    .run()
+    .catch((e: Error) => {
+      console.log(JSON.stringify({ acao: 'contato_no_lead_falhou', protocolo, erro: e.message }));
+    });
+}
+
+/**
+ * Quem chamou direto no WhatsApp: vai para a planilha de leads (Geral + aba de
+ * lead direto), sem Banco de Dados e sem aviso no grupo.
+ *
+ * `leads_diretos` e' a trava: a mesma conversa ou o mesmo telefone nao entram
+ * duas vezes. Falha na planilha fica marcada e volta para a fila; a
+ * retentativa acha a linha em `erro` e tenta de novo.
+ */
+async function registrarLeadDireto(
+  env: Env,
+  tenantId: number,
+  p: Record<string, unknown>,
+  conv: Record<string, unknown> | null,
+  conversaId: number,
+  ctx: { telefone: string | null; chave: string; cliente: string | null; semLead: string },
+): Promise<Resultado> {
+  const semLead = (motivo: string): Resultado => ({ status: 'ignorado', motivo: `${ctx.semLead} · ${motivo}` });
+
+  if (str(p.message_type) === 'outgoing') return semLead('mensagem da empresa');
+  const fone = normFone(ctx.telefone);
+  if (!fone || !ctx.chave) return semLead('sem telefone valido (grupo ou contato sem numero)');
+
+  const decisao = decidirLeadDireto({
+    contatoDesde: str(obj(conv?.contact_inbox)?.created_at),
+    mensagemEm: (p.created_at as string | number | undefined) ?? null,
+    primeiraRespostaEm: (conv?.first_reply_created_at as string | number | undefined) ?? null,
+  });
+  if (!decisao.lead) return semLead(decisao.motivo);
+
+  const telefone = fone.replace('+', '');
+  const sender = obj(obj(conv?.meta)?.sender) ?? {};
+  const nome = nomeParaExibir(str(sender.name), { telefone, nomesProprios: [ctx.cliente] });
+  const chegouEm = paraMs(p.created_at as string | number | undefined) ?? Date.now();
+
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO leads_diretos (tenant_id, cw_conversation_id, phone_key, nome, telefone, chegou_em)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(tenantId, conversaId, ctx.chave, nome, telefone, new Date(chegouEm).toISOString())
+    .run();
+
+  const linha = await env.DB.prepare(
+    `SELECT id, planilha_status FROM leads_diretos
+     WHERE tenant_id = ? AND (cw_conversation_id = ? OR phone_key = ?)
+     ORDER BY id LIMIT 1`,
+  )
+    .bind(tenantId, conversaId, ctx.chave)
+    .first<{ id: number; planilha_status: string }>();
+
+  if (!linha) return semLead('trava de lead direto nao gravou');
+  if (linha.planilha_status === 'ok') return semLead('lead direto ja registrado');
+
+  try {
+    const abas = await gravarLeadDireto(env, tenantId, { chegouEm, nome, telefone });
+    await env.DB.prepare(
+      `UPDATE leads_diretos SET planilha_status = 'ok', planilha_erro = NULL WHERE id = ?`,
+    ).bind(linha.id).run();
+    return {
+      status: 'ok',
+      motivo: `lead direto (sem protocolo): ${nome} · ${abas.length ? `planilha: ${abas.join(', ')}` : 'planilha desligada'} · sem aviso no grupo`,
+    };
+  } catch (e) {
+    const erro = (e as Error).message.slice(0, 300);
+    await env.DB.prepare(
+      `UPDATE leads_diretos SET planilha_status = 'erro', planilha_erro = ? WHERE id = ?`,
+    ).bind(erro, linha.id).run();
+    return { status: 'erro', motivo: `lead direto ${nome}: planilha falhou: ${erro}` };
+  }
 }

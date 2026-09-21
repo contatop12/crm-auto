@@ -24,9 +24,14 @@ type Resultado = {
   motivo: string;
   /** `false` = erro que nao melhora sozinho; fica visivel, mas sai da fila. */
   retentar?: boolean;
+  /** Ainda nao da' para decidir (ex.: card sem protocolo): espera e volta. */
+  adiar?: boolean;
 };
 
-async function processar(msg: QueueMessage, env: Env, payload: string): Promise<Resultado> {
+/** Espera de quem pediu `adiar` — o tempo de a atribuicao da conversa gravar. */
+const ESPERA_ADIADA_S = 20;
+
+async function processar(msg: QueueMessage, env: Env, payload: string, tentativa = 1): Promise<Resultado> {
   switch (msg.source) {
     case 'click':
       // cabeca da corrente: sem a linha em `leads`, o protocolo que o lead
@@ -63,7 +68,7 @@ async function processar(msg: QueueMessage, env: Env, payload: string): Promise<
       if (msg.eventType === 'kanban_conversao') {
         return enviarConversao(env, msg.tenantId, payload);
       }
-      return avisarLeadNoGrupo(env, msg.tenantId, payload);
+      return avisarLeadNoGrupo(env, msg.tenantId, payload, { tentativa });
 
     default:
       return { status: 'ignorado', motivo: `origem desconhecida: ${msg.source}` };
@@ -80,7 +85,16 @@ export async function consumir(batch: MessageBatch<QueueMessage>, env: Env): Pro
         continue;
       }
 
-      const r = await processar(m.body, env, evento.payload);
+      const r = await processar(m.body, env, evento.payload, m.attempts);
+
+      // Adiado nao e' erro: fica 'processando' (nao pinta o painel de vermelho)
+      // e volta para a fila daqui a pouco.
+      if (r.adiar) {
+        await marcarEvento(env.DB, m.body.eventId, 'processando', r.motivo);
+        m.retry({ delaySeconds: ESPERA_ADIADA_S });
+        continue;
+      }
+
       await marcarEvento(env.DB, m.body.eventId, r.status, r.motivo);
 
       // 'erro' e' falha possivelmente transitoria (Pulseboard fora do ar, por

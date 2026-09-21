@@ -119,7 +119,8 @@ admin.get('/tenants/:id/planilha', async (c) => {
   const id = Number(c.req.param('id'));
   const cfg = await c.env.DB.prepare(
     `SELECT sheets_ativo, planilha_modo, planilha_webhook_url, sheets_doc_id,
-            sheets_leads_doc_id, sheets_leads_aba, sheets_aba_geral, sheets_aba_google, sheets_aba_meta
+            sheets_leads_doc_id, sheets_leads_aba, sheets_aba_geral, sheets_aba_google, sheets_aba_meta,
+            sheets_aba_direto
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(id)
@@ -127,6 +128,7 @@ admin.get('/tenants/:id/planilha', async (c) => {
       sheets_ativo: number; planilha_modo: string; planilha_webhook_url: string | null;
       sheets_doc_id: string | null; sheets_leads_doc_id: string | null; sheets_leads_aba: string | null;
       sheets_aba_geral: string | null; sheets_aba_google: string | null; sheets_aba_meta: string | null;
+      sheets_aba_direto: string | null;
     }>();
 
   return c.json({
@@ -139,6 +141,7 @@ admin.get('/tenants/:id/planilha', async (c) => {
       geral: cfg?.sheets_aba_geral ?? null,
       google: cfg?.sheets_aba_google ?? null,
       meta: cfg?.sheets_aba_meta ?? null,
+      direto: cfg?.sheets_aba_direto ?? null,
     },
     conta_servico: SheetsClient.email(c.env),
     campos: CAMPOS_PLANILHA,
@@ -150,7 +153,7 @@ admin.put('/tenants/:id/planilha', async (c) => {
   const b = await c.req.json<{
     ativo?: boolean; modo?: string; url?: string;
     banco_doc?: string; leads_doc?: string;
-    leads_abas?: { geral?: string; google?: string; meta?: string };
+    leads_abas?: { geral?: string; google?: string; meta?: string; direto?: string };
   }>();
 
   const modo = b.modo === 'n8n' ? 'n8n' : 'sistema';
@@ -167,6 +170,9 @@ admin.put('/tenants/:id/planilha', async (c) => {
     google: nomeDaAba(b.leads_abas?.google),
     meta: nomeDaAba(b.leads_abas?.meta),
   };
+  // tela antiga (sem o campo) nao apaga a aba de lead direto ja' configurada
+  const mexeNoDireto = b.leads_abas !== undefined && 'direto' in b.leads_abas;
+  const direto = nomeDaAba(b.leads_abas?.direto);
 
   // ligar sem destino encheria o log de falha a cada lead
   const temDestino = modo === 'n8n' ? !!url : !!(banco || (leads && (abas.geral || abas.google || abas.meta)));
@@ -176,10 +182,11 @@ admin.put('/tenants/:id/planilha', async (c) => {
     `UPDATE tenant_config
      SET sheets_ativo = ?, planilha_modo = ?, planilha_webhook_url = ?, sheets_doc_id = ?,
          sheets_leads_doc_id = ?, sheets_aba_geral = ?, sheets_aba_google = ?, sheets_aba_meta = ?,
+         sheets_aba_direto = CASE WHEN ? = 1 THEN ? ELSE sheets_aba_direto END,
          updated_at = datetime('now')
      WHERE tenant_id = ?`,
   )
-    .bind(ativo, modo, url, banco, leads, abas.geral, abas.google, abas.meta, id)
+    .bind(ativo, modo, url, banco, leads, abas.geral, abas.google, abas.meta, mexeNoDireto ? 1 : 0, direto, id)
     .run();
 
   console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, modo, ativo }));
@@ -267,7 +274,7 @@ admin.post('/tenants/:id/planilha/teste', async (c) => {
   const id = Number(c.req.param('id'));
   const b = await c.req.json<{
     modo?: string; url?: string; banco_doc?: string; leads_doc?: string;
-    leads_abas?: { geral?: string; google?: string; meta?: string };
+    leads_abas?: { geral?: string; google?: string; meta?: string; direto?: string };
   }>();
 
   const t = await c.env.DB.prepare('SELECT nome FROM tenants WHERE id = ?')
@@ -310,6 +317,7 @@ admin.post('/tenants/:id/planilha/teste', async (c) => {
         geral: String(b.leads_abas?.geral ?? '').trim() || null,
         google: String(b.leads_abas?.google ?? '').trim() || null,
         meta: String(b.leads_abas?.meta ?? '').trim() || null,
+        direto: String(b.leads_abas?.direto ?? '').trim() || null,
       },
     }, registro);
     return c.json({ ok: true, gravado: abas.length > 0, resposta: abas.length ? 'abas: ' + abas.join(', ') : 'nenhuma planilha informada' });

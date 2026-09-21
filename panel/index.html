@@ -2700,6 +2700,7 @@
               seletorDeAba('pl-aba-geral', 'Aba Geral (todo lead)', r.leads_abas.geral) +
               seletorDeAba('pl-aba-google', 'Aba do Google (mensagem)', r.leads_abas.google) +
               seletorDeAba('pl-aba-meta', 'Aba do Meta (mensagem)', r.leads_abas.meta) +
+              seletorDeAba('pl-aba-direto', 'Aba de lead direto (WhatsApp sem anúncio)', r.leads_abas.direto) +
             '</div>' +
             '<p class="dica">' + (r.conta_servico
               ? 'Compartilhe as duas planilhas com <code>' + esc(r.conta_servico) + '</code> como <strong>Editor</strong>.'
@@ -2742,6 +2743,7 @@
               geral: document.getElementById('pl-aba-geral').value,
               google: document.getElementById('pl-aba-google').value,
               meta: document.getElementById('pl-aba-meta').value,
+              direto: document.getElementById('pl-aba-direto').value,
             },
           };
         };
@@ -2754,7 +2756,7 @@
           try {
             c = await api('/tenants/' + id + '/planilha/conferir?banco=' + encodeURIComponent(v.banco_doc) +
               '&leads=' + encodeURIComponent(v.leads_doc) + '&abas=' +
-              encodeURIComponent([v.leads_abas.geral, v.leads_abas.google, v.leads_abas.meta].filter(Boolean).join(',')));
+              encodeURIComponent([v.leads_abas.geral, v.leads_abas.google, v.leads_abas.meta, v.leads_abas.direto].filter(Boolean).join(',')));
           } catch (e) {
             saida.innerHTML = '<p class="st-erro">' + esc(e.message) + '</p>';
             return;

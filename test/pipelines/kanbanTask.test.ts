@@ -155,9 +155,10 @@ describe('avisarLeadNoGrupo', () => {
   });
 
   test('sem protocolo, deduplica pelo id da task', async () => {
+    // tentativa 3: ja' esperou a atribuicao e o protocolo nao veio
     const { env, consultar } = cenario();
-    await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }));
-    await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }));
+    await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 3 });
+    await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 3 });
 
     expect(enviados).toHaveLength(1);
     expect(consultar<{ chave: string }>('SELECT chave FROM group_notifications')[0]!.chave).toBe(
@@ -207,7 +208,8 @@ describe('a mesma task nao avisa duas vezes', () => {
     // avisos no grupo, o primeiro sem URL porque o clique ainda nao casara.
     const { env, consultar } = cenario();
 
-    const semProtocolo = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }));
+    // tentativa 3: o card esperou e avisou sem protocolo mesmo
+    const semProtocolo = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 3 });
     expect(semProtocolo.status).toBe('ok');
 
     const comProtocolo = await avisarLeadNoGrupo(env, 1, task());
@@ -263,5 +265,65 @@ describe('aviso desligado por cliente', () => {
     const r = await avisarLeadNoGrupo(env, 1, task());
     expect(r.status).toBe('erro');
     expect(r.retentar).not.toBe(false);
+  });
+});
+
+describe('card sem protocolo ainda (Vita, setembro: 8 de 10 avisos sairam "Direto")', () => {
+  test('primeiras entregas esperam a atribuicao em vez de avisar como Direto', async () => {
+    const { env, consultar } = cenario();
+    const r = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+
+    expect(r.status).toBe('erro');
+    expect(r.adiar).toBe(true);
+    expect(enviados).toHaveLength(0);
+    // nada reservado: a proxima entrega ainda pode avisar
+    expect(consultar('SELECT * FROM group_notifications')).toHaveLength(0);
+  });
+
+  test('acha o protocolo pela conversa e avisa com canal Google e URL', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_e164, gclid, page_url)
+          VALUES (1, 'VITA-MU5I8BRH4IZJ', 'Marcia Ribeiro De Souza', '+5542999063333', 'Cj0KC',
+                  'https://audicao.vitaaudio.com.br/aparelho-auditivo?gclid=x')`);
+    // a atribuicao grava a conversa (display 28) antes de mexer no Chatwoot
+    exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol) VALUES (1, 28, 'VITA-MU5I8BRH4IZJ')`);
+
+    const r = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+
+    expect(r.status).toBe('ok');
+    expect(enviados[0]!.Canal).toBe('Campanha de Mensagem - Google');
+    expect(enviados[0]!.URL).toBe('https://audicao.vitaaudio.com.br/aparelho-auditivo');
+    expect(enviados[0]!.nome).toBe('Marcia Ribeiro De Souza');
+    expect(consultar<{ chave: string }>('SELECT chave FROM group_notifications')[0]!.chave).toBe('VITA-MU5I8BRH4IZJ');
+  });
+
+  test('o id interno da conversa nao se confunde com o numero da tela', async () => {
+    const { env, exec } = cenario();
+    // conversa de OUTRO lead cujo numero de tela coincide com o id interno do card
+    exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol) VALUES (1, 754, 'VITA-OUTRO')`);
+    const r = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+    expect(r.adiar).toBe(true);
+  });
+});
+
+describe('nome no aviso', () => {
+  test('nome de perfil sem letra vira o aviso claro', async () => {
+    const { env } = cenario();
+    await avisarLeadNoGrupo(env, 1, task({ contacts: [{ name: '😊', phone_number: '+5511954687762' }], title: '' }));
+    expect(enviados[0]!.nome).toBe('Sem nome no WhatsApp');
+  });
+
+  test('telefone no lugar do nome vira o aviso claro', async () => {
+    const { env } = cenario();
+    await avisarLeadNoGrupo(env, 1, task({ contacts: [{ name: '5519999360206', phone_number: '+5519999360206' }], title: '' }));
+    expect(enviados[0]!.nome).toBe('Sem nome no WhatsApp');
+  });
+
+  test('numero da propria empresa nao avisa', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET numeros_proprios = '["5519990177608"]' WHERE tenant_id = 1`);
+    const r = await avisarLeadNoGrupo(env, 1, task({ contacts: [{ name: 'Vita Audio Aparelhos Auditivos', phone_number: '+5519990177608' }] }));
+    expect(r.status).toBe('ignorado');
+    expect(enviados).toHaveLength(0);
   });
 });

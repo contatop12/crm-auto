@@ -1,6 +1,7 @@
 import { montarCanal } from './canal';
 import { detectOrigin, detectPlatform } from './platform';
 import { phoneKey } from './phone';
+import { nomeParaExibir, nomeUtil } from './nomeLead';
 
 /**
  * O registro que vai para as planilhas do cliente.
@@ -136,6 +137,11 @@ function caminho(url: string | null | undefined): string {
   }
 }
 
+/** Canal do lead que veio pelo site, com protocolo, mas sem anuncio. */
+export const CANAL_DIRETO_SITE = 'Mensagem Direta (site)';
+/** Canal de quem chamou no WhatsApp sem protocolo e sem anuncio. */
+export const CANAL_DIRETO_WHATSAPP = 'Mensagem Direta (WhatsApp)';
+
 export function montarRegistro(
   ctx: ContextoPlanilha,
   lead: LeadDaPlanilha | null,
@@ -157,6 +163,13 @@ export function montarRegistro(
     utmSource: lead?.utm_source, utmMedium: lead?.utm_medium,
     utmCampaign: lead?.utm_campaign, gclid: lead?.gclid,
   });
+  const origem = detectOrigin({ origemClick: lead?.origem, eventClick: lead?.evento });
+
+  // O nome de perfil do WhatsApp nao e' confiavel ("😊", ".", o telefone, o
+  // perfil da propria empresa). Com telefone o lead ja' conversou: o nome ruim
+  // vira o aviso claro. Sem telefone e' so' o clique — nome vazio mesmo.
+  const ctxNome = { telefone: digitos, nomesProprios: [ctx.cliente] };
+  const nomeLead = digitos ? nomeParaExibir(lead?.nome, ctxNome) : (nomeUtil(lead?.nome, ctxNome) ?? '');
 
   const atribuicao = {
     gclid: t(lead?.gclid),
@@ -177,7 +190,7 @@ export function montarRegistro(
   const cliques = {
     protocol: ctx.protocolo,
     phone_number: nacional,
-    lead_name: t(lead?.nome),
+    lead_name: nomeLead,
     email: t(lead?.email),
     status: cv ? cv.etapa : 'pendente',
     ...atribuicao,
@@ -206,7 +219,7 @@ export function montarRegistro(
         origem: t(lead?.origem),
         qualified_at: new Date(cv.quando).toISOString(),
         click_created_at: cliqueFormatado,
-        lead_name: t(lead?.nome),
+        lead_name: nomeLead,
         email: t(lead?.email),
         phone_number: nacional,
         ...atribuicao,
@@ -227,11 +240,13 @@ export function montarRegistro(
   return {
     tipo: ctx.tipo,
     ...quandoChegou,
-    canal: montarCanal({
-      origem: detectOrigin({ origemClick: lead?.origem, eventClick: lead?.evento }),
-      plataforma,
-      quizVersion: null,
-    }),
+    // Sem anuncio por tras, "Campanha de ... - Direto" diz uma campanha que nao
+    // existe. O rotulo leva "Mensagem" de proposito: no "Switch Vita Audio" do
+    // fluxo Central, canal com "Mensagem" cai na saida sem conexao — a linha na
+    // Geral nunca vira aviso repetido no grupo.
+    canal: plataforma === 'outro' && origem === 'mensagem'
+      ? CANAL_DIRETO_SITE
+      : montarCanal({ origem, plataforma, quizVersion: null }),
     plataforma,
     campanha: t(lead?.utm_campaign),
     pagina: caminho(lead?.page_url),
@@ -244,7 +259,7 @@ export function montarRegistro(
     link_anuncio: plataforma === 'meta' && /instagram\.com|fb\.me|facebook\.com/i.test(t(lead?.page_url))
       ? t(lead?.page_url) : '',
     protocolo: ctx.protocolo,
-    nome: t(lead?.nome),
+    nome: nomeLead,
     // a planilha de leads ja' guardava o numero assim (5511...), sem o `+`
     telefone: digitos,
     link_whatsapp: digitos ? `https://wa.me/${digitos}` : '',
@@ -365,8 +380,9 @@ export function linhaDeLeads(
  * Em quais abas da planilha de leads o lead entra: a Geral e a do canal dele.
  *
  * Lead do Google vai para a Geral e para a "Google Mensagem"; o da campanha de
- * mensagem do Meta, para a Geral e para a do Meta. Cliente sem a aba do canal
- * (a Vita so' tem a Geral) fica so' com a Geral.
+ * mensagem do Meta, para a Geral e para a do Meta; o que chegou sem anuncio,
+ * para a Geral e para a aba de lead direto ("WhatsApp Direto" na Vita). Cliente
+ * sem a aba do canal fica so' com a Geral.
  *
  * Lead de FORMULARIO nao entra na Geral: quem grava ele la' e' a automacao do
  * formulario (quiz da Persianas, formularios do site da Tainã), com as
@@ -374,11 +390,16 @@ export function linhaDeLeads(
  * Ele so' entra na aba do canal quando chama no WhatsApp, como sempre foi.
  */
 export function abasDoLead(
-  abas: { geral: string | null; google: string | null; meta: string | null },
+  abas: { geral: string | null; google: string | null; meta: string | null; direto?: string | null },
   plataforma: string,
   origem: string = 'mensagem',
 ): string[] {
-  const doCanal = plataforma === 'google' ? abas.google : plataforma === 'meta' ? abas.meta : null;
+  // Sem anuncio (plataforma `outro`) o lugar e' a aba de lead direto — so' no
+  // cliente que tem essa aba; nos outros fica como sempre foi, so' a Geral.
+  const doCanal = plataforma === 'google' ? abas.google
+    : plataforma === 'meta' ? abas.meta
+    : origem === 'formulario' ? null
+    : (abas.direto ?? null);
   const geral = origem === 'formulario' ? null : abas.geral;
   return [geral, doCanal].filter((a): a is string => !!a);
 }

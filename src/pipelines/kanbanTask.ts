@@ -4,6 +4,14 @@ import { montarCanal } from '../domain/canal';
 import { detectOrigin, detectPlatform } from '../domain/platform';
 import { normFone } from '../domain/phone';
 import { PulseboardClient, ErroPulseboard } from '../clients/pulseboard';
+import { nomeParaExibir, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLead';
+
+/**
+ * Quantas entregas do webhook do card esperam o protocolo antes de avisar sem
+ * ele. A fila devolve a mensagem em ~20 s; duas esperas cobrem com folga a
+ * atribuicao da conversa, que leva poucos segundos.
+ */
+export const TENTATIVAS_ESPERANDO_PROTOCOLO = 3;
 
 /**
  * Avisa o grupo do cliente quando um lead entra no funil de Ads.
@@ -21,6 +29,8 @@ export interface Resultado {
   motivo: string;
   /** `false` = erro de cadastro; fica visivel no painel, mas sai da fila. */
   retentar?: boolean;
+  /** Ainda nao da' para decidir: volta para a fila sem virar erro no painel. */
+  adiar?: boolean;
 }
 
 interface ConfigTenant {
@@ -28,6 +38,8 @@ interface ConfigTenant {
   cw_board_funil_id: number | null;
   pulseboard_url: string | null;
   pulseboard_ativo: number;
+  numeros_proprios: string | null;
+  cliente: string | null;
 }
 
 interface LinhaLead {
@@ -50,10 +62,12 @@ export async function avisarLeadNoGrupo(
   env: Env,
   tenantId: number,
   payload: string,
+  opcoes: { tentativa?: number } = {},
 ): Promise<Resultado> {
   const cfg = await env.DB.prepare(
-    `SELECT cw_account_id, cw_board_funil_id, pulseboard_url, pulseboard_ativo
-     FROM tenant_config WHERE tenant_id = ?`,
+    `SELECT c.cw_account_id, c.cw_board_funil_id, c.pulseboard_url, c.pulseboard_ativo,
+            c.numeros_proprios, t.nome AS cliente
+     FROM tenant_config c JOIN tenants t ON t.id = c.tenant_id WHERE c.tenant_id = ?`,
   )
     .bind(tenantId)
     .first<ConfigTenant>();
@@ -80,6 +94,33 @@ export async function avisarLeadNoGrupo(
     };
   }
 
+  // Numero da propria empresa nao e' lead: nao avisa.
+  const proprios = lerNumerosProprios(cfg.numeros_proprios);
+  if (ehNumeroProprio(t.telefone, proprios)) {
+    return { status: 'ignorado', motivo: `card ${t.taskId} e' de um numero da propria empresa` };
+  }
+
+  /**
+   * O protocolo decide o canal e a URL do aviso. O webhook do card costuma
+   * chegar ANTES de o card ganhar o atributo — o aviso saia como
+   * "Campanha de Mensagem - Direto", sem URL, para lead do Google (8 de 10 na
+   * Vita em setembro). A conversa ja' tem o protocolo em `conversations` (a
+   * atribuicao grava antes de mexer no Chatwoot); sem ele ainda, espera a
+   * atribuicao algumas vezes antes de avisar como direto.
+   */
+  let protocolo = t.protocolo;
+  if (!protocolo) {
+    protocolo = (await protocoloDaConversa(env, tenantId, t.conversaDisplay, t.taskId)) ?? '';
+    if (!protocolo && (opcoes.tentativa ?? 1) < TENTATIVAS_ESPERANDO_PROTOCOLO) {
+      return {
+        status: 'erro',
+        motivo: `card ${t.taskId} ainda sem protocolo: esperando a atribuicao da conversa`,
+        adiar: true,
+      };
+    }
+  }
+  const chaveDedupe = protocolo || `task:${t.taskId}`;
+
   /**
    * O MESMO card avisa uma vez, mesmo trocando de nome no meio.
    *
@@ -96,7 +137,7 @@ export async function avisarLeadNoGrupo(
       `SELECT chave, status FROM group_notifications
        WHERE tenant_id = ? AND task_id = ? AND chave != ?`,
     )
-      .bind(tenantId, t.taskId, t.chaveDedupe)
+      .bind(tenantId, t.taskId, chaveDedupe)
       .first<{ chave: string; status: string }>();
 
     if (mesmaTask && mesmaTask.status !== 'erro') {
@@ -112,7 +153,7 @@ export async function avisarLeadNoGrupo(
     `INSERT OR IGNORE INTO group_notifications (tenant_id, chave, task_id, protocolo)
      VALUES (?, ?, ?, ?)`,
   )
-    .bind(tenantId, t.chaveDedupe, t.taskId, t.protocolo || null)
+    .bind(tenantId, chaveDedupe, t.taskId, protocolo || null)
     .run();
 
   if ((reserva.meta.changes ?? 0) === 0) {
@@ -122,23 +163,23 @@ export async function avisarLeadNoGrupo(
     const antes = await env.DB.prepare(
       'SELECT status FROM group_notifications WHERE tenant_id = ? AND chave = ?',
     )
-      .bind(tenantId, t.chaveDedupe)
+      .bind(tenantId, chaveDedupe)
       .first<{ status: string }>();
 
     if (antes?.status !== 'erro') {
-      return { status: 'ignorado', motivo: `grupo ja avisado sobre ${t.chaveDedupe}` };
+      return { status: 'ignorado', motivo: `grupo ja avisado sobre ${chaveDedupe}` };
     }
   }
 
   // Dados do clique para montar o canal. Lead que nunca passou pela ingestao
   // ainda e' avisado — so com menos precisao no rotulo.
-  const lead = t.protocolo
+  const lead = protocolo
     ? await env.DB.prepare(
         `SELECT nome, phone_e164, page_url, origem, evento, quiz_version,
                 utm_source, utm_medium, utm_campaign, gclid, gbraid, wbraid, fbc
          FROM leads WHERE tenant_id = ? AND protocol = ?`,
       )
-        .bind(tenantId, t.protocolo)
+        .bind(tenantId, protocolo)
         .first<LinhaLead>()
     : null;
 
@@ -161,9 +202,10 @@ export async function avisarLeadNoGrupo(
     quizVersion: sinais.quizVersion,
   });
 
-  const nome = lead?.nome || t.nome || 'Lead';
   // o Pulseboard espera so digitos, com DDI e sem '+'
   const telefone = (normFone(lead?.phone_e164 ?? t.telefone) || '').replace('+', '');
+  // nome de perfil do WhatsApp: "😊", "." ou o telefone viram o aviso claro
+  const nome = nomeParaExibir(lead?.nome || t.nome, { telefone, nomesProprios: [cfg.cliente] });
   const url = String(lead?.page_url ?? '').split('?')[0] ?? '';
 
   const marcar = (status: string, erro?: string) =>
@@ -172,7 +214,7 @@ export async function avisarLeadNoGrupo(
        SET status = ?, erro = ?, canal = ?, lead_nome = ?, telefone = ?, enviado_em = datetime('now')
        WHERE tenant_id = ? AND chave = ?`,
     )
-      .bind(status, erro ?? null, canal, nome, telefone, tenantId, t.chaveDedupe)
+      .bind(status, erro ?? null, canal, nome, telefone, tenantId, chaveDedupe)
       .run();
 
   // Cliente que nao usa o aviso no grupo. Sem isto, cada lead novo virava um
@@ -213,4 +255,29 @@ export async function avisarLeadNoGrupo(
 
   await marcar('enviado');
   return { status: 'ok', motivo: `grupo avisado: ${nome} · ${canal}` };
+}
+
+/** Protocolo que a atribuicao ja' gravou para a conversa (ou o card) do lead. */
+async function protocoloDaConversa(
+  env: Env,
+  tenantId: number,
+  /**
+   * `conversations.cw_conversation_id` guarda o `conversation.id` do webhook de
+   * mensagem, que e' o numero da tela (display) — o mesmo do link do aviso.
+   * O id interno do card (`conversationId`) e' outro numero e nao serve.
+   */
+  conversaDisplay: number,
+  taskId: number,
+): Promise<string | null> {
+  if (!conversaDisplay && !taskId) return null;
+  const r = await env.DB.prepare(
+    `SELECT protocol FROM conversations
+     WHERE tenant_id = ? AND protocol IS NOT NULL AND protocol <> ''
+       AND (cw_conversation_id = ? OR task_id = ?)
+     ORDER BY updated_at DESC LIMIT 1`,
+  )
+    .bind(tenantId, conversaDisplay || -1, taskId || -1)
+    .first<{ protocol: string }>()
+    .catch(() => null);
+  return r?.protocol ?? null;
 }
