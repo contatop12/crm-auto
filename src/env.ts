@@ -19,6 +19,17 @@ export interface Env {
   GOOGLE_ADS_MCC_ID: string;
 
   /**
+   * Credencial OAuth so' do Google Ads API (GAQL e criar metas). O nivel de
+   * acesso do Google Ads API e' do PROJETO do Google Cloud, nao do developer
+   * token: o projeto novo (920085856941) so' tem acesso de teste ate' o Google
+   * aprovar o Basic. Enquanto isso, o Ads API usa o cliente do projeto antigo,
+   * que tem acesso de producao. Sem estes, cai no GOOGLE_ADS_CLIENT_* de sempre.
+   */
+  GOOGLE_ADS_API_CLIENT_ID?: string;
+  GOOGLE_ADS_API_CLIENT_SECRET?: string;
+  GOOGLE_ADS_API_REFRESH_TOKEN?: string;
+
+  /**
    * JSON da service account `crm-api@crm-p12.iam.gserviceaccount.com`. Quando
    * existe, e' a primeira credencial tentada em todas as APIs do Google.
    */

@@ -76,12 +76,20 @@ export class GoogleAdsClient {
     const r = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: exigir(this.env, 'GOOGLE_ADS_CLIENT_ID'),
-        client_secret: exigir(this.env, 'GOOGLE_ADS_CLIENT_SECRET'),
-        refresh_token: exigir(this.env, 'GOOGLE_ADS_REFRESH_TOKEN'),
-        grant_type: 'refresh_token',
-      }),
+      // credencial propria do Ads API quando existe: ver GOOGLE_ADS_API_* em env.ts
+      body: new URLSearchParams(this.env.GOOGLE_ADS_API_REFRESH_TOKEN
+        ? {
+            client_id: exigir(this.env, 'GOOGLE_ADS_API_CLIENT_ID'),
+            client_secret: exigir(this.env, 'GOOGLE_ADS_API_CLIENT_SECRET'),
+            refresh_token: this.env.GOOGLE_ADS_API_REFRESH_TOKEN,
+            grant_type: 'refresh_token',
+          }
+        : {
+            client_id: exigir(this.env, 'GOOGLE_ADS_CLIENT_ID'),
+            client_secret: exigir(this.env, 'GOOGLE_ADS_CLIENT_SECRET'),
+            refresh_token: exigir(this.env, 'GOOGLE_ADS_REFRESH_TOKEN'),
+            grant_type: 'refresh_token',
+          }),
     });
 
     const j = (await r.json()) as { access_token?: string; error_description?: string };

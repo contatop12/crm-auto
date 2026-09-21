@@ -549,7 +549,15 @@ admin.get('/tenants/:id/metas/preview', async (c) => {
     return c.json({ error: 'sincronize as etapas do funil antes de gerar as metas' }, 400);
   }
 
-  const existentes = await GoogleAdsClient.fromEnv(c.env).conversionActions(t.gaCustomerId);
+  // O Google responde erro com motivo (permissao, developer token, API
+  // desligada); sem isto a tela mostrava so' "HTTP 500".
+  let existentes;
+  try {
+    existentes = await GoogleAdsClient.fromEnv(c.env).conversionActions(t.gaCustomerId);
+  } catch (e) {
+    console.log(JSON.stringify({ acao: 'metas_preview_falhou', tenant_id: id, erro: (e as Error).message }));
+    return c.json({ error: `o Google Ads recusou a consulta das metas: ${(e as Error).message}` }, 502);
+  }
   const funil = stages.map((s) => ({
     id: s.id,
     posicao: s.posicao,
@@ -604,7 +612,9 @@ admin.post('/tenants/:id/metas', async (c) => {
   const cli = GoogleAdsClient.fromEnv(c.env);
   const novas = metas.filter((m) => !m.jaExiste);
 
-  const criadas = novas.length
+  let criadas;
+  try {
+    criadas = novas.length
     ? await criarConversionActions(
         cli,
         t.gaCustomerId,
@@ -620,6 +630,10 @@ admin.post('/tenants/:id/metas', async (c) => {
         body.validar === true,
       )
     : [];
+  } catch (e) {
+    console.log(JSON.stringify({ acao: 'metas_criar_falhou', tenant_id: id, erro: (e as Error).message }));
+    return c.json({ error: `o Google Ads recusou criar as metas: ${(e as Error).message}` }, 502);
+  }
 
   if (body.validar === true) {
     return c.json({ ok: true, validado: true, seriam_criadas: novas.length });
