@@ -4,12 +4,36 @@
 !.env.example
 .dev.vars
 .dev.vars.*
+.secrets.tmp.json
+# chave de service account e credencial baixada do Google Cloud
+*service-account*.json
+*-sa-key*.json
+client_secret*.json
+credentials*.json
+*.pem
+*.key
+*.p12
+
+# Dados de cliente exportados: backup de planilha, CSV de leads e conversoes.
+# Tem dado pessoal de lead — fica na maquina, nunca no repositorio.
+*.csv
+*.xlsx
+backup*/
+backup-*.json
+*.bak
+*.bak-*
+
+# Ferramentas locais (IA, MCP) — configuracao de quem usa, nao do projeto
+.claude/
+.superpowers/
+.mcp.json
+CLAUDE.local.md
 
 # Dependências
 node_modules/
 panel/node_modules/
 
-# Build
+# Build e Cloudflare local
 dist/
 panel/.vite/
 .wrangler/
@@ -21,13 +45,13 @@ coverage/
 # Editor / SO
 .DS_Store
 Thumbs.db
+desktop.ini
 .vscode/*
 !.vscode/extensions.json
 .idea/
 
-# Logs
+# Logs e temporarios
 *.log
 npm-debug.log*
-
-# Nunca commitar arquivo temporario de segredos
-.secrets.tmp.json
+tmp/
+*.tmp
