@@ -26,6 +26,7 @@ import {
 } from '../domain/padroes';
 import { avaliarEtapa } from '../domain/fluxo';
 import { classificarCards } from '../domain/orfaos';
+import { vigiarWhatsapp } from '../pipelines/vigiaWhatsapp';
 
 /**
  * Cadastro de clientes, sincronizacao das etapas e geracao das metas de
@@ -38,6 +39,15 @@ admin.use('*', requireAccess);
 // ---------------------------------------------------------------------------
 // Listas auxiliares: o cadastro vira escolha em vez de digitacao de ID
 // ---------------------------------------------------------------------------
+
+/**
+ * Previa do vigia do WhatsApp: le' tudo e diz o que avisaria, sem corrigir,
+ * sem mandar aviso e sem mexer no estado do cron.
+ */
+admin.get('/vigia-whatsapp', async (c) => {
+  const r = await vigiarWhatsapp(c.env, { enviar: false });
+  return c.json({ leituras: r.leituras.map(({ caixas: _c, ...l }) => l), avisos: r.avisos });
+});
 
 admin.get('/chatwoot/accounts', async (c) => {
   const perfil = await ChatwootClient.fromEnv(c.env).perfil();

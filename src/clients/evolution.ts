@@ -15,6 +15,21 @@ export interface EvoLabel {
   name?: string;
 }
 
+/** Configuracao da integracao com o Chatwoot, como o `/chatwoot/find` devolve. */
+export interface ConfigChatwootEvo {
+  enabled?: boolean;
+  accountId?: string | number;
+  nameInbox?: string;
+  webhook_url?: string;
+  [campo: string]: unknown;
+}
+
+export interface InstanciaEvo {
+  name: string;
+  connectionStatus?: string;
+  ownerJid?: string | null;
+}
+
 export class EvolutionClient {
   constructor(
     private readonly baseUrl: string,
@@ -37,6 +52,8 @@ export class EvolutionClient {
         ...(corpo === undefined ? {} : { 'content-type': 'application/json' }),
       },
       body: corpo === undefined ? undefined : JSON.stringify(corpo),
+      // servidor pendurado nao pode travar o pipeline nem o vigia
+      signal: AbortSignal.timeout(20000),
     });
     if (!r.ok) {
       throw new Error(`Evolution ${caminho} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
@@ -115,6 +132,45 @@ export class EvolutionClient {
     } catch {
       return { viva: false, detalhe: 'nao respondeu no tempo' };
     }
+  }
+
+  /** Todas as instancias do servidor, com o estado da conexao. */
+  async instancias(): Promise<InstanciaEvo[]> {
+    const r = await this.req<InstanciaEvo[]>('/instance/fetchInstances');
+    return Array.isArray(r) ? r : [];
+  }
+
+  /**
+   * Integracao com o Chatwoot da instancia. Traz o token do Chatwoot junto:
+   * quem chama nunca registra isto em log.
+   */
+  async chatwoot(instancia: string): Promise<ConfigChatwootEvo | null> {
+    const r = await this.req<ConfigChatwootEvo | null>(`/chatwoot/find/${encodeURIComponent(instancia)}`);
+    return r && typeof r === 'object' ? r : null;
+  }
+
+  /**
+   * Regrava a integracao com o Chatwoot. O `/chatwoot/set` substitui a
+   * configuracao inteira, entao quem chama parte do que o `chatwoot()` leu e
+   * muda so' o campo que precisa. `autoCreate: false` para nao criar caixa.
+   */
+  async definirChatwoot(instancia: string, cfg: ConfigChatwootEvo): Promise<void> {
+    const { webhook_url: _calculado, ...resto } = cfg;
+    await this.req(`/chatwoot/set/${encodeURIComponent(instancia)}`, { ...resto, autoCreate: false });
+  }
+
+  /** Mensagens mais recentes da instancia, da mais nova para a mais velha. */
+  async mensagensRecentes(instancia: string, quantas = 250): Promise<Array<Record<string, unknown>>> {
+    const r = await this.req<{ messages?: { records?: Array<Record<string, unknown>> } }>(
+      `/chat/findMessages/${encodeURIComponent(instancia)}`,
+      { where: {}, page: 1, offset: quantas },
+    );
+    return r.messages?.records ?? [];
+  }
+
+  /** Texto para um numero ou grupo (JID `...@g.us`). */
+  async enviarTexto(instancia: string, numero: string, texto: string): Promise<void> {
+    await this.req(`/message/sendText/${encodeURIComponent(instancia)}`, { number: numero, text: texto });
   }
 
   /** `open` quando a instancia esta conectada ao WhatsApp. */

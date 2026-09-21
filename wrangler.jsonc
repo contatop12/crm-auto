@@ -58,8 +58,9 @@
   // Limpeza diaria: apaga o CORPO dos eventos com mais de 30 dias, preservando
   // a linha e o status. O payload cru e' necessario para diagnostico, mas nao
   // precisa virar deposito permanente de dado pessoal dos leads.
+  // A cada 15 min: vigia do WhatsApp -> Chatwoot (src/pipelines/vigiaWhatsapp.ts).
   "triggers": {
-    "crons": ["17 4 * * *"]
+    "crons": ["17 4 * * *", "*/15 * * * *"]
   },
 
   "assets": {

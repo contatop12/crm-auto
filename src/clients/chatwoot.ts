@@ -366,4 +366,21 @@ export class ChatwootClient {
     return { ids, completo: false };
   }
 
+  /** Caixas de entrada da conta, com o webhook (o caminho de volta ao WhatsApp). */
+  async caixas(acc: number): Promise<Array<{ id: number; name: string; webhook_url?: string | null }>> {
+    const r = await this.req<{ payload?: Array<{ id: number; name: string; webhook_url?: string | null }> }>(
+      'GET',
+      `/api/v1/accounts/${acc}/inboxes`,
+    );
+    return r.payload ?? [];
+  }
+
+  /** Mensagens de cliente que entraram na caixa entre `desde` e `ate` (segundos). */
+  async recebidasNaCaixa(acc: number, caixa: number, desde: number, ate: number): Promise<number> {
+    const r = await this.req<{ incoming_messages_count?: number }>(
+      'GET',
+      `/api/v2/accounts/${acc}/reports/summary?type=inbox&id=${caixa}&since=${desde}&until=${ate}`,
+    );
+    return Number(r.incoming_messages_count ?? 0);
+  }
 }

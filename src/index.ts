@@ -6,6 +6,7 @@ import { api } from './routes/api';
 import { admin } from './routes/admin';
 import { consumir } from './queue/consumer';
 import { expurgarPayloadsAntigos } from './db/observability';
+import { vigiarWhatsapp } from './pipelines/vigiaWhatsapp';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -37,13 +38,25 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 /** Retencao do corpo dos webhooks, em dias. */
 const RETENCAO_PAYLOAD_DIAS = 30;
 
+/** Mesmo texto do `triggers.crons` do wrangler.jsonc: e' assim que se sabe qual disparou. */
+const CRON_EXPURGO = '17 4 * * *';
+
 export default {
   fetch: app.fetch,
   queue: (batch: MessageBatch<QueueMessage>, env: Env) => consumir(batch, env),
-  scheduled: async (_ev: ScheduledController, env: Env, ctx: ExecutionContext) => {
+  scheduled: async (ev: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    if (ev.cron === CRON_EXPURGO) {
+      ctx.waitUntil(
+        expurgarPayloadsAntigos(env.DB, RETENCAO_PAYLOAD_DIAS).then((n) =>
+          console.log(JSON.stringify({ acao: 'expurgo_payload', linhas: n, dias: RETENCAO_PAYLOAD_DIAS })),
+        ),
+      );
+      return;
+    }
+    // os outros disparos (a cada 15 min) sao o vigia do WhatsApp -> Chatwoot
     ctx.waitUntil(
-      expurgarPayloadsAntigos(env.DB, RETENCAO_PAYLOAD_DIAS).then((n) =>
-        console.log(JSON.stringify({ acao: 'expurgo_payload', linhas: n, dias: RETENCAO_PAYLOAD_DIAS })),
+      vigiarWhatsapp(env).catch((e) =>
+        console.log(JSON.stringify({ acao: 'vigia_whatsapp_erro', erro: String((e as Error).message).slice(0, 300) })),
       ),
     );
   },
