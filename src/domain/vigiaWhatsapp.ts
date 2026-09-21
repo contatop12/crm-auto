@@ -179,6 +179,9 @@ export interface RegistroVigia {
   avisadoEm: number | null;
   /** Resolveu fora do horario de aviso: a boa noticia espera o horario. */
   resolvidoEm?: number;
+  /** Para a central de notificacoes mostrar a queda sem refazer a leitura. */
+  rotulo?: string;
+  texto?: string;
 }
 
 export type EstadoVigia = Record<string, RegistroVigia>;
@@ -263,6 +266,8 @@ export function planejarAvisos(
     const reg: RegistroVigia = mesmo
       ? { tipo: prev.tipo, desde: prev.desde, vezes: prev.vezes + 1, avisadoEm: prev.avisadoEm }
       : { tipo: a.problema.tipo, desde: agora, vezes: 1, avisadoEm: null };
+    reg.rotulo = a.rotulo;
+    reg.texto = a.problema.texto;
 
     if (podeAvisar && reg.vezes >= CONFIRMAR_EM) {
       if (reg.avisadoEm === null) {

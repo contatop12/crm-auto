@@ -16,6 +16,7 @@ import { TagManagerClient } from '../clients/tagManager';
 import { conferirNoChatwoot, conferirNoGtm, type Veredito } from '../domain/conferencia';
 import { avisarLeadNoGrupo } from '../pipelines/kanbanTask';
 import { enviarConversao } from '../pipelines/stageChanged';
+import { listarNotificacoes, resolverNotificacao } from '../db/notificacoes';
 
 /**
  * API do painel. Tudo aqui passa pelo `requireAccess` — o Access na frente do
@@ -83,6 +84,31 @@ api.get('/overview', async (c) => {
         : 'atividade',
     })),
   );
+});
+
+/** Central de notificacoes: erros em aberto, quedas do WhatsApp e configuracao pendente. */
+api.get('/notificacoes', async (c) => {
+  const itens = await listarNotificacoes(c.env);
+  return c.json({
+    itens,
+    contagem: {
+      erro: itens.filter((n) => n.tipo === 'erro').length,
+      aviso: itens.filter((n) => n.tipo === 'aviso').length,
+    },
+  });
+});
+
+/**
+ * Marca como resolvida. Erro de evento sai do cartao do cliente e da central,
+ * mas continua no log (aba Atividade) com quem resolveu.
+ */
+api.post('/notificacoes/resolver', async (c) => {
+  const { chave, ids } = await c.req.json<{ chave?: string; ids?: number[] }>().catch(() => ({} as { chave?: string; ids?: number[] }));
+  if (!chave || !/^(ev|cfg|wa):/.test(chave)) return c.json({ error: 'notificacao invalida' }, 400);
+  const por = c.get('identity')?.email ?? 'painel';
+  const r = await resolverNotificacao(c.env, chave, ids, por);
+  console.log(JSON.stringify({ acao: 'resolver_notificacao', por, chave, resolvidos: r.resolvidos }));
+  return c.json({ ok: true, ...r });
 });
 
 /** `a` aconteceu depois de `b`? Sem `a`, nao. Sem `b`, sim. */

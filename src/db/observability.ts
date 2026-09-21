@@ -39,13 +39,17 @@ export async function resumoPorTenant(db: D1Database): Promise<ResumoTenant[]> {
             AND e.received_at >= datetime('now','-1 day')) AS ok_24h,
          (SELECT COUNT(*) FROM events e WHERE e.tenant_id = t.id AND e.status = 'ignorado'
             AND e.received_at >= datetime('now','-1 day')) AS ignorados_24h,
+         -- erro resolvido (pela equipe ou pelo sistema) fica no log, fora do cartao
          (SELECT COUNT(*) FROM events e WHERE e.tenant_id = t.id AND e.status = 'erro'
+            AND e.resolvido_em IS NULL
             AND e.received_at >= datetime('now','-1 day')) AS erros_24h,
          (SELECT MAX(received_at) FROM events e WHERE e.tenant_id = t.id) AS ultimo_evento_em,
          (SELECT MAX(received_at) FROM events e WHERE e.tenant_id = t.id
             AND e.status != 'erro') AS ultimo_ok_em,
-         (SELECT MAX(received_at) FROM events e WHERE e.tenant_id = t.id AND e.status = 'erro') AS ultimo_erro_em,
+         (SELECT MAX(received_at) FROM events e WHERE e.tenant_id = t.id AND e.status = 'erro'
+            AND e.resolvido_em IS NULL) AS ultimo_erro_em,
          (SELECT e.motivo FROM events e WHERE e.tenant_id = t.id AND e.status = 'erro'
+            AND e.resolvido_em IS NULL
             ORDER BY e.received_at DESC LIMIT 1) AS ultimo_erro_motivo,
          (SELECT COUNT(*) FROM conversions c WHERE c.tenant_id = t.id AND c.status = 'enviado') AS conversoes_enviadas,
          (SELECT COUNT(*) FROM conversions c WHERE c.tenant_id = t.id AND c.status = 'erro') AS conversoes_erro,

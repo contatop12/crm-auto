@@ -227,6 +227,31 @@ describe('enviarConversao', () => {
     expect(linha(consultar).erro).toBeNull();
   });
 
+  test('subiu no reenvio: os erros anteriores desta conversao saem do cartao', async () => {
+    const { env, consultar, exec } = cenario();
+    // o que a fila gravou quando o Google recusou (caso da Proposta da Taina em 21/09)
+    exec(`INSERT INTO events (id, tenant_id, source, event_type, payload, status, motivo)
+          VALUES (10, 1, 'kanban', 'kanban_conversao', '{}', 'erro', 'VITA-123-qualificado_1: Data Manager 400: There was a problem with the request.'),
+                 (11, 1, 'kanban', 'kanban_conversao', '{}', 'erro', 'VITA-999-qualificado_1: Data Manager 400: outro lead'),
+                 (12, 1, 'chatwoot', 'message_incoming', '{}', 'erro', 'VITA-123-qualificado_1: nao e conversao')`);
+    const r = await enviarConversao(env, 1, card());
+    expect(r.status).toBe('ok');
+    const ev = (id: number) => consultar(`SELECT resolvido_em, resolvido_por FROM events WHERE id = ${id}`)[0] as { resolvido_em: string | null; resolvido_por: string | null };
+    expect(ev(10).resolvido_em).not.toBeNull();
+    expect(ev(10).resolvido_por).toContain('sistema');
+    expect(ev(11).resolvido_em).toBeNull(); // outro lead continua em aberto
+    expect(ev(12).resolvido_em).toBeNull(); // so' erro de conversao do kanban
+  });
+
+  test('a venda que subiu resolve o "sem valor da venda" do mesmo protocolo', async () => {
+    const { env, consultar, exec } = cenario();
+    exec(`INSERT INTO events (id, tenant_id, source, event_type, payload, status, motivo)
+          VALUES (20, 1, 'kanban', 'kanban_conversao', '{}', 'erro', 'VITA-123: "Oportunidade Ganha" sem valor da venda — preencha o valor no card para a conversao subir')`);
+    const r = await enviarConversao(env, 1, card({ board_step_id: 33, board_step: { id: 33, name: 'Oportunidade Ganha' }, value: 4500 }));
+    expect(r.status).toBe('ok');
+    expect((consultar(`SELECT resolvido_em FROM events WHERE id = 20`)[0] as { resolvido_em: string | null }).resolvido_em).not.toBeNull();
+  });
+
   test('o que so foi ensaiado na sombra sobe de verdade ao sair dela', async () => {
     const { env, exec, consultar } = cenario({ validateOnly: 1 });
     await enviarConversao(env, 1, card());

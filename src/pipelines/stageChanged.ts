@@ -351,6 +351,22 @@ async function fechar(
     .bind(status, d.requestId ?? null, d.erro ?? null, d.tipo ?? null, status, tenantId, chave)
     .run()
     .catch(() => undefined);
+
+  // Subiu: os erros que esta conversao deixou no log ja' nao sao noticia. Sem
+  // isto a Proposta da Taina, reenviada com sucesso, continuava como "ultimo
+  // erro" no cartao. O erro de "sem valor da venda" vem com o protocolo puro
+  // ("PROTO: ...") em vez da chave ("PROTO-compra: ..."), por isso as duas formas.
+  if (status === 'enviado') {
+    const protocolo = chave.replace(/-[a-z_0-9]+$/, '');
+    await env.DB.prepare(
+      `UPDATE events SET resolvido_em = datetime('now'), resolvido_por = 'sistema: a conversao subiu'
+       WHERE tenant_id = ? AND status = 'erro' AND resolvido_em IS NULL
+         AND event_type = 'kanban_conversao' AND (motivo LIKE ? OR motivo LIKE ?)`,
+    )
+      .bind(tenantId, chave + ':%', protocolo + ': %')
+      .run()
+      .catch(() => undefined);
+  }
 }
 
 type Rec = Record<string, unknown>;

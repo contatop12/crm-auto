@@ -98,6 +98,63 @@
         white-space: nowrap;
       }
 
+      /* ---------- central de notificações ---------- */
+
+      .sino {
+        position: relative; display: inline-flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px; margin-right: -8px; border: 0; border-radius: var(--r);
+        background: none; color: var(--tinta-2); cursor: pointer;
+      }
+      .sino:hover, .sino[aria-expanded='true'] { background: rgba(23, 25, 28, .05); color: var(--tinta); }
+      .sino-conta {
+        position: absolute; top: 1px; right: 0;
+        min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+        background: var(--falha); color: #fff;
+        font: 600 10px/16px var(--mono); text-align: center;
+      }
+      .sino-conta.so-aviso { background: var(--espera); }
+
+      .avisos {
+        position: fixed; top: 62px; right: 16px; z-index: 35;
+        width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 84px); overflow: auto;
+        background: var(--carta); border: 1px solid var(--linha-forte); border-radius: 8px;
+        box-shadow: 0 10px 30px rgba(23, 25, 28, .12);
+      }
+      .avisos-topo {
+        position: sticky; top: 0; z-index: 1;
+        display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+        padding: 12px 16px; background: var(--carta); border-bottom: 1px solid var(--linha);
+      }
+      .avisos-topo h2 { font-size: 14px; }
+      .avisos-topo span { font: 12px var(--mono); color: var(--tinta-3); }
+      .avisos-grupo {
+        padding: 12px 16px 4px;
+        font: 600 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--tinta-3);
+      }
+      .aviso { padding: 10px 16px 12px; border-bottom: 1px solid var(--linha); }
+      .aviso:last-child { border-bottom: 0; }
+      .aviso-linha { display: flex; align-items: baseline; gap: 8px; }
+      .aviso-marca { flex: none; width: 7px; height: 7px; border-radius: 50%; transform: translateY(-1px); }
+      .aviso-erro .aviso-marca { background: var(--falha); }
+      .aviso-aviso .aviso-marca { background: var(--espera); }
+      .aviso-titulo { font-size: 13px; font-weight: 600; }
+      .aviso-detalhe {
+        margin: 4px 0 8px 15px;
+        font: 12px/1.45 var(--mono); color: var(--tinta-2); overflow-wrap: anywhere;
+      }
+      .aviso-cliente { color: var(--tinta); }
+      .aviso-rodape {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+        margin-left: 15px; font-size: 12px; color: var(--tinta-3);
+      }
+      .aviso-rodape button {
+        padding: 0; border: 0; background: none; color: var(--tinta);
+        font: inherit; font-size: 12px; cursor: pointer;
+        text-decoration: underline; text-underline-offset: 2px;
+      }
+      .aviso-rodape button:disabled { color: var(--tinta-3); cursor: default; text-decoration: none; }
+      .avisos-vazio { padding: 28px 16px; margin: 0; color: var(--tinta-2); font-size: 13px; }
+
       main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 96px; }
 
       /* ---------- tipografia ---------- */
@@ -479,6 +536,7 @@
   <body>
     <div class="wrap">
       <nav class="topo" id="topo"></nav>
+      <aside class="avisos" id="avisos" role="dialog" aria-label="Notificações" hidden></aside>
       <main id="tela"><div class="barra"></div></main>
     </div>
 
@@ -501,6 +559,7 @@
         fechar: 'M6 6l12 12M18 6L6 18',
         anterior: 'M15 18l-6-6 6-6',
         proxima: 'M9 6l6 6-6 6',
+        sino: 'M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0',
       };
 
       function ic(nome, tam) {
@@ -531,6 +590,8 @@
           '<button id="btn-google" data-dica="Consentimento do Tag Manager e Google Ads">' + ic('google') + '<span>Google</span></button>' +
           '<button id="btn-novo" data-dica="Cadastrar um cliente novo">' + ic('mais') + '<span>Novo cliente</span></button>' +
         '</div>' +
+        '<button class="sino" id="btn-avisos" aria-haspopup="dialog" aria-expanded="false" aria-controls="avisos" ' +
+          'aria-label="Notificações">' + ic('sino', 18) + '<span class="sino-conta" id="sino-conta" hidden></span></button>' +
         '<span class="relogio" id="rodape"></span>';
 
       const tela = document.getElementById('tela');
@@ -3342,6 +3403,110 @@
           });
         });
       }
+
+      // ---------- central de notificações ----------
+      /**
+       * Tudo que pede atenção, num lugar só: erro de processamento, queda do
+       * WhatsApp e configuração pendente. Resolver um erro tira ele daqui E do
+       * cartão do cliente; o evento continua no log da aba Atividade.
+       */
+      const sino = document.getElementById('btn-avisos');
+      const sinoConta = document.getElementById('sino-conta');
+      const caixaAvisos = document.getElementById('avisos');
+      let avisos = { itens: [], contagem: { erro: 0, aviso: 0 } };
+
+      async function carregarAvisos() {
+        try {
+          avisos = await api('/notificacoes');
+        } catch {
+          return; // o sino não é motivo para derrubar a tela
+        }
+        const erro = avisos.contagem.erro;
+        const aviso = avisos.contagem.aviso;
+        const total = erro + aviso;
+        sinoConta.hidden = total === 0;
+        sinoConta.textContent = total > 99 ? '99+' : String(total);
+        sinoConta.classList.toggle('so-aviso', erro === 0);
+        sino.setAttribute('aria-label', total
+          ? 'Notificações: ' + erro + (erro === 1 ? ' erro' : ' erros') + ', ' + aviso + (aviso === 1 ? ' aviso' : ' avisos')
+          : 'Notificações: nada pendente');
+        if (!caixaAvisos.hidden) desenharAvisos();
+      }
+
+      function desenharAvisos() {
+        const itens = avisos.itens;
+        const bloco = function (n) {
+          const i = itens.indexOf(n);
+          const quando = n.quando
+            ? '<span>' + esc(haQuanto(n.quando)) + (n.quantidade > 1 ? ' · ' + n.quantidade + '×' : '') + '</span>'
+            : '';
+          return '<div class="aviso aviso-' + esc(n.tipo) + '">' +
+            '<div class="aviso-linha"><span class="aviso-marca"></span><span class="aviso-titulo">' + esc(n.titulo) + '</span></div>' +
+            '<div class="aviso-detalhe">' + (n.cliente ? '<span class="aviso-cliente">' + esc(n.cliente) + '</span> · ' : '') +
+              esc(n.detalhe) + '</div>' +
+            '<div class="aviso-rodape">' + quando +
+              (n.tenant_id ? '<button data-abrir="' + i + '">Abrir</button>' : '') +
+              '<button data-resolver="' + i + '">' + (n.origem === 'evento' ? 'Marcar como resolvido' : 'Dispensar') + '</button>' +
+            '</div></div>';
+        };
+        const erros = itens.filter((n) => n.tipo === 'erro');
+        const outros = itens.filter((n) => n.tipo !== 'erro');
+        caixaAvisos.innerHTML =
+          '<div class="avisos-topo"><h2>Notificações</h2><span>' +
+            erros.length + (erros.length === 1 ? ' erro' : ' erros') + ' · ' +
+            outros.length + (outros.length === 1 ? ' aviso' : ' avisos') + '</span></div>' +
+          (itens.length
+            ? (erros.length ? '<div class="avisos-grupo">Erros</div>' + erros.map(bloco).join('') : '') +
+              (outros.length ? '<div class="avisos-grupo">Avisos</div>' + outros.map(bloco).join('') : '')
+            : '<p class="avisos-vazio">Nada pendente. Erros, quedas do WhatsApp e configuração que falta aparecem aqui.</p>');
+      }
+
+      function abrirAvisos(abrir) {
+        caixaAvisos.hidden = !abrir;
+        sino.setAttribute('aria-expanded', String(abrir));
+        if (abrir) { desenharAvisos(); carregarAvisos(); }
+      }
+
+      sino.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        abrirAvisos(caixaAvisos.hidden);
+      });
+      document.addEventListener('click', (ev) => {
+        if (!caixaAvisos.hidden && !caixaAvisos.contains(ev.target)) abrirAvisos(false);
+      });
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && !caixaAvisos.hidden) { abrirAvisos(false); sino.focus(); }
+      });
+
+      caixaAvisos.addEventListener('click', async (ev) => {
+        const b = ev.target.closest('button');
+        if (!b) return;
+        ev.stopPropagation();
+        if (b.dataset.abrir !== undefined) {
+          const n = avisos.itens[Number(b.dataset.abrir)];
+          abrirAvisos(false);
+          verCliente(n.tenant_id, n.aba || undefined);
+          return;
+        }
+        if (b.dataset.resolver !== undefined) {
+          const n = avisos.itens[Number(b.dataset.resolver)];
+          b.disabled = true;
+          b.textContent = 'resolvendo…';
+          try {
+            await enviar('/notificacoes/resolver', 'POST', { chave: n.chave, ids: n.ids });
+          } catch (e) {
+            b.disabled = false;
+            b.textContent = 'falhou: ' + e.message;
+            return;
+          }
+          await carregarAvisos();
+          // o cartão do cliente mostra o mesmo erro: sai de lá também
+          if (document.getElementById('btn-atualizar').getAttribute('aria-current') === 'page') verOverview();
+        }
+      });
+
+      carregarAvisos();
+      setInterval(carregarAvisos, 60000);
 
       document.getElementById('btn-google').addEventListener('click', () => verGoogle());
       document.getElementById('btn-padroes').addEventListener('click', () => verPadroes());
