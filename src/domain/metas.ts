@@ -135,7 +135,21 @@ function etapasUteis(stages: Stage[]): Stage[] {
   );
 }
 
-export function proporMetas(stages: Stage[], existentes: ConversionAction[]): MetaProposta[] {
+/**
+ * `ligadas`: o que ja' esta' configurado no funil. Quando uma meta ja' tem
+ * etapa, a sugestao parte dela (e do valor dela) em vez de recalcular pela
+ * posicao — senao a tela desfaria o mapeamento que o cliente definiu na
+ * planilha de etapas, como o da Tainã, que usa Proposta Enviada como meta
+ * propria e empurra os Qualificados para Agendamento e Consulta.
+ */
+export function proporMetas(
+  stages: Stage[],
+  existentes: ConversionAction[],
+  ligadas: EtapaLigada[] = [],
+): MetaProposta[] {
+  const ligadaPorEvento = new Map(
+    ligadas.filter((l) => stages.some((s) => s.id === l.stageId)).map((l) => [l.evento, l]),
+  );
   const porNome = new Map(existentes.map((a) => [norm(a.name), a]));
   const ordenadas = [...stages].sort((a, b) => a.posicao - b.posicao);
   const uteis = etapasUteis(stages);
@@ -162,12 +176,14 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
   const base = usaProposta ? 1 : 0;
 
   return CATALOGO.map((m) => {
-    const sugerida =
-      m.evento === 'conversa' ? entrada
+    const ligada = ligadaPorEvento.get(m.evento);
+    const configurada = ligada ? ordenadas.find((s) => s.id === ligada.stageId) ?? null : null;
+    const sugerida = configurada ??
+      (m.evento === 'conversa' ? entrada
       : m.evento === 'proposta_enviada' ? (intermediarias[0] ?? null)
       : m.evento === 'qualificado_1' ? (intermediarias[base] ?? null)
       : m.evento === 'qualificado_2' ? (intermediarias[base + 1] ?? null)
-      : ganha;
+      : ganha);
 
     const achada = achar(m);
 
@@ -175,7 +191,7 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
       evento: m.evento,
       nome: m.nome,
       categoria: m.categoria,
-      valor: m.valor,
+      valor: ligada ? ligada.valor : m.valor,
       primary: m.primary,
       contagem: 'ONE_PER_CLICK',
       janelaClique: m.janelaClique,
@@ -191,7 +207,8 @@ export function proporMetas(stages: Stage[], existentes: ConversionAction[]): Me
       idExistente: achada ? String(achada.id) : null,
       // marcar por padrao uma meta opcional criaria no Google Ads algo que o
       // cliente nao usa
-      marcada: m.opcional ? !!achada : true,
+      // ...a nao ser que ele ja' a tenha ligado a uma etapa
+      marcada: m.opcional ? !!achada || !!ligada : true,
     };
   });
 }

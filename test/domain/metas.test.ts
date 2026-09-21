@@ -236,3 +236,47 @@ describe('metasForaDoCatalogo', () => {
     expect(metasForaDoCatalogo(persianas, [ligada({ evento: '' })], []).length).toBe(0);
   });
 });
+
+describe('proporMetas — parte do que ja esta ligado', () => {
+  // funil da Tainã: Proposta Enviada, Agendamento Realizado e Consulta Realizada
+  const taina: Stage[] = [
+    { id: 70, posicao: 1, nome: 'Novo Lead', isFinal: false, autoOnReply: false },
+    { id: 71, posicao: 2, nome: 'Qualificando', isFinal: false, autoOnReply: true },
+    { id: 72, posicao: 3, nome: 'Proposta Enviada', isFinal: false, autoOnReply: false },
+    { id: 73, posicao: 4, nome: 'Agendamento Realizado', isFinal: false, autoOnReply: false },
+    { id: 99, posicao: 5, nome: 'Consulta Realizada', isFinal: false, autoOnReply: false },
+    { id: 74, posicao: 6, nome: 'Oportunidade Perdida', isFinal: true, autoOnReply: false },
+    { id: 75, posicao: 7, nome: 'Oportunidade Ganha', isFinal: true, autoOnReply: false },
+  ] as Stage[];
+  const ligada = (stageId: number, evento: string, valor: number | null, actionId: string | null): EtapaLigada => ({
+    stageId, evento, nome: '', categoria: 'QUALIFIED_LEAD', valor, primary: false,
+    contagem: 'ONE_PER_CLICK', janelaClique: 30, janelaView: 1, actionId,
+  });
+  const ligadas = [
+    ligada(72, 'proposta_enviada', 20, null),
+    ligada(73, 'qualificado_1', 150, '7694731833'),
+    ligada(99, 'qualificado_2', 300, '7694732055'),
+  ];
+
+  test('cada meta sugere a etapa em que ja esta ligada', () => {
+    const p = proporMetas(taina, [], ligadas);
+    const etapa = (e: string) => p.find((m) => m.evento === e)!.stageId;
+    expect(etapa('proposta_enviada')).toBe(72);
+    expect(etapa('qualificado_1')).toBe(73);
+    expect(etapa('qualificado_2')).toBe(99);
+  });
+
+  test('o valor configurado vence o do catalogo', () => {
+    const p = proporMetas(taina, [], ligadas);
+    expect(p.find((m) => m.evento === 'proposta_enviada')!.valor).toBe(20);
+    expect(p.find((m) => m.evento === 'qualificado_2')!.valor).toBe(300);
+  });
+
+  test('meta opcional ja ligada a uma etapa vem marcada para ser criada', () => {
+    expect(proporMetas(taina, [], ligadas).find((m) => m.evento === 'proposta_enviada')!.marcada).toBe(true);
+  });
+
+  test('sem nada ligado, a sugestao continua a mesma de antes', () => {
+    expect(proporMetas(taina, []).map((m) => m.stageId)).toEqual(proporMetas(taina, [], []).map((m) => m.stageId));
+  });
+});

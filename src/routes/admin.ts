@@ -557,27 +557,24 @@ admin.get('/tenants/:id/metas/preview', async (c) => {
     isFinal: !!s.isFinal,
     autoOnReply: !!s.autoOnReply,
   }));
+  const jaLigadas = ligadas.map((l) => ({
+    stageId: Number(l.stageId),
+    evento: String(l.evento ?? ''),
+    nome: String(l.nome ?? ''),
+    categoria: (l.categoria ?? 'QUALIFIED_LEAD') as 'CONTACT' | 'QUALIFIED_LEAD' | 'PURCHASE',
+    valor: l.valor === null ? null : Number(l.valor),
+    primary: !!l.primary_,
+    contagem: (l.contagem ?? 'ONE_PER_CLICK') as 'ONE_PER_CLICK' | 'MANY_PER_CLICK',
+    janelaClique: Number(l.janelaClique ?? 30),
+    janelaView: Number(l.janelaView ?? 1),
+    actionId: l.actionId === null ? null : String(l.actionId),
+  }));
 
   return c.json({
     conta: t.gaCustomerId,
     metas: [
-      ...proporMetas(funil, existentes),
-      ...metasForaDoCatalogo(
-        funil,
-        ligadas.map((l) => ({
-          stageId: Number(l.stageId),
-          evento: String(l.evento ?? ''),
-          nome: String(l.nome ?? ''),
-          categoria: (l.categoria ?? 'QUALIFIED_LEAD') as 'CONTACT' | 'QUALIFIED_LEAD' | 'PURCHASE',
-          valor: l.valor === null ? null : Number(l.valor),
-          primary: !!l.primary_,
-          contagem: (l.contagem ?? 'ONE_PER_CLICK') as 'ONE_PER_CLICK' | 'MANY_PER_CLICK',
-          janelaClique: Number(l.janelaClique ?? 30),
-          janelaView: Number(l.janelaView ?? 1),
-          actionId: l.actionId === null ? null : String(l.actionId),
-        })),
-        existentes,
-      ),
+      ...proporMetas(funil, existentes, jaLigadas),
+      ...metasForaDoCatalogo(funil, jaLigadas, existentes),
     ],
   });
 });
