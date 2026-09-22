@@ -2,9 +2,11 @@ import type { Env } from '../env';
 import { exigir } from '../domain/config';
 import { decifrarToken } from '../domain/segredoMeta';
 import { corpoMeta, montarEventoMeta, type EventoMeta } from '../domain/eventoMeta';
-import type { CanalMeta } from '../domain/plataformaLead';
+import { destinoDoLead, MOTIVO_FORA, type CanalMeta, type SinaisDoLead } from '../domain/plataformaLead';
+import { valorDaConversao } from '../domain/conversao';
 import { postarEventos, type RespostaMeta } from '../clients/metaCapi';
 import { registrarEvento } from '../db/queries';
+import { clidRecente } from '../db/metaAtribuicoes';
 
 /**
  * Conversoes da Meta: do evento criado pela etapa do funil ate' a Conversions API.
@@ -60,6 +62,137 @@ interface LeadMeta {
   ip_address: string | null;
   user_agent: string | null;
   page_url: string | null;
+}
+
+export interface LeadDoFunil extends SinaisDoLead {
+  phone_key: string | null;
+  valor_proposta: number | null;
+  created_at: string;
+}
+
+export interface EtapaDoFunil {
+  nome: string;
+  meta_evento: EventoMeta | null;
+  conversion_value: number | null;
+}
+
+/**
+ * O ramo Meta do `enviarConversao`: decide se ha' evento, grava a linha e
+ * enfileira o envio. Nao chama a Meta — isso e' do consumidor.
+ *
+ * Mesma semantica de dedup da conversao do Google: `INSERT OR IGNORE` contra
+ * `UNIQUE (tenant_id, dedupe_key)`; 'falhou' e 'pendente' sao retentativa; o
+ * ensaio (`nao_enviado`) nao conta como envio quando o envio esta' ligado.
+ */
+export async function criarEventoMeta(
+  env: Env,
+  tenantId: number,
+  c: { etapa: EtapaDoFunil; protocolo: string; lead: LeadDoFunil; valorDoCard: number | null; quando: number },
+): Promise<ResultadoMeta> {
+  let destino = destinoDoLead(c.lead);
+
+  // O clique pode ter chegado depois da atribuicao: a Evolution avisa o CRM
+  // direto, mas nada garante a ordem. Procura de novo antes de desistir, e
+  // grava no lead para a proxima etapa (a venda) ja' achar.
+  if ('fora' in destino && destino.fora === 'sem_identificador' && c.lead.phone_key) {
+    const achado = await clidRecente(env.DB, tenantId, c.lead.phone_key, c.lead.created_at);
+    if (achado) {
+      await env.DB.prepare('UPDATE leads SET ctwa_clid = ? WHERE tenant_id = ? AND protocol = ? AND ctwa_clid IS NULL')
+        .bind(achado.ctwa_clid, tenantId, c.protocolo)
+        .run();
+      destino = destinoDoLead({ ...c.lead, ctwa_clid: achado.ctwa_clid });
+    }
+  }
+
+  if (destino.plataforma !== 'meta') return { status: 'ignorado', motivo: `${c.protocolo}: lead do Google` };
+  if ('fora' in destino) {
+    return { status: 'ignorado', motivo: `${c.protocolo} veio da Meta: ${MOTIVO_FORA[destino.fora]}` };
+  }
+  if (!c.etapa.meta_evento) {
+    return { status: 'ignorado', motivo: `${c.protocolo} veio da Meta: etapa "${c.etapa.nome}" sem evento da Meta` };
+  }
+
+  const cfg = await env.DB.prepare('SELECT meta_dataset_id, meta_dry_run, ga_currency FROM tenant_config WHERE tenant_id = ?')
+    .bind(tenantId)
+    .first<{ meta_dataset_id: string | null; meta_dry_run: number; ga_currency: string | null }>();
+  if (!cfg?.meta_dataset_id) {
+    return { status: 'ignorado', motivo: `${c.protocolo} veio da Meta: cliente sem dataset da Meta no cadastro` };
+  }
+
+  const evento = c.etapa.meta_evento;
+  const moeda = cfg.ga_currency ?? 'BRL';
+  let valor = c.etapa.conversion_value;
+  if (evento === 'Purchase') {
+    const v = valorDaConversao(c.etapa.conversion_value, c.valorDoCard, c.lead.valor_proposta);
+    if (v.semValorReal) {
+      // antes do INSERT: a linha e' o dedup, e grava-la agora recusaria o
+      // envio de quando o valor for preenchido
+      return {
+        status: 'erro',
+        retentar: false,
+        motivo: `${c.protocolo}: "${c.etapa.nome}" sem valor da venda — preencha o valor no card para o evento da Meta subir`,
+      };
+    }
+    valor = v.valor;
+  }
+
+  // O whatsapp-track ja' mandou este evento para esta pessoa, com outro
+  // event_id: a Meta contaria duas vezes.
+  if (c.lead.phone_key) {
+    const doTracker = await env.DB.prepare(
+      `SELECT 1 AS ja FROM meta_eventos
+       WHERE tenant_id = ? AND origem = 'tracker' AND phone_key = ? AND event_name = ? LIMIT 1`,
+    )
+      .bind(tenantId, c.lead.phone_key, evento)
+      .first();
+    if (doTracker) {
+      return { status: 'ignorado', motivo: `${c.protocolo}: ${evento} ja enviado a Meta pelo whatsapp-track` };
+    }
+  }
+
+  const chave = `${c.protocolo}-${evento}`;
+  const posto = await env.DB.prepare(
+    `INSERT OR IGNORE INTO meta_eventos
+       (tenant_id, dedupe_key, event_id, protocol, phone_key, canal, event_name, etapa, value, currency, event_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      tenantId, chave, chave, c.protocolo, c.lead.phone_key, destino.canal, evento, c.etapa.nome,
+      valor, moeda, new Date(c.quando).toISOString(),
+    )
+    .run();
+
+  if (!posto.meta.changes) {
+    const atual = await env.DB.prepare('SELECT status FROM meta_eventos WHERE tenant_id = ? AND dedupe_key = ?')
+      .bind(tenantId, chave)
+      .first<{ status: string }>();
+    const retentativa = atual?.status === 'falhou' || atual?.status === 'pendente';
+    const ensaio = atual?.status === 'nao_enviado' && cfg.meta_dry_run !== 1;
+    if (!retentativa && !ensaio) {
+      return {
+        status: 'ignorado',
+        motivo: `evento da Meta ${chave} ja ${atual?.status === 'enviado' ? 'enviado' : 'guardado com o envio desligado'}`,
+      };
+    }
+    await env.DB.prepare(
+      `UPDATE meta_eventos SET status = 'pendente', canal = ?, value = ?, erro = NULL WHERE tenant_id = ? AND dedupe_key = ?`,
+    )
+      .bind(destino.canal, valor, tenantId, chave)
+      .run();
+  }
+
+  const linha = await env.DB.prepare('SELECT id FROM meta_eventos WHERE tenant_id = ? AND dedupe_key = ?')
+    .bind(tenantId, chave)
+    .first<{ id: number }>();
+  await enfileirarEventoMeta(env, tenantId, linha!.id, chave);
+
+  return {
+    status: 'ok',
+    motivo:
+      `${chave} → "${c.etapa.nome}" · Meta ${evento} (${destino.canal})` +
+      (valor ? ` · ${moeda} ${valor}` : '') +
+      ' · na fila',
+  };
 }
 
 /**

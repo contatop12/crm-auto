@@ -3,6 +3,9 @@ import { GoogleAdsClient } from '../clients/googleAds';
 import { montarEvento, montarCorpo, valorDaConversao } from '../domain/conversao';
 import { exigir } from '../domain/config';
 import { espelharNaPlanilha } from './planilha';
+import { criarEventoMeta } from './metaCapi';
+import { destinoDoLead } from '../domain/plataformaLead';
+import type { EventoMeta } from '../domain/eventoMeta';
 
 /**
  * Mudança de etapa no Kanban vira conversão no Google Ads.
@@ -40,17 +43,23 @@ interface Etapa {
   conversion_event: string | null;
   conversion_action_id: string | null;
   conversion_value: number | null;
+  /** Evento da Meta desta etapa; NULL = nao manda nada para a Meta. */
+  meta_evento: EventoMeta | null;
 }
 
 interface Lead {
   email: string | null;
   phone_e164: string | null;
+  phone_key: string | null;
   gclid: string | null;
   gbraid: string | null;
   wbraid: string | null;
   valor_proposta: number | null;
   utm_source: string | null;
   fbc: string | null;
+  ctwa_clid: string | null;
+  evento: string | null;
+  created_at: string;
 }
 
 export async function enviarConversao(
@@ -74,7 +83,7 @@ export async function enviarConversao(
   if (stepId === null) return { status: 'ignorado', motivo: `card ${taskId}: payload sem etapa` };
 
   const etapa = await env.DB.prepare(
-    `SELECT nome, conversion_event, conversion_action_id, conversion_value
+    `SELECT nome, conversion_event, conversion_action_id, conversion_value, meta_evento
      FROM funnel_stages WHERE tenant_id = ? AND cw_step_id = ?`,
   )
     .bind(tenantId, stepId)
@@ -88,6 +97,43 @@ export async function enviarConversao(
 
   // A maioria das etapas não vira conversão, e isso é o normal: "Qualificando"
   // é passagem, não resultado.
+  if (!etapa.conversion_event && !etapa.meta_evento) {
+    return { status: 'ignorado', motivo: `etapa "${etapa.nome}" nao tem meta de conversao` };
+  }
+
+  const protocolo = await acharProtocolo(env, tenantId, p, taskId);
+  if (!protocolo) {
+    // Lead orgânico não tem clique; sem clique não há o que atribuir. Não é
+    // erro — é a metade dos cards.
+    return { status: 'ignorado', motivo: `card ${taskId}: sem protocolo, nao ha clique para atribuir` };
+  }
+
+  const lead = await env.DB.prepare(
+    `SELECT email, phone_e164, phone_key, gclid, gbraid, wbraid, valor_proposta, utm_source, fbc,
+            ctwa_clid, evento, created_at
+     FROM leads WHERE tenant_id = ? AND protocol = ?`,
+  )
+    .bind(tenantId, protocolo)
+    .first<Lead>();
+  if (!lead) {
+    return { status: 'ignorado', motivo: `protocolo ${protocolo} sem clique registrado em leads` };
+  }
+
+  const quando = data(str(p.step_changed_at) ?? str(p.updated_at)) ?? Date.now();
+
+  /**
+   * A conversão volta para a plataforma que trouxe o lead.
+   *
+   * Lead da Meta NUNCA sobe para o Google: sem gclid ele subiria por
+   * e-mail/telefone, o Google aceitaria sem reclamar e usaria dado falso para
+   * decidir lance. Ele vai para a Meta — pelo evento da etapa, se houver — ou
+   * para lugar nenhum, com o motivo. A decisão é `destinoDoLead`: o clique do
+   * Google vence o cookie de pixel da Meta.
+   */
+  if (destinoDoLead(lead).plataforma === 'meta') {
+    return criarEventoMeta(env, tenantId, { etapa, protocolo, lead, valorDoCard: num(p.value), quando });
+  }
+
   if (!etapa.conversion_event) {
     return { status: 'ignorado', motivo: `etapa "${etapa.nome}" nao tem meta de conversao` };
   }
@@ -107,41 +153,6 @@ export async function enviarConversao(
     return { status: 'ignorado', motivo: 'cliente sem conta do Google Ads no perfil' };
   }
 
-  const protocolo = await acharProtocolo(env, tenantId, p, taskId);
-  if (!protocolo) {
-    // Lead orgânico não tem clique; sem clique não há o que atribuir. Não é
-    // erro — é a metade dos cards.
-    return { status: 'ignorado', motivo: `card ${taskId}: sem protocolo, nao ha clique para atribuir` };
-  }
-
-  const lead = await env.DB.prepare(
-    `SELECT email, phone_e164, gclid, gbraid, wbraid, valor_proposta, utm_source, fbc
-     FROM leads WHERE tenant_id = ? AND protocol = ?`,
-  )
-    .bind(tenantId, protocolo)
-    .first<Lead>();
-  if (!lead) {
-    return { status: 'ignorado', motivo: `protocolo ${protocolo} sem clique registrado em leads` };
-  }
-
-  /**
-   * Esta conta e' do GOOGLE Ads. Lead do Meta nao entra.
-   *
-   * Sem esta trava, um lead que preencheu formulario no Meta subiria como
-   * conversao para o Google — que nao trouxe esse lead. O Google usaria isso
-   * para otimizar campanha, ou seja: dado falso virando decisao de lance.
-   *
-   * Nao ha `gclid` num lead de Meta, entao ele subiria por e-mail/telefone e
-   * o Google aceitaria sem reclamar. Falha silenciosa, do tipo que so' aparece
-   * meses depois num relatorio que nao fecha.
-   */
-  if (ehDoMeta(lead)) {
-    return {
-      status: 'ignorado',
-      motivo: `${protocolo} veio do Meta — conversao do Google nao recebe lead de outra plataforma`,
-    };
-  }
-
   const { valor, semValorReal } = valorDaConversao(etapa.conversion_value, num(p.value), lead.valor_proposta);
   if (semValorReal) {
     // Antes do INSERT de proposito: a linha em `conversions` e' o dedup, e
@@ -153,7 +164,6 @@ export async function enviarConversao(
     };
   }
 
-  const quando = data(str(p.step_changed_at) ?? str(p.updated_at)) ?? Date.now();
   const sombra = cfg.validate_only === 1;
   const chave = `${protocolo}-${etapa.conversion_event}`;
 
@@ -370,20 +380,6 @@ async function fechar(
 }
 
 type Rec = Record<string, unknown>;
-
-/**
- * O lead veio do Meta?
- *
- * `fbc` e' o identificador de clique do Meta; `utm_source` marcado como meta
- * cobre o lead de formulario, que nao tem clique nenhum. Um lead com `gclid`
- * NAO e' do Meta, mesmo que tenha `fbc` — o clique do Google e' mais forte e
- * mais recente que um cookie de pixel que so' prova que a pessoa passou por la'.
- */
-function ehDoMeta(l: Lead): boolean {
-  if (l.gclid || l.gbraid || l.wbraid) return false;
-  if (l.fbc) return true;
-  return /^(meta|facebook|instagram|fb|ig)$/i.test((l.utm_source ?? '').trim());
-}
 
 function obj(v: unknown): Rec | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : null;
