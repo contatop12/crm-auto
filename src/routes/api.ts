@@ -384,12 +384,22 @@ api.get('/tenants/:id/ingest-status', async (c) => {
     };
   };
 
+  // A Evolution nao grava em `events`: so' o cartao do anuncio vira linha
+  const evo = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total, MAX(recebido_em) AS ultimo,
+            SUM(CASE WHEN recebido_em >= datetime('now','-1 day') THEN 1 ELSE 0 END) AS em_24h
+     FROM meta_atribuicoes WHERE tenant_id = ? AND origem = 'evolution'`,
+  )
+    .bind(Number(c.req.param('id')))
+    .first<{ total: number; ultimo: string | null; em_24h: number | null }>();
+
   return c.json({
     click: junta((l) => l.source === 'click'),
     chatwoot: junta((l) => l.source === 'chatwoot'),
     kanban_entrada: junta((l) => l.event_type === 'kanban_entrada'),
     kanban_conversao: junta((l) => l.event_type === 'kanban_conversao'),
     meta: junta((l) => l.source === 'meta'),
+    evolution: { total: evo?.total ?? 0, em_24h: evo?.em_24h ?? 0, erros: 0, ultimo: evo?.ultimo ?? null },
   });
 });
 

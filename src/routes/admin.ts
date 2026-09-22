@@ -27,6 +27,7 @@ import {
 import { avaliarEtapa } from '../domain/fluxo';
 import { classificarCards } from '../domain/orfaos';
 import { vigiarWhatsapp } from '../pipelines/vigiaWhatsapp';
+import { metaAds } from './metaAds';
 
 /**
  * Cadastro de clientes, sincronizacao das etapas e geracao das metas de
@@ -326,7 +327,7 @@ admin.post('/tenants/:id/planilha/teste', async (c) => {
   }
 });
 
-const CANAIS = ['click', 'kanban', 'meta'] as const;
+const CANAIS = ['click', 'kanban', 'meta', 'evolution'] as const;
 type Canal = (typeof CANAIS)[number];
 
 const ehCanal = (v: string): v is Canal => (CANAIS as readonly string[]).includes(v);
@@ -412,6 +413,8 @@ admin.post('/tenants/:id/webhooks/:canal/gerar', async (c) => {
     click: [`${base}/click?k=${nova}`],
     kanban: [`${base}/kanban?k=${nova}`, `${base}/kanban?k=${nova}&evento=conversao`],
     meta: [`${base}/meta-lead?k=${nova}`],
+    // a instancia ligada pelo "Conectar" para de entregar ate' conectar de novo
+    evolution: [`${base}/evolution?k=${nova}`],
   };
   return c.json({ ok: true, canal, chave: nova, trocar: trocar[canal] });
 });
@@ -1664,3 +1667,6 @@ admin.post('/tenants/:id/gtm/publicar', async (c) => {
   console.log(JSON.stringify({ acao: 'gtm_publicar', por: c.get('identity').email, tenant_id: id, versao: vid }));
   return c.json({ ok: true, versao: vid });
 });
+
+// Meta Ads: montado depois do `use('*', requireAccess)` do topo, que vale para estas rotas tambem
+admin.route('/', metaAds);
