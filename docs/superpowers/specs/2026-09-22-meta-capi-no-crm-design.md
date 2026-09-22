@@ -30,6 +30,13 @@ Ao fim, o whatsapp-track é desligado. Fica uma ferramenta só.
 - Das instâncias Evolution, só a *Tainã Aci* tem webhook, e ele aponta para o
   tracker. A Evolution aceita **um** webhook por instância.
 - Os dois Workers estão na mesma conta Cloudflare (Contato P12).
+- Por enquanto **só a Tainã** roda campanha de mensagem na Meta. Todo lead
+  dessa campanha chega com o texto pronto
+  `Olá! Gostaria de mais informações [Protocolo: MA21RMKT]`. Hoje esse texto
+  não vira lead em nada:
+  - `findProtocol` exige hífen (`PREFIXO-CODIGO`), e `MA21RMKT` não tem;
+  - a frase de entrada cadastrada da Tainã é outra ("Olá! Vi o anúncio e
+    gostaria de agendar uma consulta.").
 
 ## Escopo
 
@@ -77,8 +84,12 @@ Chatwoot → fila → consumidor (já existe)
         para este telefone nos últimos 7 dias (novo)
         → lead PREFIXO-CTWA-<conversa>, leads.ctwa_clid preenchido
      3) telefone na janela
-     sem lead, 1ª tentativa, rastrear_meta_mensagem = 1 e Meta configurada
-        → adiar (20 s) — o clid pode ainda não ter chegado
+     4) frase de entrada (hoje) — a Tainã ganha a frase "MA21RMKT" → meta
+        → lead TAINA-MSG-<conversa>
+     lead de plataforma meta sem ctwa_clid → procura em meta_atribuicoes pelo
+        telefone (7 dias) e grava em leads.ctwa_clid (novo)
+     lead meta ainda sem clid, 1ª tentativa → adiar (20 s) — o clid pode ainda
+        não ter chegado
      promove → dispararConversaoDeEntrada(plataforma)
 
 Kanban (frase do vendedor move o card) → enviarConversao
@@ -106,8 +117,9 @@ Na ordem:
 2. Tem `ctwa_clid` → `meta/whatsapp`.
 3. `evento = 'meta_lead_form'` → `meta/formulario`, que é ignorado.
 4. Tem `fbc` → `meta/site`.
-5. Tem `utm_source` de Meta mas nenhum identificador (cartão de anúncio lido
-   do texto sem `ctwa_clid`) → `meta/sem_identificador`, ignorado com motivo.
+5. Tem `utm_source` de Meta mas nenhum identificador (frase `MA21RMKT` ou
+   cartão no texto, e o `ctwa_clid` nunca chegou) → `meta/sem_identificador`,
+   ignorado com motivo.
    A CAPI de `business_messaging` exige o `ctwa_clid`.
 6. Caso contrário → `google`, que é o caminho de hoje: sem conta ou sem
    identificador, o próprio Google recusa.
@@ -115,11 +127,20 @@ Na ordem:
 ### Corrida Evolution × Chatwoot
 
 A Evolution avisa o CRM direto. O Chatwoot só avisa depois de gravar a
-mensagem, então na prática o clid chega antes. Se não tiver chegado, o
-`atribuirLead` devolve `adiar` **uma vez**: a fila já tem esse mecanismo
-(`ESPERA_ADIADA_S = 20`). Isso vale só para cliente com
-`rastrear_meta_mensagem = 1` e `meta_dataset_id` preenchido, para não atrasar
-os outros. Na segunda tentativa, o fluxo segue normal com o que houver.
+mensagem, então na prática o clid chega antes. Há duas proteções para quando
+ele não chegou:
+
+1. **Na atribuição.** Um lead de campanha de mensagem da Meta (frase de
+   entrada com plataforma `meta`, como a `MA21RMKT`, ou cartão no texto) que
+   ainda está sem `ctwa_clid` faz o `atribuirLead` devolver `adiar`
+   **uma vez**. O lead do site com `fbc` não espera, porque o identificador
+   dele é o `fbc`. A fila já tem esse mecanismo
+   (`ESPERA_ADIADA_S = 20`). Mensagem orgânica nunca espera. Na segunda
+   tentativa, o fluxo segue com o que houver.
+2. **No envio.** Um lead Meta sem `ctwa_clid` procura de novo em
+   `meta_atribuicoes` pelo telefone antes de montar o evento, e grava o clid
+   se achar. Cobre o clid que chegou depois da atribuição, para as etapas
+   seguintes (Purchase).
 
 ### Etapa de entrada
 
@@ -151,6 +172,13 @@ ALTER TABLE funnel_stages ADD COLUMN meta_evento TEXT
   CHECK (meta_evento IN ('LeadSubmitted', 'Purchase'));
 
 ALTER TABLE leads ADD COLUMN ctwa_clid TEXT;
+
+-- Taina: todo lead da campanha de mensagem da Meta chega com
+-- "Ola! Gostaria de mais informacoes [Protocolo: MA21RMKT]". A frase casa por
+-- "contem" depois do `limpa` (que preserva o codigo); findProtocol nao le
+-- MA21RMKT porque exige hifen.
+INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+SELECT id, 'MA21RMKT', 'mensagem', 'meta' FROM tenants WHERE slug = 'taina';
 
 -- ingest_keys reconstruida: o CHECK de `canal` passa a aceitar 'evolution'
 -- (tabela pequena; copia as linhas, mesmos indices)
@@ -370,7 +398,8 @@ pelo leitor. O `jpegThumbnail` do cartão nunca é gravado.
      original, `phone_key`).
    - Nada disso vai para o git.
 4. **Configurar as etapas no painel:** "Novo Lead" → `LeadSubmitted`,
-   "Oportunidade Ganha" → `Purchase`.
+   "Oportunidade Ganha" → `Purchase`. A frase `MA21RMKT` já entra pela
+   migração.
 5. **"Verificar token"** deve responder OK.
 6. **Ligar o envio** (`meta_dry_run = 0`), direto e sem código de teste. A
    Tainã gera ~0,8 lead/dia; uma janela de teste custaria um dia de leads
@@ -425,10 +454,14 @@ Vitest, seguindo `test/domain` e `test/pipelines`, com `test/helpers/fakeD1.ts`.
   - dedup;
   - trava contra os envios `origem = 'tracker'`.
 - `leadMessage`:
-  - clid da Evolution → lead CTWA com `ctwa_clid`, promovido, conversão de
-    entrada pela etapa Meta;
-  - sem clid na 1ª tentativa → `adiar`; na 2ª segue normal;
-  - cliente sem Meta nunca adia.
+  - `Olá! Gostaria de mais informações [Protocolo: MA21RMKT]` com clid na
+    Evolution → lead `TAINA-MSG-<conversa>` com `ctwa_clid`, promovido,
+    conversão de entrada pela etapa Meta;
+  - a mesma mensagem sem clid na 1ª tentativa → `adiar`; na 2ª segue sem clid;
+  - clid da Evolution sem a frase → lead CTWA com `ctwa_clid`;
+  - mensagem orgânica nunca adia.
+- `stageChanged`: lead Meta sem `ctwa_clid` e com atribuição que chegou
+  depois → o clid é achado no envio e vai no evento.
 - `ingest` evolution: chave errada → 401; sem cartão → nada gravado; com
   cartão → `meta_atribuicoes`; reenvio do mesmo clid → uma linha só.
 - `metaCapi` (consumidor): dry-run → `nao_enviado` sem `fetch`; 200 →
