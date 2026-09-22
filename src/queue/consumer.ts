@@ -50,7 +50,8 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
         case 'message_incoming':
           // Onde a atribuicao acontece: le o protocolo da mensagem, acha o
           // clique e escreve origem, UTMs e etiquetas na conversa e no card.
-          return atribuirLead(env, msg.tenantId, payload);
+          // `tentativa`: o lead da Meta sem clique espera a Evolution uma vez
+          return atribuirLead(env, msg.tenantId, payload, { tentativa });
         case 'message_outgoing':
           // move o card pela frase do vendedor e captura o valor da proposta
           return moverPelaResposta(env, msg.tenantId, payload);

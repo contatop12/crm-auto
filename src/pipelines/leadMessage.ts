@@ -8,12 +8,14 @@ import { matchLead } from '../domain/matching';
 import { detectPlatform, detectOrigin, classifyCampaign } from '../domain/platform';
 import { buildLabels } from '../domain/labels';
 import { utmsDoCard, precisaResolverNome } from '../domain/padroes';
-import { casarFraseDeEntrada, protocoloDaFrase, type FraseEntrada } from '../domain/frasesEntrada';
+import { casarFraseDeEntrada, protocoloDaFrase, type FraseEntrada, type OrigemDaFrase } from '../domain/frasesEntrada';
 import { anuncioDoMeta, protocoloDoAnuncio, type AnuncioMeta } from '../domain/anuncioMeta';
 import { enviarConversao } from './stageChanged';
 import { espelharNaPlanilha } from './planilha';
 import { nomeUtil, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLead';
 import type { LabelVocabulary, LeadCandidate } from '../domain/types';
+import { destinoDoLead, type SinaisDoLead } from '../domain/plataformaLead';
+import { clidRecente, type AtribuicaoMeta } from '../db/metaAtribuicoes';
 
 /**
  * Mensagem do lead: e' aqui que a atribuicao acontece.
@@ -41,6 +43,8 @@ export const SENTINELA_PROMOVER = 'PROMOVER';
 interface Resultado {
   status: 'ok' | 'ignorado' | 'erro';
   motivo: string;
+  /** O clique do anuncio pode nao ter chegado ainda: a fila devolve daqui a pouco. */
+  adiar?: boolean;
 }
 
 interface Config {
@@ -76,7 +80,12 @@ interface LinhaLead {
   page_url?: string | null;
 }
 
-export async function atribuirLead(env: Env, tenantId: number, payload: string): Promise<Resultado> {
+export async function atribuirLead(
+  env: Env,
+  tenantId: number,
+  payload: string,
+  opts: { tentativa?: number } = {},
+): Promise<Resultado> {
   let p: Record<string, unknown>;
   try {
     p = JSON.parse(payload) as Record<string, unknown>;
@@ -117,17 +126,30 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
     return { status: 'ignorado', motivo: `conversa ${conversaId} e' de um numero da propria empresa` };
   }
 
-  // 1) protocolo na mensagem  2) cartao do anuncio do Meta  3) telefone na janela
+  // 1) protocolo na mensagem  2) anuncio da Meta  3) telefone na janela  4) frase
   //
-  // O cartao do anuncio vem antes do telefone: ele prova de onde a conversa
-  // veio AGORA. Casar pelo telefone atribuiria ao Google quem clicou num
-  // anuncio do Google meses atras e hoje chegou pelo Instagram.
+  // O anuncio vem antes do telefone: ele prova de onde a conversa veio AGORA.
+  // Casar pelo telefone atribuiria ao Google quem clicou num anuncio do Google
+  // meses atras e hoje chegou pelo Instagram. O anuncio chega de dois jeitos:
+  // o cartao no texto (quando o Chatwoot recebe) ou o clique (`ctwa_clid`) que
+  // a Evolution entregou para este telefone, quando o webhook da instancia
+  // aponta para o CRM.
   const protocoloDito = findProtocol(texto);
+  const clid = protocoloDito ? null : await clidRecente(env.DB, tenantId, chave || null);
   const anuncio = !protocoloDito && cfg.rastrear_meta_mensagem === 1 ? anuncioDoMeta(texto) : null;
+  const primeiraTentativa = (opts.tentativa ?? 1) < 2;
+
+  // Anuncio da Meta sem o clique: a Evolution avisa o CRM direto, mas nada
+  // garante que chegou antes do Chatwoot. Espera uma vez — so' quem tem a
+  // Evolution ligada ao CRM, senao o clique nunca viria.
+  if (anuncio && !clid && primeiraTentativa && (await recebeEvolution(env, tenantId))) {
+    return adiar(conversaId);
+  }
+
   const leadDoClique = protocoloDito
     ? await porProtocolo(env, tenantId, protocoloDito)
-    : anuncio
-      ? await leadDoAnuncio(env, tenantId, anuncio, { telefone, chave, conversaId, prefixo: cfg.gtm_prefixo })
+    : anuncio || clid
+      ? await leadDoAnuncio(env, tenantId, { anuncio, clid }, { telefone, chave, conversaId, prefixo: cfg.gtm_prefixo })
       : await porTelefone(env, tenantId, chave, cfg.janela_match_dias ?? 90);
 
   /**
@@ -138,9 +160,19 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
    * existe porque alguem apertou aquele botao. Sem isto o lead e' descartado:
    * pago, atendido, e invisivel para o Google.
    */
-  const lead = leadDoClique ?? (await leadDaFrase(env, tenantId, {
-    texto, telefone, chave, conversaId, prefixo: cfg.gtm_prefixo,
-  }));
+  let lead = leadDoClique;
+  if (!lead) {
+    const frase = casarFraseDeEntrada(texto, await frasesDoTenant(env, tenantId));
+    // A frase da campanha de mensagem da Meta (a MA21RMKT da Taina) sem o
+    // clique: mesma espera. Antes de criar o lead, para a segunda tentativa
+    // nao deixar um lead da frase orfao quando o clique chegar.
+    if (frase?.plataforma === 'meta' && primeiraTentativa && (await recebeEvolution(env, tenantId))) {
+      return adiar(conversaId);
+    }
+    lead = frase
+      ? await leadDaFrase(env, tenantId, frase, { telefone, chave, conversaId, prefixo: cfg.gtm_prefixo })
+      : null;
+  }
 
   if (!lead) {
     const semLead = protocoloDito
@@ -323,7 +355,7 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
       quizValor: lead.quiz_valor,
       pagina: lead.page_url,
       trafego: daAds ? 'pago' : leadDoClique && veioDoSite ? 'organico' : null,
-      canal: anuncio ? 'msg-nat' : veioDoSite ? (origem === 'formulario' ? 'formulario-do-site' : 'msg-site') : null,
+      canal: anuncio || clid ? 'msg-nat' : veioDoSite ? (origem === 'formulario' ? 'formulario-do-site' : 'msg-site') : null,
       viaSite: !daAds && veioDoSite,
     },
     vocab,
@@ -483,10 +515,23 @@ async function dispararConversaoDeEntrada(
   protocolo: string,
   conversaId: number,
 ): Promise<void> {
+  // A etapa de entrada depende de para onde a conversao do lead volta: a
+  // primeira com meta do Google, ou a primeira com evento da Meta.
+  const sinais = await env.DB.prepare(
+    'SELECT gclid, gbraid, wbraid, ctwa_clid, fbc, evento, utm_source FROM leads WHERE tenant_id = ? AND protocol = ?',
+  )
+    .bind(tenantId, protocolo)
+    .first<SinaisDoLead>()
+    .catch(() => null);
+  const daMeta = !!sinais && destinoDoLead(sinais).plataforma === 'meta';
+
   const etapa = await env.DB.prepare(
-    `SELECT cw_step_id FROM funnel_stages
-     WHERE tenant_id = ? AND conversion_event IS NOT NULL AND conversion_action_id IS NOT NULL
-     ORDER BY posicao LIMIT 1`,
+    daMeta
+      ? `SELECT cw_step_id FROM funnel_stages
+         WHERE tenant_id = ? AND meta_evento IS NOT NULL ORDER BY posicao LIMIT 1`
+      : `SELECT cw_step_id FROM funnel_stages
+         WHERE tenant_id = ? AND conversion_event IS NOT NULL AND conversion_action_id IS NOT NULL
+         ORDER BY posicao LIMIT 1`,
   )
     .bind(tenantId)
     .first<{ cw_step_id: number }>()
@@ -523,17 +568,14 @@ async function dispararConversaoDeEntrada(
 async function leadDaFrase(
   env: Env,
   tenantId: number,
+  casou: OrigemDaFrase,
   ctx: {
-    texto: string;
     telefone: string | null;
     chave: string | null;
     conversaId: number;
     prefixo: string | null;
   },
-): Promise<LinhaLead | null> {
-  const casou = casarFraseDeEntrada(ctx.texto, await frasesDoTenant(env, tenantId));
-  if (!casou) return null;
-
+): Promise<LinhaLead> {
   const protocolo = protocoloDaFrase(ctx.prefixo ?? '', ctx.conversaId);
   const fone = normFone(ctx.telefone);
 
@@ -565,44 +607,74 @@ async function leadDaFrase(
 }
 
 /**
- * Cria o lead da campanha de mensagem do Meta a partir do cartao do anuncio.
+ * Cria o lead da campanha de mensagem da Meta.
  *
- * `utm_source` guarda a rede (instagram/facebook): e' o que a trava do Google
- * reconhece como Meta — a conversao do Google nao recebe este lead — e o que
- * vira a etiqueta. O anuncio fica no lead: titulo em `utm_content`, post em
- * `page_url`, para a planilha e para quem quiser saber qual criativo trouxe.
+ * Duas fontes, que se completam: o cartao do anuncio no texto (titulo e link)
+ * e o clique que a Evolution guardou (`ctwa_clid`, sem o qual a Meta nao
+ * aceita o evento). `utm_source` guarda a rede (instagram/facebook): e' o que
+ * vira a etiqueta e o que diz que o lead e' da Meta. O anuncio fica no lead:
+ * titulo em `utm_content`, post em `page_url`.
  */
 async function leadDoAnuncio(
   env: Env,
   tenantId: number,
-  anuncio: AnuncioMeta,
+  fonte: { anuncio: AnuncioMeta | null; clid: AtribuicaoMeta | null },
   ctx: { telefone: string | null; chave: string | null; conversaId: number; prefixo: string | null },
 ): Promise<LinhaLead> {
   const protocolo = protocoloDoAnuncio(ctx.prefixo ?? '', ctx.conversaId);
+  const link = fonte.anuncio?.link ?? fonte.clid?.source_url ?? null;
+  const rede = fonte.anuncio?.rede ?? redeDoLink(link);
+  const titulo = fonte.anuncio?.titulo ?? fonte.clid?.titulo ?? null;
+  const ctwa = fonte.clid?.ctwa_clid ?? null;
+
   await env.DB.prepare(
     `INSERT INTO leads (tenant_id, protocol, phone_raw, phone_e164, phone_key,
-                        utm_source, utm_medium, utm_content, page_url, origem, evento)
-     VALUES (?, ?, ?, ?, ?, ?, 'mensagem', ?, ?, 'mensagem', 'anuncio_meta')
+                        utm_source, utm_medium, utm_content, page_url, origem, evento, ctwa_clid)
+     VALUES (?, ?, ?, ?, ?, ?, 'mensagem', ?, ?, 'mensagem', 'anuncio_meta', ?)
      ON CONFLICT (tenant_id, protocol) DO UPDATE SET
        phone_e164 = COALESCE(excluded.phone_e164, leads.phone_e164),
        phone_key  = COALESCE(excluded.phone_key, leads.phone_key),
+       ctwa_clid  = COALESCE(leads.ctwa_clid, excluded.ctwa_clid),
        updated_at = datetime('now')`,
   )
     .bind(tenantId, protocolo, ctx.telefone, normFone(ctx.telefone) || null, ctx.chave || null,
-      anuncio.rede, anuncio.titulo, anuncio.link)
+      rede, titulo, link, ctwa)
     .run();
 
-  console.log(JSON.stringify({ acao: 'lead_do_anuncio_meta', protocolo, rede: anuncio.rede }));
+  console.log(JSON.stringify({ acao: 'lead_do_anuncio_meta', protocolo, rede, clique: !!ctwa }));
 
   return {
     protocol: protocolo,
     nome: null,
     gclid: null, gbraid: null, wbraid: null,
-    utm_source: anuncio.rede, utm_medium: 'mensagem', utm_campaign: null,
-    utm_id: null, utm_term: null, utm_content: anuncio.titulo,
+    utm_source: rede, utm_medium: 'mensagem', utm_campaign: null,
+    utm_id: null, utm_term: null, utm_content: titulo,
     fbc: null,
     origem: 'mensagem', evento: 'anuncio_meta',
     quiz_version: null, quiz_valor: null,
+  };
+}
+
+/** A rede pelo link do cartao. Sem link: 'meta', que ainda marca o lead como da Meta. */
+function redeDoLink(link: string | null): string {
+  if (!link) return 'meta';
+  return /instagram\.com/i.test(link) ? 'instagram' : 'facebook';
+}
+
+/** O cliente ligou a Evolution ao CRM? So' entao o clique do anuncio pode chegar. */
+async function recebeEvolution(env: Env, tenantId: number): Promise<boolean> {
+  const l = await env.DB.prepare(`SELECT 1 AS tem FROM ingest_keys WHERE tenant_id = ? AND canal = 'evolution'`)
+    .bind(tenantId)
+    .first()
+    .catch(() => null);
+  return !!l;
+}
+
+function adiar(conversaId: number): Resultado {
+  return {
+    status: 'ignorado',
+    adiar: true,
+    motivo: `conversa ${conversaId}: anuncio da Meta sem o clique (ctwa_clid) ainda — espera a Evolution`,
   };
 }
 
