@@ -11,9 +11,8 @@ import { utmsDoCard, precisaResolverNome } from '../domain/padroes';
 import { casarFraseDeEntrada, protocoloDaFrase, type FraseEntrada } from '../domain/frasesEntrada';
 import { anuncioDoMeta, protocoloDoAnuncio, type AnuncioMeta } from '../domain/anuncioMeta';
 import { enviarConversao } from './stageChanged';
-import { espelharNaPlanilha, gravarLeadDireto } from './planilha';
-import { nomeUtil, nomeParaExibir, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLead';
-import { decidirLeadDireto, paraMs } from '../domain/leadDireto';
+import { espelharNaPlanilha } from './planilha';
+import { nomeUtil, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLead';
 import type { LabelVocabulary, LeadCandidate } from '../domain/types';
 
 /**
@@ -155,12 +154,11 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
         ? { origem: null, plataforma: 'outro', viaSite: true, canal: 'msg-site' }
         : { origem: null, plataforma: 'outro', trafego: 'direto' });
     }
-    // Todo lead na planilha: quem chamou direto entra na Geral e na aba de lead
-    // direto — so' no cliente que tem essa aba, e sem aviso no grupo.
-    if (!cfg.sheets_aba_direto) return { status: 'ignorado', motivo: semLead };
-    return registrarLeadDireto(env, tenantId, p, conv, conversaId, {
-      telefone, chave, cliente: cfg.cliente, semLead,
-    });
+    // Lead e' o que vem com protocolo. Quem chamou direto (paciente, indicacao,
+    // numero salvo) nao entra na planilha nem avisa o grupo: o "lead direto"
+    // de 21/09 pegou paciente antigo como lead novo (o Chatwoot so' cria o
+    // contato na primeira mensagem depois da integracao).
+    return { status: 'ignorado', motivo: semLead };
   }
 
   const sinais = {
@@ -653,74 +651,4 @@ async function gravarContatoNoLead(
     .catch((e: Error) => {
       console.log(JSON.stringify({ acao: 'contato_no_lead_falhou', protocolo, erro: e.message }));
     });
-}
-
-/**
- * Quem chamou direto no WhatsApp: vai para a planilha de leads (Geral + aba de
- * lead direto), sem Banco de Dados e sem aviso no grupo.
- *
- * `leads_diretos` e' a trava: a mesma conversa ou o mesmo telefone nao entram
- * duas vezes. Falha na planilha fica marcada e volta para a fila; a
- * retentativa acha a linha em `erro` e tenta de novo.
- */
-async function registrarLeadDireto(
-  env: Env,
-  tenantId: number,
-  p: Record<string, unknown>,
-  conv: Record<string, unknown> | null,
-  conversaId: number,
-  ctx: { telefone: string | null; chave: string; cliente: string | null; semLead: string },
-): Promise<Resultado> {
-  const semLead = (motivo: string): Resultado => ({ status: 'ignorado', motivo: `${ctx.semLead} · ${motivo}` });
-
-  if (str(p.message_type) === 'outgoing') return semLead('mensagem da empresa');
-  const fone = normFone(ctx.telefone);
-  if (!fone || !ctx.chave) return semLead('sem telefone valido (grupo ou contato sem numero)');
-
-  const decisao = decidirLeadDireto({
-    contatoDesde: str(obj(conv?.contact_inbox)?.created_at),
-    mensagemEm: (p.created_at as string | number | undefined) ?? null,
-    primeiraRespostaEm: (conv?.first_reply_created_at as string | number | undefined) ?? null,
-  });
-  if (!decisao.lead) return semLead(decisao.motivo);
-
-  const telefone = fone.replace('+', '');
-  const sender = obj(obj(conv?.meta)?.sender) ?? {};
-  const nome = nomeParaExibir(str(sender.name), { telefone, nomesProprios: [ctx.cliente] });
-  const chegouEm = paraMs(p.created_at as string | number | undefined) ?? Date.now();
-
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO leads_diretos (tenant_id, cw_conversation_id, phone_key, nome, telefone, chegou_em)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(tenantId, conversaId, ctx.chave, nome, telefone, new Date(chegouEm).toISOString())
-    .run();
-
-  const linha = await env.DB.prepare(
-    `SELECT id, planilha_status FROM leads_diretos
-     WHERE tenant_id = ? AND (cw_conversation_id = ? OR phone_key = ?)
-     ORDER BY id LIMIT 1`,
-  )
-    .bind(tenantId, conversaId, ctx.chave)
-    .first<{ id: number; planilha_status: string }>();
-
-  if (!linha) return semLead('trava de lead direto nao gravou');
-  if (linha.planilha_status === 'ok') return semLead('lead direto ja registrado');
-
-  try {
-    const abas = await gravarLeadDireto(env, tenantId, { chegouEm, nome, telefone });
-    await env.DB.prepare(
-      `UPDATE leads_diretos SET planilha_status = 'ok', planilha_erro = NULL WHERE id = ?`,
-    ).bind(linha.id).run();
-    return {
-      status: 'ok',
-      motivo: `lead direto (sem protocolo): ${nome} · ${abas.length ? `planilha: ${abas.join(', ')}` : 'planilha desligada'} · sem aviso no grupo`,
-    };
-  } catch (e) {
-    const erro = (e as Error).message.slice(0, 300);
-    await env.DB.prepare(
-      `UPDATE leads_diretos SET planilha_status = 'erro', planilha_erro = ? WHERE id = ?`,
-    ).bind(erro, linha.id).run();
-    return { status: 'erro', motivo: `lead direto ${nome}: planilha falhou: ${erro}` };
-  }
 }

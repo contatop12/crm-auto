@@ -2,7 +2,6 @@ import { describe, test, expect } from 'vitest';
 import {
   SEM_NOME, limparNome, nomeUtil, nomeParaExibir, lerNumerosProprios, ehNumeroProprio,
 } from '../../src/domain/nomeLead';
-import { decidirLeadDireto, paraMs } from '../../src/domain/leadDireto';
 import { abasDoLead, montarRegistro } from '../../src/domain/planilha';
 
 // Nomes reais da Geral da Vita (agosto e setembro de 2026)
@@ -52,49 +51,6 @@ describe('numeros da propria empresa', () => {
     expect(lerNumerosProprios(null)).toEqual([]);
     expect(lerNumerosProprios('nao e json')).toEqual([]);
     expect(ehNumeroProprio('+5519990177608', [])).toBe(false);
-  });
-});
-
-describe('quem e lead direto', () => {
-  test('contato novo que chamou primeiro (Benicio, 21/09)', () => {
-    expect(decidirLeadDireto({
-      contatoDesde: '2026-09-21T20:04:38.410Z',
-      mensagemEm: '2026-09-21T20:04:38.497Z',
-      primeiraRespostaEm: null,
-    }).lead).toBe(true);
-  });
-
-  test('a clinica falou primeiro (Leticia, 17/09; Sr Domingos, 10/09)', () => {
-    expect(decidirLeadDireto({
-      contatoDesde: '2026-09-17T19:42:44.941Z',
-      mensagemEm: '2026-09-17T19:43:27.540Z',
-      primeiraRespostaEm: '2026-09-17T19:42:45.301Z',
-    }).lead).toBe(false);
-  });
-
-  test('contato antigo na caixa (paciente)', () => {
-    expect(decidirLeadDireto({
-      contatoDesde: '2026-08-12T10:00:00.000Z',
-      mensagemEm: '2026-09-21T12:12:00.000Z',
-      primeiraRespostaEm: null,
-    }).lead).toBe(false);
-  });
-
-  test('resposta da clinica DEPOIS da mensagem nao tira o lead', () => {
-    expect(decidirLeadDireto({
-      contatoDesde: '2026-09-12T14:51:07.378Z',
-      mensagemEm: '2026-09-12T14:51:07.465Z',
-      primeiraRespostaEm: '2026-09-14T11:36:37.638Z',
-    }).lead).toBe(true);
-  });
-
-  test('sem as datas nao decide que e lead', () => {
-    expect(decidirLeadDireto({ contatoDesde: null, mensagemEm: null, primeiraRespostaEm: null }).lead).toBe(false);
-  });
-
-  test('epoch em segundos e ISO viram o mesmo instante', () => {
-    expect(paraMs(1790021078)).toBe(1790021078000);
-    expect(paraMs('2026-09-21T20:04:38.000Z')).toBe(Date.parse('2026-09-21T20:04:38.000Z'));
   });
 });
 

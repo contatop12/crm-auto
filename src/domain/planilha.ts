@@ -139,8 +139,6 @@ function caminho(url: string | null | undefined): string {
 
 /** Canal do lead que veio pelo site, com protocolo, mas sem anuncio. */
 export const CANAL_DIRETO_SITE = 'Mensagem Direta (site)';
-/** Canal de quem chamou no WhatsApp sem protocolo e sem anuncio. */
-export const CANAL_DIRETO_WHATSAPP = 'Mensagem Direta (WhatsApp)';
 
 export function montarRegistro(
   ctx: ContextoPlanilha,

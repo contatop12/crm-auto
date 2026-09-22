@@ -3,7 +3,7 @@ import { postarNaPlanilha } from '../clients/n8n';
 import { SheetsClient } from '../clients/sheets';
 import {
   montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna, campoDaColunaLeads, jaTemTelefone,
-  abasDoLead, telefoneEmLink, dataHoraBrasilia, CANAL_DIRETO_WHATSAPP,
+  abasDoLead, telefoneEmLink, dataHoraBrasilia,
   type ContextoPlanilha, type LeadDaPlanilha,
 } from '../domain/planilha';
 
@@ -212,75 +212,4 @@ async function gravarPorProtocolo(
   const n = i + 2; // a coluna comeca na linha 2
   const atual = await sheets.linha(doc, aba, n, ultima);
   await sheets.atualizar(doc, aba, n, ultima, montarLinhaPorCabecalho(cab, dados, atual));
-}
-
-/** O que se sabe de quem chamou direto no WhatsApp, sem clique nem protocolo. */
-export interface LeadDiretoPlanilha {
-  /** Quando a primeira mensagem chegou (ms). */
-  chegouEm: number;
-  /** Ja' passado por `nomeParaExibir`. */
-  nome: string;
-  /** So' digitos, com o 55. */
-  telefone: string;
-}
-
-/**
- * Grava o lead direto na planilha de LEADS: Geral e a aba de lead direto.
- *
- * O Banco de Dados fica de fora de proposito: ele guarda clique e protocolo, e
- * este lead nao tem nenhum dos dois. SEQUENCIA fica em branco, como sempre
- * (quem numera e' o script da planilha). A trava de "uma linha por lead" e' a
- * mesma de sempre: telefone ja' presente na aba nao entra de novo.
- *
- * Devolve as abas escritas; falha em alguma aba sobe como erro para quem chama
- * poder retentar.
- */
-export async function gravarLeadDireto(
-  env: Env,
-  tenantId: number,
-  lead: LeadDiretoPlanilha,
-): Promise<string[]> {
-  const cfg = await env.DB.prepare(
-    `SELECT sheets_ativo, planilha_modo, sheets_leads_doc_id, sheets_aba_geral, sheets_aba_direto
-     FROM tenant_config WHERE tenant_id = ?`,
-  )
-    .bind(tenantId)
-    .first<{
-      sheets_ativo: number; planilha_modo: string; sheets_leads_doc_id: string | null;
-      sheets_aba_geral: string | null; sheets_aba_direto: string | null;
-    }>();
-
-  if (!cfg || cfg.sheets_ativo !== 1 || cfg.planilha_modo !== 'sistema') return [];
-  if (!cfg.sheets_leads_doc_id || !cfg.sheets_aba_direto) return [];
-
-  const quando = dataHoraBrasilia(lead.chegouEm);
-  const registro: Record<string, unknown> = {
-    data: quando.data,
-    hora: quando.hora,
-    timestamp: quando.timestamp,
-    canal: CANAL_DIRETO_WHATSAPP,
-    plataforma: '',
-    pagina: '',
-    pagina_slug: '',
-    nome: lead.nome,
-    telefone: lead.telefone,
-    link_whatsapp: lead.telefone ? `https://wa.me/${lead.telefone}` : '',
-  };
-
-  const sheets = new SheetsClient(env);
-  const feitas: string[] = [];
-  const falhas: string[] = [];
-  const abas = [cfg.sheets_aba_geral, cfg.sheets_aba_direto].filter((a): a is string => !!a);
-  for (const aba of abas) {
-    try {
-      await acrescentarLead(sheets, cfg.sheets_leads_doc_id, aba, registro);
-      feitas.push(aba);
-    } catch (e) {
-      falhas.push(`${aba}: ${(e as Error).message}`);
-    }
-  }
-  if (falhas.length) {
-    throw new Error(`${falhas.join(' | ')}${feitas.length ? ` (gravou: ${feitas.join(', ')})` : ''}`);
-  }
-  return feitas;
 }

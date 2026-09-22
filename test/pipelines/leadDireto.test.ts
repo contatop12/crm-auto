@@ -175,33 +175,19 @@ describe('numero da propria empresa', () => {
   });
 });
 
-describe('lead direto (sem protocolo, sem clique, sem frase)', () => {
-  test('contato novo que chamou primeiro entra na Geral e na aba de lead direto', async () => {
+describe('contato sem protocolo nao e lead', () => {
+  // Lead e' o que vem com protocolo (regra do usuario, 21/09). O Benicio,
+  // paciente desde maio, mandou "Oieee" e virou "lead direto" na planilha
+  // porque o Chatwoot so' criou o contato dele naquele dia.
+  test('nao entra na planilha, mesmo no cliente que tem a aba de lead direto', async () => {
     const { env, consultar } = cenario({ planilha: true });
     const r = await atribuirLead(env, 1, mensagem());
 
-    expect(r.status).toBe('ok');
-    expect(r.motivo).toMatch(/sem aviso no grupo/);
-    for (const aba of ['Geral', 'WhatsApp Direto']) {
-      expect(abas[aba]).toHaveLength(2);
-      const linha = Object.fromEntries(GERAL_CAB.map((h, i) => [h, abas[aba]![1]![i]]));
-      expect(linha).toMatchObject({
-        'URL WHATSAPP': 'https://wa.me/5511984738894',
-        Canal: 'Mensagem Direta (WhatsApp)',
-        SEQUENCIA: '',
-        DATA: '21/09/2026',
-        HORA: '17:04:38',
-        NOME: 'Benicio Groblackner',
-        TELEFONE: '5511984738894',
-      });
-    }
-    expect(consultar<{ planilha_status: string }>('SELECT planilha_status FROM leads_diretos')[0]!.planilha_status).toBe('ok');
-  });
-
-  test('o canal leva "Mensagem": no fluxo Central ele cai na saida sem aviso', async () => {
-    const { env } = cenario({ planilha: true });
-    await atribuirLead(env, 1, mensagem());
-    expect(abas.Geral![1]![1]).toMatch(/Mensagem/);
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toMatch(/sem protocolo/);
+    expect(abas.Geral).toHaveLength(1);
+    expect(abas['WhatsApp Direto']).toHaveLength(1);
+    expect(consultar('SELECT * FROM leads_diretos')).toHaveLength(0);
   });
 
   test('nao vai para o Banco de Dados nem avisa o grupo', async () => {
@@ -211,75 +197,7 @@ describe('lead direto (sem protocolo, sem clique, sem frase)', () => {
     expect(chamadas.some((c) => /pulseboard/.test(c.url))).toBe(false);
   });
 
-  test('a segunda mensagem do mesmo contato nao duplica a linha', async () => {
-    const { env } = cenario({ planilha: true });
-    await atribuirLead(env, 1, mensagem());
-    const r = await atribuirLead(env, 1, mensagem({ em: '2026-09-21T20:05:10.000Z', texto: 'tem horario amanha?' }));
-    expect(r.status).toBe('ignorado');
-    expect(abas.Geral).toHaveLength(2);
-  });
-
-  test('o mesmo telefone em outra conversa nao entra de novo', async () => {
-    const { env } = cenario({ planilha: true });
-    await atribuirLead(env, 1, mensagem());
-    await atribuirLead(env, 1, mensagem({ conversa: 97, contatoDesde: '2026-09-21T20:04:38.000Z' }));
-    expect(abas.Geral).toHaveLength(2);
-  });
-
-  test('paciente antigo (contato de antes na caixa) nao e lead', async () => {
-    const { env } = cenario({ planilha: true });
-    const r = await atribuirLead(env, 1, mensagem({
-      nome: 'Ivan', fone: '+5519978163737', contatoDesde: '2026-08-28T17:38:00.000Z',
-      texto: 'A oliva que comprei ha 3 semanas ja rasgou',
-    }));
-    expect(r.status).toBe('ignorado');
-    expect(r.motivo).toMatch(/contato antigo/);
-    expect(abas.Geral).toHaveLength(1);
-  });
-
-  test('quando a clinica falou primeiro nao e lead direto', async () => {
-    // formulario (mensagem da Natasha), confirmacao de consulta, retorno
-    const { env } = cenario({ planilha: true });
-    const r = await atribuirLead(env, 1, mensagem({
-      nome: '5519999360206', fone: '+5519999360206',
-      contatoDesde: '2026-09-21T20:03:44.941Z', primeiraResposta: '2026-09-21T20:03:45.301Z',
-    }));
-    expect(r.status).toBe('ignorado');
-    expect(r.motivo).toMatch(/clinica falou primeiro/);
-    expect(abas.Geral).toHaveLength(1);
-  });
-
-  test('nome de perfil ruim vai como "Sem nome no WhatsApp"', async () => {
-    const { env } = cenario({ planilha: true });
-    await atribuirLead(env, 1, mensagem({ nome: '.' }));
-    expect(abas.Geral![1]![5]).toBe('Sem nome no WhatsApp');
-  });
-
-  test('telefone que ja esta na aba (lead de agosto) nao duplica', async () => {
-    const { env } = cenario({ planilha: true });
-    abas.Geral!.push(['https://wa.me/11984738894', 'Campanha de Mensagem - Google', '22AGO', '27/08/2026', '16:20:36', 'Benicio', '11984738894']);
-    await atribuirLead(env, 1, mensagem());
-    expect(abas.Geral).toHaveLength(2);
-    expect(abas['WhatsApp Direto']).toHaveLength(2);
-  });
-
-  test('aba que falhou volta para a fila e a retentativa grava', async () => {
-    const { env, consultar } = cenario({ planilha: true });
-    const guardada = abas['WhatsApp Direto']!;
-    delete abas['WhatsApp Direto'];
-    const r1 = await atribuirLead(env, 1, mensagem());
-    expect(r1.status).toBe('erro');
-    expect(consultar<{ planilha_status: string }>('SELECT planilha_status FROM leads_diretos')[0]!.planilha_status).toBe('erro');
-
-    abas['WhatsApp Direto'] = guardada;
-    const r2 = await atribuirLead(env, 1, mensagem());
-    expect(r2.status).toBe('ok');
-    // a Geral ja tinha a linha: a trava por telefone segura a segunda
-    expect(abas.Geral).toHaveLength(2);
-    expect(abas['WhatsApp Direto']).toHaveLength(2);
-  });
-
-  test('cliente sem aba de lead direto segue como antes: ignorado', async () => {
+  test('cliente sem aba de lead direto: ignorado, como sempre', async () => {
     const { env, exec } = cenario({ planilha: true });
     exec(`UPDATE tenant_config SET sheets_aba_direto = NULL WHERE tenant_id = 1`);
     const r = await atribuirLead(env, 1, mensagem());
