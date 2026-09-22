@@ -14,7 +14,10 @@ import { validarCliente, gerarIngestKey } from '../domain/tenantInput';
 import { mascararSegredo } from '../domain/segredo';
 import { postarNaPlanilha } from '../clients/n8n';
 import { ESCOPOS_GOOGLE } from '../domain/escoposGoogle';
-import { CAMPOS_PLANILHA, montarRegistro, urlDoWebhook, idDaPlanilha, campoDaColunaLeads } from '../domain/planilha';
+import {
+  CAMPOS_PLANILHA, CANAIS_DA_GERAL, montarRegistro, urlDoWebhook, idDaPlanilha, campoDaColunaLeads,
+  lerCanaisDaGeral, gravarCanaisDaGeral,
+} from '../domain/planilha';
 import { SheetsClient } from '../clients/sheets';
 import { escreverNasPlanilhas } from '../pipelines/planilha';
 import { etiquetaSlug } from '../domain/labels';
@@ -121,7 +124,7 @@ admin.get('/tenants/:id/planilha', async (c) => {
   const cfg = await c.env.DB.prepare(
     `SELECT sheets_ativo, planilha_modo, planilha_webhook_url, sheets_doc_id,
             sheets_leads_doc_id, sheets_leads_aba, sheets_aba_geral, sheets_aba_google, sheets_aba_meta,
-            sheets_aba_direto
+            sheets_aba_direto, sheets_geral_canais
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(id)
@@ -129,7 +132,7 @@ admin.get('/tenants/:id/planilha', async (c) => {
       sheets_ativo: number; planilha_modo: string; planilha_webhook_url: string | null;
       sheets_doc_id: string | null; sheets_leads_doc_id: string | null; sheets_leads_aba: string | null;
       sheets_aba_geral: string | null; sheets_aba_google: string | null; sheets_aba_meta: string | null;
-      sheets_aba_direto: string | null;
+      sheets_aba_direto: string | null; sheets_geral_canais: string | null;
     }>();
 
   return c.json({
@@ -144,6 +147,8 @@ admin.get('/tenants/:id/planilha', async (c) => {
       meta: cfg?.sheets_aba_meta ?? null,
       direto: cfg?.sheets_aba_direto ?? null,
     },
+    // os canais que entram na Geral, ja' resolvidos: NULL no banco = todos
+    geral_canais: lerCanaisDaGeral(cfg?.sheets_geral_canais) ?? [...CANAIS_DA_GERAL],
     conta_servico: SheetsClient.email(c.env),
     campos: CAMPOS_PLANILHA,
   });
@@ -155,6 +160,7 @@ admin.put('/tenants/:id/planilha', async (c) => {
     ativo?: boolean; modo?: string; url?: string;
     banco_doc?: string; leads_doc?: string;
     leads_abas?: { geral?: string; google?: string; meta?: string; direto?: string };
+    geral_canais?: string[];
   }>();
 
   const modo = b.modo === 'n8n' ? 'n8n' : 'sistema';
@@ -174,6 +180,9 @@ admin.put('/tenants/:id/planilha', async (c) => {
   // tela antiga (sem o campo) nao apaga a aba de lead direto ja' configurada
   const mexeNoDireto = b.leads_abas !== undefined && 'direto' in b.leads_abas;
   const direto = nomeDaAba(b.leads_abas?.direto);
+  // idem: tela sem os canais da Geral nao volta o cliente para "todos"
+  const mexeNosCanais = Array.isArray(b.geral_canais);
+  const canais = mexeNosCanais ? gravarCanaisDaGeral(b.geral_canais!.map(String)) : null;
 
   // ligar sem destino encheria o log de falha a cada lead
   const temDestino = modo === 'n8n' ? !!url : !!(banco || (leads && (abas.geral || abas.google || abas.meta)));
@@ -184,10 +193,14 @@ admin.put('/tenants/:id/planilha', async (c) => {
      SET sheets_ativo = ?, planilha_modo = ?, planilha_webhook_url = ?, sheets_doc_id = ?,
          sheets_leads_doc_id = ?, sheets_aba_geral = ?, sheets_aba_google = ?, sheets_aba_meta = ?,
          sheets_aba_direto = CASE WHEN ? = 1 THEN ? ELSE sheets_aba_direto END,
+         sheets_geral_canais = CASE WHEN ? = 1 THEN ? ELSE sheets_geral_canais END,
          updated_at = datetime('now')
      WHERE tenant_id = ?`,
   )
-    .bind(ativo, modo, url, banco, leads, abas.geral, abas.google, abas.meta, mexeNoDireto ? 1 : 0, direto, id)
+    .bind(
+      ativo, modo, url, banco, leads, abas.geral, abas.google, abas.meta,
+      mexeNoDireto ? 1 : 0, direto, mexeNosCanais ? 1 : 0, canais, id,
+    )
     .run();
 
   console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, modo, ativo }));

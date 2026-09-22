@@ -3490,6 +3490,11 @@
         }
 
         const url = function (doc) { return doc ? 'https://docs.google.com/spreadsheets/d/' + doc : ''; };
+        const naGeral = r.geral_canais || ['google', 'meta', 'direto'];
+        const caixaDaGeral = function (canal, rotulo) {
+          return '<label><input type="checkbox" name="pl-geral" value="' + canal + '"' +
+            (naGeral.indexOf(canal) >= 0 ? ' checked' : '') + ' /> ' + esc(rotulo) + '</label>';
+        };
 
         alvo.innerHTML =
           '<div class="campo"><label>Quem escreve nas planilhas</label>' +
@@ -3510,6 +3515,11 @@
               seletorDeAba('pl-aba-meta', 'Aba do Meta (mensagem)', r.leads_abas.meta) +
               seletorDeAba('pl-aba-direto', 'Aba de lead direto (WhatsApp sem anúncio)', r.leads_abas.direto) +
             '</div>' +
+            '<div class="campo"><label>Na aba Geral entram os leads de</label>' +
+              caixaDaGeral('google', 'Google (mensagem)') +
+              caixaDaGeral('meta', 'Meta (mensagem)') +
+              caixaDaGeral('direto', 'WhatsApp direto (sem anúncio)') +
+              '<p class="dica">O lead sempre entra na aba do canal dele. Desmarcado, ele não vai para a Geral.</p></div>' +
             '<p class="dica">' + (r.conta_servico
               ? 'Compartilhe as duas planilhas com <code>' + esc(r.conta_servico) + '</code> como <strong>Editor</strong>.'
               : '<span class="st-erro">A service account não está configurada no Worker (GOOGLE_SA_KEY).</span>') + '</p>' +
@@ -3553,6 +3563,8 @@
               meta: document.getElementById('pl-aba-meta').value,
               direto: document.getElementById('pl-aba-direto').value,
             },
+            geral_canais: Array.prototype.map.call(
+              alvo.querySelectorAll('input[name="pl-geral"]:checked'), function (i) { return i.value; }),
           };
         };
 

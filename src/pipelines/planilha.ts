@@ -3,8 +3,8 @@ import { postarNaPlanilha } from '../clients/n8n';
 import { SheetsClient } from '../clients/sheets';
 import {
   montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna, campoDaColunaLeads, jaTemTelefone,
-  abasDoLead, telefoneEmLink, dataHoraBrasilia,
-  type ContextoPlanilha, type LeadDaPlanilha,
+  abasDoLead, lerCanaisDaGeral, telefoneEmLink, dataHoraBrasilia,
+  type CanalDaGeral, type ContextoPlanilha, type LeadDaPlanilha,
 } from '../domain/planilha';
 
 /**
@@ -30,6 +30,8 @@ export interface DestinoPlanilha {
   leads_doc: string | null;
   /** Geral e a aba de cada canal. O lead entra na Geral e na do canal dele. */
   leads_abas: { geral: string | null; google: string | null; meta: string | null; direto?: string | null };
+  /** Canais que entram na Geral; null = todos. */
+  geral_canais?: CanalDaGeral[] | null;
 }
 
 interface ConfigPlanilha {
@@ -45,6 +47,7 @@ interface ConfigPlanilha {
   sheets_aba_google: string | null;
   sheets_aba_meta: string | null;
   sheets_aba_direto: string | null;
+  sheets_geral_canais: string | null;
   cliente: string;
 }
 
@@ -57,7 +60,7 @@ export async function espelharNaPlanilha(
     `SELECT c.sheets_ativo, c.planilha_modo, c.planilha_webhook_url, c.sheets_doc_id,
             c.sheets_aba_cliques, c.sheets_aba_conversoes, c.sheets_leads_doc_id,
             c.sheets_leads_aba, c.sheets_aba_geral, c.sheets_aba_google, c.sheets_aba_meta,
-            c.sheets_aba_direto, t.nome AS cliente
+            c.sheets_aba_direto, c.sheets_geral_canais, t.nome AS cliente
      FROM tenant_config c JOIN tenants t ON t.id = c.tenant_id WHERE c.tenant_id = ?`,
   )
     .bind(tenantId)
@@ -89,6 +92,7 @@ export async function espelharNaPlanilha(
         meta: cfg.sheets_aba_meta,
         direto: cfg.sheets_aba_direto,
       },
+      geral_canais: lerCanaisDaGeral(cfg.sheets_geral_canais),
     }, registro);
     console.log(JSON.stringify({ acao: 'planilha_ok', modo: 'sistema', tipo: ctx.tipo, protocolo: ctx.protocolo, abas: gravado }));
     return;
@@ -141,7 +145,9 @@ export async function escreverNasPlanilhas(
   const entrou = registro.conversao === 'conversa' || registro.tipo === 'entrada';
   if (destino.leads_doc && entrou) {
     const doc = destino.leads_doc;
-    for (const aba of abasDoLead(destino.leads_abas, String(registro.plataforma ?? ''), registro.cliques.origem)) {
+    for (const aba of abasDoLead(
+      destino.leads_abas, String(registro.plataforma ?? ''), registro.cliques.origem, destino.geral_canais ?? null,
+    )) {
       await tentar(aba, () => acrescentarLead(sheets, doc, aba, registro));
     }
   }

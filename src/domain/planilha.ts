@@ -386,11 +386,15 @@ export function linhaDeLeads(
  * formulario (quiz da Persianas, formularios do site da Tainã), com as
  * respostas que o sistema nao tem. Gravar de novo aqui duplicaria a linha.
  * Ele so' entra na aba do canal quando chama no WhatsApp, como sempre foi.
+ *
+ * `geralCanais` limita a Geral a alguns canais (null = todos). A Tainã so'
+ * quer o lead do Meta na Geral: o do Google fica na "Google Mensagem".
  */
 export function abasDoLead(
   abas: { geral: string | null; google: string | null; meta: string | null; direto?: string | null },
   plataforma: string,
   origem: string = 'mensagem',
+  geralCanais: CanalDaGeral[] | null = null,
 ): string[] {
   // Sem anuncio (plataforma `outro`) o lugar e' a aba de lead direto — so' no
   // cliente que tem essa aba; nos outros fica como sempre foi, so' a Geral.
@@ -398,8 +402,31 @@ export function abasDoLead(
     : plataforma === 'meta' ? abas.meta
     : origem === 'formulario' ? null
     : (abas.direto ?? null);
-  const geral = origem === 'formulario' ? null : abas.geral;
+  const canal: CanalDaGeral = plataforma === 'google' || plataforma === 'meta' ? plataforma : 'direto';
+  const naGeral = geralCanais === null || geralCanais.includes(canal);
+  const geral = origem === 'formulario' || !naGeral ? null : abas.geral;
   return [geral, doCanal].filter((a): a is string => !!a);
+}
+
+export const CANAIS_DA_GERAL = ['google', 'meta', 'direto'] as const;
+export type CanalDaGeral = (typeof CANAIS_DA_GERAL)[number];
+
+/**
+ * `sheets_geral_canais` do cadastro: `google,meta,direto`.
+ *
+ * NULL e' "todos", o jeito de sempre. Texto vazio e' "nenhum": o cliente
+ * desmarcou tudo na tela.
+ */
+export function lerCanaisDaGeral(v: string | null | undefined): CanalDaGeral[] | null {
+  if (v === null || v === undefined) return null;
+  const lidos = v.split(',').map((c) => c.trim().toLowerCase());
+  return CANAIS_DA_GERAL.filter((c) => lidos.includes(c));
+}
+
+/** O inverso, para gravar: todos marcados volta a ser NULL. */
+export function gravarCanaisDaGeral(canais: string[]): string | null {
+  const validos = CANAIS_DA_GERAL.filter((c) => canais.includes(c));
+  return validos.length === CANAIS_DA_GERAL.length ? null : validos.join(',');
 }
 
 /**

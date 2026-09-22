@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -301,6 +301,39 @@ describe('planilha de leads: aba Geral e aba do canal', () => {
 
   test('sem Geral configurada, so a do canal', () => {
     expect(abasDoLead({ geral: null, google: 'Google Mensagem', meta: null }, 'google')).toEqual(['Google Mensagem']);
+  });
+});
+
+describe('planilha de leads: canais que entram na Geral', () => {
+  const abas = { geral: 'Geral', google: 'Google Mensagem', meta: 'Meta Mensagem', direto: 'WhatsApp Direto' };
+
+  test('Tainã: lead do Google fica so na Google Mensagem', () => {
+    expect(abasDoLead(abas, 'google', 'mensagem', ['meta'])).toEqual(['Google Mensagem']);
+  });
+
+  test('Tainã: lead do Meta continua na Geral e na Meta Mensagem', () => {
+    expect(abasDoLead(abas, 'meta', 'mensagem', ['meta'])).toEqual(['Geral', 'Meta Mensagem']);
+  });
+
+  test('lead sem anuncio conta como direto', () => {
+    expect(abasDoLead(abas, 'outro', 'mensagem', ['meta'])).toEqual(['WhatsApp Direto']);
+    expect(abasDoLead(abas, 'outro', 'mensagem', ['direto'])).toEqual(['Geral', 'WhatsApp Direto']);
+  });
+
+  test('null e todos: nada muda para quem nao escolheu', () => {
+    expect(abasDoLead(abas, 'google', 'mensagem', null)).toEqual(['Geral', 'Google Mensagem']);
+  });
+
+  test('cadastro: NULL e todos, vazio e nenhum, lixo e ignorado', () => {
+    expect(lerCanaisDaGeral(null)).toBeNull();
+    expect(lerCanaisDaGeral('')).toEqual([]);
+    expect(lerCanaisDaGeral('Meta, x ,google')).toEqual(['google', 'meta']);
+  });
+
+  test('gravar: todos marcados volta a NULL', () => {
+    expect(gravarCanaisDaGeral(['direto', 'meta', 'google'])).toBeNull();
+    expect(gravarCanaisDaGeral(['meta'])).toBe('meta');
+    expect(gravarCanaisDaGeral([])).toBe('');
   });
 });
 
