@@ -6,6 +6,7 @@ import { registrarClique } from '../pipelines/click';
 import { moverPelaResposta } from '../pipelines/sellerMessage';
 import { enviarConversao } from '../pipelines/stageChanged';
 import { registrarLeadMeta } from '../pipelines/metaLead';
+import { enviarEventoMeta } from '../pipelines/metaCapi';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -67,6 +68,10 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
       // Avisar o grupo aqui anunciaria como "lead novo" quem ja fechou.
       if (msg.eventType === 'kanban_conversao') {
         return enviarConversao(env, msg.tenantId, payload);
+      }
+      // Envio a Meta: criado pela etapa do funil, uma execucao por evento
+      if (msg.eventType === 'meta_capi') {
+        return enviarEventoMeta(env, msg.tenantId, payload);
       }
       return avisarLeadNoGrupo(env, msg.tenantId, payload, { tentativa });
 
