@@ -41,6 +41,14 @@ export interface Env {
   EVOLUTION_ALERT_INSTANCE: string;
   EVOLUTION_ALERT_GROUP_ID: string;
 
+  /**
+   * Cifra o token da Meta de cada cliente (AES-GCM). E' a MESMA do
+   * whatsapp-track: o token da Taina veio de la' ainda cifrado. Perder esta
+   * chave = recadastrar o token de todo cliente. Backup: `MASTER_KEY_PROD` no
+   * `.env` local.
+   */
+  MASTER_KEY?: string;
+
   // Cloudflare Access — auth do painel.
   // CF_ACCESS_AUD aceita lista separada por virgula: um app do Access por
   // hostname, cada um com seu proprio aud.
