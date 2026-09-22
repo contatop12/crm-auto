@@ -912,6 +912,7 @@
             <button class="aba" role="tab" data-aba="funil" aria-selected="false">Funil</button>
             <button class="aba" role="tab" data-aba="canais" aria-selected="false">Canais</button>
             <button class="aba" role="tab" data-aba="google" aria-selected="false">Google Ads</button>
+            <button class="aba" role="tab" data-aba="meta" aria-selected="false">Meta Ads</button>
             <button class="aba" role="tab" data-aba="planilha" aria-selected="false">Planilha</button>
             <button class="aba" role="tab" data-aba="atividade" aria-selected="false">Atividade</button>
           </div>
@@ -1164,6 +1165,31 @@
             </div>
           </div>
 
+          <div class="painel" data-painel="meta" hidden>
+            <div class="secoes">
+              <nav class="secoes-menu" aria-label="Seções da Meta Ads">
+                <button data-secao="whatsapp">WhatsApp (Evolution)</button>
+              </nav>
+              <div class="secoes-corpo">
+                <div class="secao-grupo" data-secao="whatsapp">
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Clique do anúncio no WhatsApp</h2>
+                        <p class="dica">A Meta só conta a conversão da campanha de mensagem com o clique do anúncio
+                        (<code>ctwa_clid</code>), e ele só chega pela Evolution. <strong>Conectar</strong> aponta o
+                        webhook da instância para o CRM. A Evolution aceita um webhook por instância: o endereço de
+                        antes para de receber e fica guardado para <strong>Restaurar anterior</strong>.</p>
+                      </div>
+                      <span class="carregando" id="evo-estado"></span>
+                    </header>
+                    <div id="evo-instancias"></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="painel" data-painel="planilha" hidden>
             <section>
               <header class="secao-topo">
@@ -1294,6 +1320,7 @@
           'canais/entradas': () => carregarWebhooksTab(id, slug),
           'google/envio': () => resumoGoogle(lerCfg()),
           'google/conversoes': () => carregarConversoes(id, 0),
+          'meta/whatsapp': () => carregarWebhooksEvolution(id),
           planilha: () => carregarPlanilha(id),
           'atividade/webhooks': () => carregarEventos(id, 0),
           'atividade/avisos': () => carregarAvisosGrupo(id, 0),
@@ -1969,7 +1996,13 @@
           throw new Error('sessão expirou — recarregue a página (F5)');
         }
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+        if (!r.ok) {
+          // o "Conectar" precisa do 409 e do host para perguntar antes de substituir
+          const erro = new Error(j.error || 'HTTP ' + r.status);
+          erro.status = r.status;
+          erro.corpo = j;
+          throw erro;
+        }
         return j;
       }
 
@@ -2235,6 +2268,101 @@
             }).join('') + '</tbody></table>'
           : '<div class="vazio"><p>Nenhum número mapeado.</p>' +
             '<p class="mono">Sem isso as etiquetas não são aplicadas no WhatsApp.</p></div>';
+      }
+
+      /**
+       * Instâncias da Evolution do cliente e para onde cada webhook aponta.
+       *
+       * O endereço de outro sistema pode ter o segredo dele na URL: a API manda
+       * só o host, e é só o host que a tela mostra.
+       */
+      async function carregarWebhooksEvolution(id) {
+        const alvo = document.getElementById('evo-instancias');
+        if (!alvo) return;
+        alvo.innerHTML = CARREGANDO;
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/evolution/webhook');
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+        if (!r.instancias.length) {
+          alvo.innerHTML = '<div class="vazio"><p>Nenhuma instância da Evolution neste cliente.</p>' +
+            '<p class="mono">Cadastre a instância em Editar cliente ou mapeie as caixas em Canais → WhatsApp.</p></div>';
+          return;
+        }
+
+        const webhook = function (l) {
+          if (l.webhook === 'crm') return '<span class="st-ok">conectado ao CRM</span>';
+          if (l.webhook === 'outro') return '<span class="st-ignorado">aponta para <code>' + esc(l.host || '?') + '</code></span>';
+          if (l.webhook === 'nenhum') return '<span class="nada">sem webhook</span>';
+          return '<span class="nada">não foi possível ler</span>';
+        };
+
+        alvo.innerHTML = '<table><thead><tr><th>Instância</th><th>WhatsApp</th><th>Webhook</th>' +
+          '<th>Último clique de anúncio</th><th></th></tr></thead><tbody>' +
+          r.instancias.map(function (l) {
+            return '<tr><td>' + esc(l.instancia) + '</td>' +
+              '<td>' + (l.conexao === 'open'
+                ? '<span class="st-ok">conectado</span>'
+                : '<span class="st-erro">' + esc(l.conexao) + '</span>') + '</td>' +
+              '<td>' + webhook(l) + '</td>' +
+              '<td>' + (l.ultimo_cartao ? esc(haQuanto(l.ultimo_cartao)) : '<span class="nada">nenhum ainda</span>') + '</td>' +
+              '<td class="acoes-etiqueta">' +
+                (l.webhook !== 'crm'
+                  ? '<button class="evo-conectar principal" data-inst="' + esc(l.instancia) + '">Conectar</button>'
+                  : '') +
+                (l.tem_anterior
+                  ? '<button class="evo-restaurar" data-inst="' + esc(l.instancia) + '">Restaurar anterior</button>'
+                  : '') +
+              '</td></tr>';
+          }).join('') + '</tbody></table>';
+
+        alvo.querySelectorAll('.evo-conectar').forEach(function (b) {
+          b.addEventListener('click', function () { conectarEvolution(id, b.dataset.inst, false); });
+        });
+        alvo.querySelectorAll('.evo-restaurar').forEach(function (b) {
+          b.addEventListener('click', function () { restaurarEvolution(id, b.dataset.inst); });
+        });
+      }
+
+      async function conectarEvolution(id, inst, confirmar) {
+        const estado = document.getElementById('evo-estado');
+        estado.textContent = 'conectando ' + inst + '…';
+        try {
+          const r = await enviar('/tenants/' + id + '/evolution/webhook', 'POST', { instancia: inst, confirmar: confirmar });
+          estado.textContent = inst + ': conectado ao CRM (' + r.host + ')';
+        } catch (e) {
+          if (e.status === 409 && e.corpo && !confirmar) {
+            estado.textContent = '';
+            const host = e.corpo.host || 'outro sistema';
+            if (confirm('Hoje o webhook de "' + inst + '" aponta para ' + host + '.\n\n' +
+              'Conectar ao CRM substitui esse endereço: ' + host + ' para de receber as mensagens desta instância. ' +
+              'O endereço de hoje fica guardado e volta com "Restaurar anterior".\n\nSubstituir?')) {
+              return conectarEvolution(id, inst, true);
+            }
+            return;
+          }
+          estado.textContent = 'não conectou: ' + e.message;
+          return;
+        }
+        carregarWebhooksEvolution(id);
+      }
+
+      async function restaurarEvolution(id, inst) {
+        if (!confirm('Devolver o webhook de "' + inst + '" para o endereço de antes?\n\n' +
+          'O CRM para de receber o clique do anúncio desta instância.')) return;
+        const estado = document.getElementById('evo-estado');
+        estado.textContent = 'restaurando ' + inst + '…';
+        try {
+          const r = await enviar('/tenants/' + id + '/evolution/webhook/restaurar', 'POST', { instancia: inst });
+          estado.textContent = inst + ': devolvido para ' + r.host;
+        } catch (e) {
+          estado.textContent = 'não restaurou: ' + e.message;
+          return;
+        }
+        carregarWebhooksEvolution(id);
       }
 
       // Os gatilhos sao a parte que mais muda: a equipe troca o texto do
@@ -3022,6 +3150,13 @@
           id: 'meta', rota: '/meta-lead', titulo: 'Meta · formulário nativo',
           dica: 'POST com o lead do formulário. Grava em <strong>leads</strong> com o telefone; quando a pessoa aparecer no WhatsApp, o sistema casa os dois sozinho. Não sobe conversão para o Google — o lead não veio de lá.',
           uso: 'meta',
+        },
+        {
+          id: 'evolution', rota: '/evolution', titulo: 'Evolution · clique do anúncio da Meta',
+          dica: 'Recebe as mensagens do WhatsApp e guarda só o clique do anúncio (<code>ctwa_clid</code>). ' +
+            'O jeito certo de ligar é o botão <strong>Conectar</strong> em Meta Ads → WhatsApp; este endereço é para ' +
+            'configurar à mão. Gerar uma chave nova desconecta as instâncias já ligadas: depois, conecte de novo.',
+          uso: 'evolution',
         },
       ];
 
