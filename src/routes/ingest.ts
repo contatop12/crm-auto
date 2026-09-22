@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { verifySignature } from '../domain/signature';
 import { registrarEvento, tenantPorSlug } from '../db/queries';
+import { lerCartaoDaEvolution } from '../domain/referralEvolution';
+import { phoneKey, normFone } from '../domain/phone';
 
 /**
  * Rotas de ingestao.
@@ -53,7 +55,7 @@ async function aceitar(
 async function chaveDoCanal(
   db: D1Database,
   tenantId: number,
-  canal: 'click' | 'kanban' | 'meta',
+  canal: 'click' | 'kanban' | 'meta' | 'evolution',
   legado: string | null,
   oferecida: string | null,
 ): Promise<boolean> {
@@ -158,6 +160,55 @@ ingest.post('/:slug/meta-lead', async (c) => {
   return c.json({ ok: true });
 });
 
+/** Acima disto e' midia embutida, nao mensagem de texto: nao ha cartao a ler. */
+const LIMITE_CORPO_EVOLUTION = 1_000_000;
+
+/**
+ * Mensagens do WhatsApp, direto da Evolution — so' para guardar o clique do
+ * anuncio da Meta (`ctwa_clid`).
+ *
+ * Nao vai para `events` nem para a fila: a instancia manda TODA mensagem, e
+ * quase nenhuma tem cartao. A que tem vira uma linha em `meta_atribuicoes`,
+ * que a atribuicao do lead (pelo Chatwoot) consulta pelo telefone.
+ *
+ * A chave e' so' a do canal `evolution`, sem cair na chave antiga do cliente:
+ * este endereco nasceu depois da separacao por canal.
+ */
+ingest.post('/:slug/evolution', async (c) => {
+  const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
+  if (!tenant) return c.json({ ok: false, error: 'tenant desconhecido' }, 404);
+
+  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key') ?? null;
+  if (!(await chaveDoCanal(c.env.DB, tenant.id, 'evolution', null, chave))) {
+    return c.json({ ok: false, error: 'chave invalida' }, 401);
+  }
+
+  if (Number(c.req.header('content-length') ?? 0) > LIMITE_CORPO_EVOLUTION) {
+    return c.json({ ok: true, gravado: false });
+  }
+  const raw = await c.req.text();
+  if (raw.length > LIMITE_CORPO_EVOLUTION) return c.json({ ok: true, gravado: false });
+
+  const cartao = lerCartaoDaEvolution(raw);
+  const chaveFone = cartao ? phoneKey(cartao.telefone) : '';
+  if (!cartao || !chaveFone) return c.json({ ok: true, gravado: false });
+
+  // UNIQUE (tenant_id, ctwa_clid): a Evolution reenvia, e o mesmo clique nao
+  // pode virar duas atribuicoes
+  const r = await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO meta_atribuicoes
+       (tenant_id, phone_key, phone_e164, ctwa_clid, ad_id, source_url, titulo, evo_instancia, origem)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'evolution')`,
+  )
+    .bind(
+      tenant.id, chaveFone, normFone(cartao.telefone) || null, cartao.ctwaClid,
+      cartao.adId, cartao.sourceUrl, cartao.titulo, cartao.instancia,
+    )
+    .run();
+
+  return c.json({ ok: true, gravado: r.meta.changes > 0 });
+});
+
 /**
  * Sondagem de alcance, para o painel conferir se o Access ainda cobre /ingest
  * antes de registrar o webhook no Chatwoot.
@@ -180,7 +231,7 @@ ingest.get('/:slug/ping', async (c) => {
   const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
   if (!tenant) return c.json({ ok: false, erro: 'cliente desconhecido' }, 404);
   // o ping serve os tres canais: vale se a chave abrir QUALQUER um deles
-  const canais = ['click', 'kanban', 'meta'] as const;
+  const canais = ['click', 'kanban', 'meta', 'evolution'] as const;
   const abre = await Promise.all(
     canais.map((n) => chaveDoCanal(c.env.DB, tenant.id, n, tenant.ingestKey, chave)),
   );
