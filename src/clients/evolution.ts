@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { exigir } from '../domain/config';
+import type { DefinicaoWebhook, WebhookEvo } from '../domain/webhookEvolution';
 
 /**
  * Cliente da Evolution API (WhatsApp).
@@ -179,5 +180,25 @@ export class EvolutionClient {
       `/instance/connectionState/${encodeURIComponent(instancia)}`,
     );
     return r.instance?.state ?? r.state ?? 'desconhecido';
+  }
+
+  /**
+   * Webhook da instancia; `null` quando nao ha nenhum. A Evolution responde
+   * `null` (ou corpo vazio) para instancia sem webhook.
+   */
+  async webhook(instancia: string): Promise<WebhookEvo | null> {
+    let r: WebhookEvo | null;
+    try {
+      r = await this.req<WebhookEvo | null>(`/webhook/find/${encodeURIComponent(instancia)}`);
+    } catch (e) {
+      if (e instanceof SyntaxError) return null;
+      throw e;
+    }
+    return r && typeof r === 'object' && typeof r.url === 'string' && r.url ? r : null;
+  }
+
+  /** Grava o webhook da instancia. Substitui o que havia: a Evolution guarda um so'. */
+  async definirWebhook(instancia: string, d: DefinicaoWebhook): Promise<void> {
+    await this.req(`/webhook/set/${encodeURIComponent(instancia)}`, { webhook: d });
   }
 }
