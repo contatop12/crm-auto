@@ -199,6 +199,17 @@ CREATE TABLE meta_atribuicoes (
 );
 CREATE INDEX idx_meta_atrib_fone ON meta_atribuicoes(tenant_id, phone_key, recebido_em DESC);
 
+-- webhook que a instancia tinha antes do "Conectar": e' o que o "Restaurar
+-- anterior" devolve. Guarda a URL inteira (pode ter o segredo de outro
+-- sistema); a API so' expoe o host.
+CREATE TABLE evo_webhooks_anteriores (
+  tenant_id      INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  evo_instancia  TEXT    NOT NULL,
+  config         TEXT    NOT NULL,   -- json do /webhook/find: url, events, enabled, byEvents, base64
+  salvo_em       TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (tenant_id, evo_instancia)
+);
+
 CREATE TABLE meta_eventos (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id        INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -319,16 +330,44 @@ changelog na implementação.
 
 **Aba nova "Meta Ads"** no perfil do cliente, ao lado de "Google Ads":
 
-1. **Conexão**
+1. **WhatsApp (Evolution): conectar em um clique.** Fica em primeiro lugar
+   na aba, porque sem ele não chega `ctwa_clid`.
+   - **Lista as instâncias do cliente** (`inbox_instances` ativas +
+     `tenant_config.evo_instancia`). Cada linha mostra:
+     - se o WhatsApp está conectado (`connectionState`);
+     - o webhook de hoje: **"conectado ao CRM"**, **"aponta para
+       `host`"** (só o host, nunca a URL com segredo) ou **"sem webhook"**;
+     - o último cartão de anúncio recebido (`MAX(recebido_em)` em
+       `meta_atribuicoes` da instância), que é a prova ao vivo de que está
+       chegando.
+   - **Botão "Conectar"**, e tudo acontece do lado do servidor:
+     1. garante a chave do canal `evolution` (cria se não existir; a pessoa
+        não precisa revelar nem copiar nada);
+     2. monta `https://<host do CRM>/ingest/<slug>/evolution?k=<chave>`;
+     3. lê o webhook atual (`GET /webhook/find/{instância}`). Se ele aponta
+        para outro lugar e o pedido não veio com `confirmar`, responde 409
+        com o host atual. O painel pergunta "Hoje aponta para
+        whatsapptrack.sitespdoze.com.br — substituir?" e repete com
+        `confirmar`;
+     4. guarda o webhook anterior em `evo_webhooks_anteriores`;
+     5. grava com `POST /webhook/set/{instância}`:
+        `{ webhook: { enabled: true, url, events: ["MESSAGES_UPSERT"], byEvents: false, base64: false } }`.
+        `base64: false` impede que mídia venha embutida no corpo;
+     6. relê o `find` e só responde "conectado" se a URL gravada for a do
+        CRM.
+   - **Botão "Restaurar anterior"** (aparece quando há anterior guardado):
+     devolve o webhook que estava antes, com URL e eventos de antes. É a
+     volta atrás da virada, em um clique.
+2. **Conexão**
    - Campos: dataset, Página, WABA, token (só escrita; mostra `••••1234`) e
      código de teste.
    - "Verificar token", que mostra o nome do dataset.
    - Interruptor "Envio ligado" (`meta_dry_run`), no padrão do `sw-envio` do
      Google.
-2. **Eventos por etapa:** as etapas do funil, cada uma com um seletor
+3. **Eventos por etapa:** as etapas do funil, cada uma com um seletor
    (nenhum / `LeadSubmitted` / `Purchase`). A etapa `Purchase` mostra
    "valor real da venda".
-3. **Eventos enviados à Meta**
+4. **Eventos enviados à Meta**
    - Log com data, protocolo, telefone mascarado, canal, evento, valor e
      status; ao expandir, a resposta da Meta.
    - "Reenviar falhas".
@@ -336,12 +375,9 @@ changelog na implementação.
 **Aba "Webhooks" → "Endereços de entrada"**
 
 - Ganha o endereço da Evolution, com a chave do canal `evolution` (revelar e
-  gerar, como os outros).
-- Ganha o botão **"Conectar na Evolution"**, por instância do cliente
-  (`inbox_instances` / `evo_instancia`). Ele grava o webhook com
-  `events: ["MESSAGES_UPSERT"]`.
-- Antes de gravar, mostra para onde o webhook aponta hoje. Se já aponta para
-  outro lugar, exige confirmação explícita.
+  gerar, como os outros), para quem quiser configurar à mão.
+- Gerar uma chave nova para `evolution` desconecta as instâncias já ligadas.
+  O painel avisa e oferece "Conectar" de novo.
 
 **Rotas**
 
@@ -352,8 +388,9 @@ POST   /api/tenants/:id/meta/verificar
 PUT    /api/tenants/:id/meta/etapas             { cw_step_id: meta_evento | null }
 GET    /api/tenants/:id/meta/eventos            paginado
 POST   /api/tenants/:id/meta/eventos/reenviar
-GET    /api/tenants/:id/evolution/webhook       estado por instância
-POST   /api/tenants/:id/evolution/webhook       conectar (flag de confirmação para sobrescrever)
+GET    /api/tenants/:id/evolution/webhook       estado por instância (conexão, host do webhook, último cartão)
+POST   /api/tenants/:id/evolution/webhook       { instancia, confirmar? } → conecta; 409 se aponta para outro lugar
+POST   /api/tenants/:id/evolution/webhook/restaurar   { instancia } → devolve o webhook anterior
 POST   /ingest/:slug/evolution?k=               público; chave do canal
 ```
 
@@ -408,9 +445,9 @@ pelo leitor. O `jpegThumbnail` do cartão nunca é gravado.
 7. **"Conectar na Evolution"** na instância *Tainã Aci*. A partir daqui o
    tracker para de receber e o CRM passa a enviar. O primeiro envio real é
    conferido no log (`events_received: 1`).
-8. **Volta atrás:** apontar o webhook da Evolution de novo para
-   `whatsapptrack.sitespdoze.com.br/hook/evolution/dra-taina-aci`. O tracker
-   fica no ar, intocado, por 14 dias. Desligá-lo depois disso é uma decisão
+8. **Volta atrás:** "Restaurar anterior" na instância *Tainã Aci*, que
+   devolve o webhook do tracker exatamente como estava (URL e eventos). O
+   tracker fica no ar, intocado, por 14 dias. Desligá-lo depois disso é uma decisão
    separada.
 
 Resultado esperado: a regra atual do tracker (`LeadSubmitted` na 1ª mensagem
@@ -466,6 +503,15 @@ Vitest, seguindo `test/domain` e `test/pipelines`, com `test/helpers/fakeD1.ts`.
   cartão → `meta_atribuicoes`; reenvio do mesmo clid → uma linha só.
 - `metaCapi` (consumidor): dry-run → `nao_enviado` sem `fetch`; 200 →
   `enviado`; 4xx → `falhou` sem retentar; 5xx → retenta.
+- Conectar na Evolution (com `fetch` falso):
+  - sem webhook → cria a chave se faltar e grava URL, eventos e
+    `base64: false`;
+  - webhook apontando para outro host, sem `confirmar` → 409 com o host, sem
+    gravar nada;
+  - com `confirmar` → guarda o anterior e grava;
+  - o `find` depois do `set` com outra URL → responde erro, não "conectado";
+  - "Restaurar anterior" → grava de volta a config guardada;
+  - a resposta da API nunca contém a URL anterior inteira, só o host.
 
 Antes de qualquer deploy: `npm test` e `npm run typecheck` verdes.
 
