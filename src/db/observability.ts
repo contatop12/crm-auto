@@ -178,5 +178,15 @@ export async function expurgarPayloadsAntigos(db: D1Database, dias = 30): Promis
     )
     .bind(`-${dias} day`)
     .run();
-  return r.meta.changes ?? 0;
+
+  // O pedido do canal site leva IP e user agent em claro: mesma validade do
+  // corpo do webhook. O registro do envio (status, evento, valor) fica.
+  const m = await db
+    .prepare(
+      `UPDATE meta_eventos SET request_payload = NULL, response_body = NULL
+       WHERE (request_payload IS NOT NULL OR response_body IS NOT NULL) AND created_at < datetime('now', ?)`,
+    )
+    .bind(`-${dias} day`)
+    .run();
+  return (r.meta.changes ?? 0) + (m.meta.changes ?? 0);
 }

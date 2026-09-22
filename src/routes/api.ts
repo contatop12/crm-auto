@@ -80,6 +80,7 @@ api.get('/overview', async (c) => {
       erro_superado: maisRecente(l.ultimo_ok_em, l.ultimo_erro_em),
       /** Onde consertar: e' a aba que tem o botao de reenviar. */
       erro_em: /pulseboard|grupo/i.test(l.ultimo_erro_motivo ?? '') ? 'atividade/avisos'
+        : /\bmeta\b/i.test(l.ultimo_erro_motivo ?? '') ? 'meta/eventos'
         : /google|conversao|data manager/i.test(l.ultimo_erro_motivo ?? '') ? 'google/conversoes'
         : 'atividade',
     })),

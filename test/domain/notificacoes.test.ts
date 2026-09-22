@@ -21,6 +21,17 @@ const erro = (over: Partial<ErroEvento> = {}): ErroEvento => ({
   ...over,
 });
 
+describe('envio a Meta que falhou', () => {
+  test('vira notificacao que leva a aba de eventos da Meta', () => {
+    const [n] = agruparErros([erro({
+      event_type: 'meta_capi',
+      motivo: 'TAINA-CTWA-76-LeadSubmitted: Meta recusou (400/2804019): Invalid parameter',
+    })], new Set());
+    expect(n!.titulo).toBe('Evento não subiu para a Meta Ads');
+    expect(n!.aba).toBe('meta/eventos');
+  });
+});
+
 describe('normalizarMotivo e chaveDoErro', () => {
   test('o protocolo sai do texto para erros iguais virarem um so', () => {
     expect(normalizarMotivo('TAINA-MTLH789J6AVC-proposta_enviada: Data Manager 400')).toBe('…: Data Manager #');

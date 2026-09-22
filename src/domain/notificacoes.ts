@@ -64,6 +64,7 @@ function tituloDoErro(e: ErroEvento): { titulo: string; aba: string } {
   if (/planilha|sheets/i.test(m)) return { titulo: 'Planilha não foi preenchida', aba: 'atividade' };
   switch (e.event_type) {
     case 'kanban_conversao': return { titulo: 'Conversão não subiu para o Google Ads', aba: 'google/conversoes' };
+    case 'meta_capi': return { titulo: 'Evento não subiu para a Meta Ads', aba: 'meta/eventos' };
     case 'assinatura_invalida': return { titulo: 'Webhook recusado (assinatura inválida)', aba: 'atividade' };
     case 'message_incoming': return { titulo: 'Mensagem do lead não foi processada', aba: 'atividade' };
     case 'message_outgoing': return { titulo: 'Resposta do vendedor não foi processada', aba: 'atividade' };
