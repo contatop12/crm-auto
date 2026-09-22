@@ -903,6 +903,7 @@
             </div>
             <div class="linha-acoes">
               <button class="selo" id="selo-google" hidden></button>
+              <button class="selo" id="selo-meta" hidden></button>
               <button id="btn-editar">${ic('editar')} Editar cliente</button>
             </div>
           </div>
@@ -1169,6 +1170,9 @@
             <div class="secoes">
               <nav class="secoes-menu" aria-label="Seções da Meta Ads">
                 <button data-secao="whatsapp">WhatsApp (Evolution)</button>
+                <button data-secao="conexao">Conexão</button>
+                <button data-secao="etapas">Eventos por etapa</button>
+                <button data-secao="eventos">Eventos enviados</button>
               </nav>
               <div class="secoes-corpo">
                 <div class="secao-grupo" data-secao="whatsapp">
@@ -1184,6 +1188,58 @@
                       <span class="carregando" id="evo-estado"></span>
                     </header>
                     <div id="evo-instancias"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="conexao" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Envio à Meta Ads</h2>
+                        <p class="dica">Desligado, o evento é montado e guardado, mas não sai. Ligado, a Meta conta a
+                        conversão na campanha, e isso não volta atrás.</p>
+                      </div>
+                      <label class="switch" data-dica="Ligado, o evento é enviado à Meta de verdade">
+                        <input type="checkbox" id="sw-meta" />
+                        <span class="trilho"></span>
+                        <span class="rotulo" id="sw-meta-rotulo">…</span>
+                      </label>
+                    </header>
+                    <div id="mads-form"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="etapas" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Eventos por etapa</h2>
+                        <p class="dica">Quando o card de um lead da Meta entra na etapa, o evento escolhido sobe.
+                        Campanha de mensagem só aceita estes dois, e cada um vai em uma etapa só.</p>
+                      </div>
+                      <div class="linha-acoes">
+                        <span class="carregando" id="mads-etapas-estado"></span>
+                        <button id="btn-mads-etapas" class="principal">Salvar</button>
+                      </div>
+                    </header>
+                    <div id="mads-etapas"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="eventos" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Eventos enviados à Meta</h2>
+                        <p class="dica">O que subiu, o que ficou guardado com o envio desligado e o motivo de cada recusa.</p>
+                      </div>
+                      <div class="linha-acoes">
+                        <span class="carregando" id="mads-reenvio-estado"></span>
+                        <button id="btn-mads-reenviar">Reenviar falhas</button>
+                      </div>
+                    </header>
+                    <div id="mads-resumo"></div>
+                    <div id="mads-eventos"></div>
                   </section>
                 </div>
               </div>
@@ -1291,6 +1347,13 @@
         tela.querySelectorAll('.btn-editar-cfg').forEach((b) => b.addEventListener('click', () => verFormulario(id)));
         document.getElementById('selo-google').addEventListener('click', () => abrir('google/envio'));
         montarSwitchEnvio(id, lerCfg());
+
+        // O cadastro da Meta é lido uma vez: pinta o selo do topo e serve a Conexão
+        let metaPromessa = null;
+        const lerMeta = () => metaPromessa || (metaPromessa = api('/tenants/' + id + '/meta'));
+        lerMeta().then(pintarSeloMeta).catch(function () { /* selo fica escondido */ });
+        document.getElementById('selo-meta').addEventListener('click', () => abrir('meta/conexao'));
+        document.getElementById('btn-mads-reenviar').addEventListener('click', () => reenviarFalhasMeta(id));
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
         document.getElementById('btn-sync').addEventListener('click', () => sincronizarEtapas(id));
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
@@ -1321,6 +1384,9 @@
           'google/envio': () => resumoGoogle(lerCfg()),
           'google/conversoes': () => carregarConversoes(id, 0),
           'meta/whatsapp': () => carregarWebhooksEvolution(id),
+          'meta/conexao': () => carregarConexaoMeta(id, lerMeta()),
+          'meta/etapas': () => carregarEtapasMeta(id),
+          'meta/eventos': () => carregarEventosMeta(id, 0),
           planilha: () => carregarPlanilha(id),
           'atividade/webhooks': () => carregarEventos(id, 0),
           'atividade/avisos': () => carregarAvisosGrupo(id, 0),
@@ -2306,7 +2372,7 @@
             return '<tr><td>' + esc(l.instancia) + '</td>' +
               '<td>' + (l.conexao === 'open'
                 ? '<span class="st-ok">conectado</span>'
-                : '<span class="st-erro">' + esc(l.conexao) + '</span>') + '</td>' +
+                : '<span class="st-erro">' + esc(({ close: 'desconectado', connecting: 'conectando' })[l.conexao] || l.conexao) + '</span>') + '</td>' +
               '<td>' + webhook(l) + '</td>' +
               '<td>' + (l.ultimo_cartao ? esc(haQuanto(l.ultimo_cartao)) : '<span class="nada">nenhum ainda</span>') + '</td>' +
               '<td class="acoes-etiqueta">' +
@@ -2363,6 +2429,240 @@
           return;
         }
         carregarWebhooksEvolution(id);
+      }
+
+      /** Selo do topo: só aparece para cliente com dataset da Meta. */
+      function pintarSeloMeta(cfg) {
+        const selo = document.getElementById('selo-meta');
+        if (!selo) return;
+        selo.hidden = !cfg || !cfg.meta_dataset_id;
+        if (selo.hidden) return;
+        selo.textContent = cfg.envio_ligado ? 'Meta Ads: enviando' : 'Meta Ads: desligado';
+        selo.className = 'selo ' + (cfg.envio_ligado ? 'selo-vivo' : 'selo-espera');
+      }
+
+      /**
+       * Credencial da Conversions API e o interruptor do envio.
+       *
+       * O token só entra: a API nunca devolve, e a tela o reconhece pelos 4
+       * últimos caracteres.
+       */
+      async function carregarConexaoMeta(id, metaPronta) {
+        const alvo = document.getElementById('mads-form');
+        const sw = document.getElementById('sw-meta');
+        const rot = document.getElementById('sw-meta-rotulo');
+        if (!alvo) return;
+        alvo.innerHTML = CARREGANDO;
+        let cfg;
+        try {
+          cfg = await (metaPronta || api('/tenants/' + id + '/meta'));
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+
+        const pintar = function (c) {
+          sw.checked = !!c.envio_ligado;
+          rot.textContent = c.envio_ligado ? 'Enviando à Meta' : 'Envio desligado';
+          rot.className = 'rotulo ' + (c.envio_ligado ? 'st-erro' : 'motivo');
+          pintarSeloMeta(c);
+        };
+        pintar(cfg);
+
+        const campo = function (idc, rotulo, valor, extra) {
+          return '<div class="campo"><label for="' + idc + '">' + esc(rotulo) + '</label>' +
+            '<input id="' + idc + '" value="' + esc(valor || '') + '"' + (extra || '') + ' /></div>';
+        };
+        const seloToken = cfg.tem_token
+          ? (cfg.token_valido
+              ? '<span class="st-ok">verificado' + (cfg.token_conferido_em ? ' ' + esc(haQuanto(cfg.token_conferido_em)) : '') + '</span>'
+              : '<span class="st-ignorado">não verificado</span>')
+          : '<span class="nada">sem token</span>';
+
+        alvo.innerHTML = '<div style="max-width:560px">' +
+          campo('mads-dataset', 'Dataset (pixel) de conversões', cfg.meta_dataset_id, ' inputmode="numeric" placeholder="só os números"') +
+          campo('mads-pagina', 'Página do Facebook', cfg.meta_page_id, ' inputmode="numeric" placeholder="id da Página"') +
+          campo('mads-waba', 'Conta do WhatsApp Business (WABA)', cfg.meta_waba_id, ' inputmode="numeric" placeholder="opcional se houver Página"') +
+          '<div class="campo"><label for="mads-token">Token da Conversions API</label>' +
+            '<input id="mads-token" type="password" autocomplete="off" placeholder="' +
+              (cfg.tem_token ? '••••' + esc(cfg.token_last4 || '') + ' — cole outro para trocar' : 'cole o token gerado no Gerenciador de Eventos') +
+            '" /><p class="dica">' + seloToken + '</p></div>' +
+          campo('mads-teste', 'Código de teste (opcional)', cfg.meta_test_event_code, ' placeholder="TEST12345"') +
+          '<p class="dica">Com código de teste, o evento aparece em "Testar eventos" e não conta como conversão.</p>' +
+          '<div class="linha-acoes"><button id="btn-mads-salvar" class="principal">Salvar</button>' +
+          '<button id="btn-mads-verificar">Verificar token</button>' +
+          '<span class="carregando" id="mads-estado"></span></div></div>';
+
+        const estado = document.getElementById('mads-estado');
+        const val = function (x) { return document.getElementById(x).value.trim(); };
+
+        document.getElementById('btn-mads-salvar').addEventListener('click', async function () {
+          const corpo = {
+            meta_dataset_id: val('mads-dataset'), meta_page_id: val('mads-pagina'),
+            meta_waba_id: val('mads-waba'), meta_test_event_code: val('mads-teste'),
+          };
+          const token = val('mads-token');
+          if (token) corpo.token = token;
+          estado.textContent = 'salvando…';
+          try {
+            const novo = await enviar('/tenants/' + id + '/meta', 'PUT', corpo);
+            carregarConexaoMeta(id, Promise.resolve(novo));
+          } catch (e) {
+            estado.textContent = 'não salvou: ' + e.message;
+          }
+        });
+
+        document.getElementById('btn-mads-verificar').addEventListener('click', async function () {
+          estado.className = 'carregando';
+          estado.textContent = 'verificando…';
+          try {
+            const v = await enviar('/tenants/' + id + '/meta/verificar', 'POST', {});
+            estado.className = v.ok ? 'st-ok' : 'st-erro';
+            estado.textContent = v.mensagem;
+          } catch (e) {
+            estado.textContent = 'falhou: ' + e.message;
+          }
+        });
+
+        // onchange (não addEventListener): a seção é redesenhada depois de salvar
+        sw.onchange = async function () {
+          const ligar = sw.checked;
+          if (ligar && !confirm(
+            'Ligar o envio faz a Meta contar os eventos nas campanhas deste cliente, de verdade.\n\n' +
+            'O que já foi enviado não vai de novo.\n\nLigar?')) {
+            sw.checked = false;
+            return;
+          }
+          sw.disabled = true;
+          rot.textContent = 'salvando…';
+          try {
+            pintar(await enviar('/tenants/' + id + '/meta', 'PUT', { envio_ligado: ligar }));
+          } catch (e) {
+            sw.checked = !ligar;
+            rot.textContent = 'falhou: ' + e.message;
+          } finally {
+            sw.disabled = false;
+          }
+        };
+      }
+
+      const EVENTOS_META = [['', 'nenhum'], ['LeadSubmitted', 'LeadSubmitted (lead)'], ['Purchase', 'Purchase (venda)']];
+
+      function valorDaEtapaMeta(evento, fixo) {
+        if (!evento) return '<span class="nada">—</span>';
+        if (fixo != null) return 'BRL ' + esc(String(fixo));
+        return evento === 'Purchase' ? 'valor real da venda' : '<span class="nada">sem valor</span>';
+      }
+
+      async function carregarEtapasMeta(id) {
+        const alvo = document.getElementById('mads-etapas');
+        const estado = document.getElementById('mads-etapas-estado');
+        if (!alvo) return;
+        alvo.innerHTML = CARREGANDO;
+        let etapas;
+        try {
+          etapas = await api('/tenants/' + id + '/meta/etapas');
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+        if (!etapas.length) {
+          alvo.innerHTML = '<div class="vazio"><p>Nenhuma etapa sincronizada.</p>' +
+            '<p class="mono">Sincronize as etapas na aba Funil.</p></div>';
+          return;
+        }
+
+        alvo.innerHTML = '<table><thead><tr><th>Etapa</th><th>Evento da Meta</th><th>Valor</th></tr></thead><tbody>' +
+          etapas.map(function (e) {
+            return '<tr><td>' + esc(e.nome) + '</td>' +
+              '<td><select class="mads-evento" data-step="' + e.cw_step_id + '">' +
+                EVENTOS_META.map(function (o) {
+                  return '<option value="' + o[0] + '"' + ((e.meta_evento || '') === o[0] ? ' selected' : '') + '>' +
+                    esc(o[1]) + '</option>';
+                }).join('') +
+              '</select></td>' +
+              '<td class="motivo mads-valor">' + valorDaEtapaMeta(e.meta_evento, e.conversion_value) + '</td></tr>';
+          }).join('') + '</tbody></table>';
+
+        alvo.querySelectorAll('.mads-evento').forEach(function (s) {
+          s.addEventListener('change', function () {
+            const e = etapas.find(function (x) { return String(x.cw_step_id) === s.dataset.step; });
+            s.closest('tr').querySelector('.mads-valor').innerHTML =
+              valorDaEtapaMeta(s.value || null, e ? e.conversion_value : null);
+          });
+        });
+
+        document.getElementById('btn-mads-etapas').onclick = async function () {
+          const mapa = {};
+          alvo.querySelectorAll('.mads-evento').forEach(function (s) { mapa[s.dataset.step] = s.value || null; });
+          estado.textContent = 'salvando…';
+          try {
+            await enviar('/tenants/' + id + '/meta/etapas', 'PUT', { etapas: mapa });
+            estado.textContent = 'salvo';
+          } catch (e) {
+            estado.textContent = 'não salvou: ' + e.message;
+          }
+        };
+      }
+
+      const STATUS_META = {
+        enviado: ['st-enviado', 'enviado'],
+        nao_enviado: ['st-ignorado', 'guardado'],
+        falhou: ['st-erro', 'falhou'],
+        pendente: ['st-recebido', 'na fila'],
+      };
+
+      async function carregarEventosMeta(id, offset) {
+        const alvo = document.getElementById('mads-eventos');
+        const resumo = document.getElementById('mads-resumo');
+        if (!alvo) return;
+        alvo.innerHTML = CARREGANDO;
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/meta/eventos?limit=' + porPagina('mads-eventos') + '&offset=' + (offset || 0));
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+          return;
+        }
+
+        const q = r.resumo;
+        resumo.innerHTML = '<div class="placar">' +
+          placar('enviados', q.enviados, 'a Meta recebeu') +
+          placar('guardados', q.ensaios, 'envio desligado: montados, não enviados') +
+          placar('falharam', q.falhas, q.falhas ? 'a Meta recusou ou não respondeu' : '') +
+          placar('na fila', q.pendentes, '') +
+          '</div>';
+
+        alvo.innerHTML = r.linhas.length
+          ? '<table><thead><tr><th>Quando</th><th>Lead</th><th>Evento</th><th>Valor</th><th>Resultado</th></tr></thead><tbody>' +
+            r.linhas.map(function (v) {
+              const st = STATUS_META[v.status] || ['', v.status];
+              const detalhe = v.erro || v.resposta;
+              return '<tr><td>' + esc(hora(v.created_at)) + '</td>' +
+                '<td><code>' + esc(v.protocol || 'whatsapp-track') + '</code><span class="sub">' + esc(v.telefone || '') + '</span></td>' +
+                '<td>' + esc(v.event_name) + '<span class="sub">' + esc(v.canal) + (v.etapa ? ' · ' + esc(v.etapa) : '') + '</span></td>' +
+                '<td>' + (v.value ? esc((v.currency || 'BRL') + ' ' + v.value) : '<span class="nada">—</span>') + '</td>' +
+                '<td><span class="' + st[0] + '">' + esc(st[1]) + '</span>' +
+                  (detalhe ? '<details><summary>resposta da Meta</summary><pre class="mono">' + esc(detalhe) + '</pre></details>' : '') +
+                '</td></tr>';
+            }).join('') + '</tbody></table>' +
+            paginacao('mads-eventos', r.total, r.limite, r.offset)
+          : '<div class="vazio"><p>Nenhum evento da Meta ainda.</p>' +
+            '<p class="mono">Sobe quando o card de um lead da Meta entra numa etapa com evento. Confira Eventos por etapa.</p></div>';
+
+        ligarPaginacao(alvo, function (o) { carregarEventosMeta(id, o); });
+      }
+
+      async function reenviarFalhasMeta(id) {
+        const est = document.getElementById('mads-reenvio-estado');
+        est.textContent = 'enfileirando…';
+        try {
+          const r = await enviar('/tenants/' + id + '/meta/eventos/reenviar', 'POST', {});
+          est.textContent = r.na_fila ? r.na_fila + ' na fila' : 'nenhuma falha para reenviar';
+          carregarEventosMeta(id, 0);
+        } catch (e) {
+          est.textContent = 'falhou: ' + e.message;
+        }
       }
 
       // Os gatilhos sao a parte que mais muda: a equipe troca o texto do
