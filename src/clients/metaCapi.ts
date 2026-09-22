@@ -57,7 +57,15 @@ export interface OpcoesVerificacao {
   testEventCode?: string | null;
   pageId?: string | null;
   wabaId?: string | null;
+  /**
+   * Um clique de anuncio ja' recebido. Desde 2026 a Meta recusa o evento de
+   * mensagem sem `ctwa_clid` (subcode 2804071), inclusive o de teste.
+   */
+  ctwaClid?: string | null;
 }
+
+/** Evento de mensagem sem `ctwa_clid`: a Meta chegou a validar o dado, entao o token passou. */
+const SEM_CTWA_CLID = 2804071;
 
 const SEM_REDE: Verificacao = { ok: false, rede: true, mensagem: 'Não foi possível falar com a Meta agora. Tente de novo.' };
 const TOKEN_INVALIDO: Verificacao = { ok: false, mensagem: 'Token inválido ou expirado. Gere outro no Gerenciador de Eventos.' };
@@ -114,6 +122,7 @@ async function verificarPorEnvio(token: string, dataset: string, o: OpcoesVerifi
   const user: Record<string, unknown> = { ph: [TELEFONE_DE_TESTE] };
   if (o.pageId) user.page_id = o.pageId;
   if (o.wabaId) user.whatsapp_business_account_id = o.wabaId;
+  if (o.ctwaClid) user.ctwa_clid = o.ctwaClid;
 
   let r: RespostaMeta;
   try {
@@ -136,6 +145,14 @@ async function verificarPorEnvio(token: string, dataset: string, o: OpcoesVerifi
     return { ok: true, mensagem: `Token válido para enviar neste dataset (conferido com o evento de teste ${codigo}).` };
   }
   if (r.erro?.code === 190) return TOKEN_INVALIDO;
+  // A recusa foi pelo dado do evento, nao pelo acesso: o token pode enviar.
+  // Acontece antes do primeiro clique de anuncio chegar ao CRM.
+  if (r.erro?.error_subcode === SEM_CTWA_CLID) {
+    return {
+      ok: true,
+      mensagem: 'Token aceito pela Meta neste dataset. O teste completo precisa de um clique de anúncio já recebido.',
+    };
+  }
   if (r.erro?.error_subcode === 2804116) {
     return { ok: false, mensagem: 'Falta Página ou WABA válido para a Meta aceitar o evento de teste.' };
   }

@@ -147,8 +147,16 @@ export async function verificarConfigMeta(env: Env, tenantId: number): Promise<V
     return { ok: false, mensagem: 'O token guardado não abriu com a MASTER_KEY deste Worker. Cole o token de novo.' };
   }
 
+  // Um clique real deixa a Meta validar o evento de teste por inteiro
+  const clique = await env.DB.prepare(
+    'SELECT ctwa_clid FROM meta_atribuicoes WHERE tenant_id = ? ORDER BY recebido_em DESC LIMIT 1',
+  )
+    .bind(tenantId)
+    .first<{ ctwa_clid: string }>();
+
   const v = await verificarToken(token, c.meta_dataset_id, {
     testEventCode: c.meta_test_event_code, pageId: c.meta_page_id, wabaId: c.meta_waba_id,
+    ctwaClid: clique?.ctwa_clid ?? null,
   });
   if (!v.rede) {
     await env.DB.prepare(

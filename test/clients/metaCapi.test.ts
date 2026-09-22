@@ -76,6 +76,25 @@ describe('verificarToken', () => {
     expect(chamadas[1]!.corpo.data[0].user_data.page_id).toBe('555');
   });
 
+  test('com um clique real, o evento de teste leva o ctwa_clid', async () => {
+    respostas.push(() => Response.json({ error: { code: 100, message: 'Missing Permission' } }, { status: 400 }));
+    respostas.push(() => Response.json({ events_received: 1 }));
+    const r = await verificarToken('tok', '123', { pageId: '555', ctwaClid: 'ARAk-real' });
+    expect(r.ok).toBe(true);
+    expect(chamadas[1]!.corpo.data[0].user_data.ctwa_clid).toBe('ARAk-real');
+  });
+
+  test('sem clique ainda: a Meta recusa pelo dado (2804071), o que prova o token', async () => {
+    // resposta real da Meta em 22/09/2026 para o evento de teste sem ctwa_clid
+    respostas.push(() => Response.json({ error: { code: 100, message: 'Missing Permission' } }, { status: 400 }));
+    respostas.push(() => Response.json(
+      { error: { code: 100, error_subcode: 2804071, message: 'Invalid parameter' } }, { status: 400 },
+    ));
+    const r = await verificarToken('tok', '123', { pageId: '555' });
+    expect(r.ok).toBe(true);
+    expect(r.mensagem).toMatch(/clique de anúncio/);
+  });
+
   test('sem Pagina nem WABA nao da para provar por envio', async () => {
     respostas.push(() => Response.json({ error: { code: 100, message: 'Missing Permission' } }, { status: 400 }));
     const r = await verificarToken('tok', '123');
