@@ -56,6 +56,26 @@ describe('conferirEnvio', () => {
     expect(() => conferirEnvio('OK')).not.toThrow();
   });
 
+  test('aviso segurado ate a sequencia da planilha chegar conta como enviado', () => {
+    // capturado em producao (Persianas, 22/09/2026, lead Soraya): a Pulseboard
+    // segura o aviso ate' 3 min esperando a SEQUENCIA da planilha e manda depois.
+    // O grupo recebeu a mensagem, com "161SET"; o painel dizia erro.
+    const corpo = '{"ok":true,"sent":0,"skipped":[],"aguardando_sequencia":1}';
+    expect(conferirEnvio(corpo)).toBe('enviado');
+  });
+
+  test('lead que outro caminho ja avisou nao e erro: e "ja avisado"', () => {
+    // capturado em producao (Persianas, 22/09/2026): o quiz do site ja tinha
+    // avisado o grupo; quando o lead chamou no WhatsApp a Pulseboard barrou a
+    // repeticao de proposito (janela de 24h). Retentar so' repete a barra.
+    const corpo = '{"ok":true,"sent":0,"skipped":["lead_index_0: duplicado (Persianas Paulista - Mensagem)"]}';
+    expect(conferirEnvio(corpo)).toBe('ja_avisado');
+  });
+
+  test('envio de verdade diz enviado', () => {
+    expect(conferirEnvio('{"ok":true,"sent":1,"skipped":[]}')).toBe('enviado');
+  });
+
   test('sent=0 sem skipped ainda e falha', () => {
     expect(() => conferirEnvio('{"ok":true,"sent":0}')).toThrow(/sem motivo declarado/);
   });

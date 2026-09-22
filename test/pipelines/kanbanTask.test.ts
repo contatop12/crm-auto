@@ -268,6 +268,52 @@ describe('aviso desligado por cliente', () => {
   });
 });
 
+describe('aviso barrado pela Pulseboard porque outro caminho ja avisou', () => {
+  const DUPLICADO = '{"ok":true,"sent":0,"skipped":["lead_index_0: duplicado (Persianas Paulista - Mensagem)"]}';
+
+  test('lead que o quiz ja avisou fica ignorado, sem voltar para a fila', async () => {
+    // Persianas, 22/09/2026: 8 leads do quiz/formulario do Meta chamaram no
+    // WhatsApp horas depois. A Pulseboard barrou a repeticao (de proposito) e o
+    // painel mostrou 8 erros, cada um retentado 6 vezes.
+    const { env, consultar } = cenario();
+    vi.stubGlobal('fetch', async () => new Response(DUPLICADO, { status: 200 }));
+
+    const r = await avisarLeadNoGrupo(env, 1, task());
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('outro caminho');
+
+    const linha = consultar<{ status: string; erro: string }>(
+      'SELECT status, erro FROM group_notifications WHERE tenant_id = 1',
+    )[0]!;
+    expect(linha.status).toBe('ignorado');
+    expect(linha.erro).toContain('outro caminho');
+  });
+
+  test('a barra nao se desfaz: o mesmo card nao tenta de novo', async () => {
+    const { env } = cenario();
+    let chamadas = 0;
+    vi.stubGlobal('fetch', async () => {
+      chamadas++;
+      return new Response(DUPLICADO, { status: 200 });
+    });
+    await avisarLeadNoGrupo(env, 1, task());
+    const r = await avisarLeadNoGrupo(env, 1, task());
+    expect(r.status).toBe('ignorado');
+    expect(chamadas).toBe(1);
+  });
+
+  test('aviso segurado esperando a sequencia da planilha conta como enviado', async () => {
+    const { env, consultar } = cenario();
+    vi.stubGlobal('fetch', async () => new Response(
+      '{"ok":true,"sent":0,"skipped":[],"aguardando_sequencia":1}', { status: 200 },
+    ));
+    const r = await avisarLeadNoGrupo(env, 1, task());
+    expect(r.status).toBe('ok');
+    expect(consultar<{ status: string }>('SELECT status FROM group_notifications WHERE tenant_id = 1')[0]!.status)
+      .toBe('enviado');
+  });
+});
+
 describe('card sem protocolo ainda (Vita, setembro: 8 de 10 avisos sairam "Direto")', () => {
   test('primeiras entregas esperam a atribuicao em vez de avisar como Direto', async () => {
     const { env, consultar } = cenario();

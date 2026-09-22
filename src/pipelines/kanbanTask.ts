@@ -4,7 +4,7 @@ import { recuperarRespostasAnteriores } from './sellerMessage';
 import { montarCanal } from '../domain/canal';
 import { detectOrigin, detectPlatform } from '../domain/platform';
 import { normFone } from '../domain/phone';
-import { PulseboardClient, ErroPulseboard } from '../clients/pulseboard';
+import { PulseboardClient, ErroPulseboard, type ResultadoAviso } from '../clients/pulseboard';
 import { nomeParaExibir, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLead';
 
 /**
@@ -247,8 +247,9 @@ export async function avisarLeadNoGrupo(
     return { status: 'erro', motivo: msg, retentar: false };
   }
 
+  let resultado: ResultadoAviso;
   try {
-    await new PulseboardClient(cfg.pulseboard_url).avisarLeadNovo({
+    resultado = await new PulseboardClient(cfg.pulseboard_url).avisarLeadNovo({
       canal,
       nome,
       telefone,
@@ -265,6 +266,15 @@ export async function avisarLeadNoGrupo(
     // fila. A de cadastro nao: fica visivel e para de tentar.
     const permanente = e instanceof ErroPulseboard && e.permanente;
     return { status: 'erro', motivo: `Pulseboard falhou: ${msg}`, retentar: !permanente };
+  }
+
+  // O lead do quiz (ou do formulario do Meta) que chama no WhatsApp horas
+  // depois: o grupo ja' soube dele pelo outro caminho, e a Pulseboard barra a
+  // repeticao. Fica registrado como ignorado — nao e' erro e nao volta a fila.
+  if (resultado === 'ja_avisado') {
+    const msg = 'grupo ja avisado deste lead por outro caminho (quiz ou formulario): a Pulseboard barrou a repeticao';
+    await marcar('ignorado', msg);
+    return { status: 'ignorado', motivo: `${msg} · ${nome} · ${canal}` };
   }
 
   await marcar('enviado');

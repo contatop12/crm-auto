@@ -36,6 +36,15 @@ const ENDPOINT = 'https://pulseboard.sitespdoze.com.br/meta-new-lead';
  * segunda so' melhora quando alguem mexe no cadastro, e retentar so' gasta a
  * fila e mantem o painel vermelho sem caminho de saida.
  */
+/**
+ * O que a Pulseboard fez com o aviso.
+ *
+ * `ja_avisado`: o grupo ja' recebeu este lead por outro caminho (o quiz do
+ * site, o formulario do Meta) nas ultimas 24h e a Pulseboard barrou a
+ * repeticao de proposito. Nao e' falha: retentar so' repete a barra.
+ */
+export type ResultadoAviso = 'enviado' | 'ja_avisado';
+
 export class ErroPulseboard extends Error {
   constructor(mensagem: string, readonly permanente: boolean) {
     super(mensagem);
@@ -46,7 +55,7 @@ export class ErroPulseboard extends Error {
 export class PulseboardClient {
   constructor(private readonly endpoint: string = ENDPOINT) {}
 
-  async avisarLeadNovo(l: NovoLead): Promise<void> {
+  async avisarLeadNovo(l: NovoLead): Promise<ResultadoAviso> {
     const r = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -71,7 +80,7 @@ export class PulseboardClient {
         r.status >= 400 && r.status < 500,
       );
     }
-    conferirEnvio(texto);
+    return conferirEnvio(texto);
   }
 }
 
@@ -89,13 +98,16 @@ export class PulseboardClient {
  * do cliente nunca viu. E' a mesma falha silenciosa do n8n que esta ferramenta
  * existe para acabar, entao quem manda e' o `sent`.
  */
-export function conferirEnvio(corpo: string): void {
-  let j: { ok?: boolean; sent?: number; skipped?: unknown; ignored?: boolean; reason?: string };
+export function conferirEnvio(corpo: string): ResultadoAviso {
+  let j: {
+    ok?: boolean; sent?: number; skipped?: unknown; ignored?: boolean; reason?: string;
+    aguardando_sequencia?: number;
+  };
   try {
     j = JSON.parse(corpo) as typeof j;
   } catch {
     // resposta que nao e' json e' inesperada, mas nao prova falha de envio
-    return;
+    return 'enviado';
   }
 
   if (j.ignored === true) {
@@ -105,9 +117,19 @@ export function conferirEnvio(corpo: string): void {
     throw new ErroPulseboard(`Pulseboard recusou: ${corpo.slice(0, 200)}`, true);
   }
   if (typeof j.sent === 'number' && j.sent < 1) {
+    // A Pulseboard segura o aviso ate' a SEQUENCIA da planilha chegar (ate' 3
+    // min) e manda depois, com o numero. Aceito, nao falhou: tratar como erro
+    // punha a fila a retentar, e a retentativa era barrada como "duplicado"
+    // (Persianas, 22/09/2026 — o grupo tinha recebido a mensagem).
+    if (typeof j.aguardando_sequencia === 'number' && j.aguardando_sequencia >= 1) return 'enviado';
+
     const motivo = Array.isArray(j.skipped) && j.skipped.length
       ? j.skipped.map(String).join(' · ')
       : 'sem motivo declarado';
+
+    // Outro caminho (quiz, formulario do Meta) ja' avisou este lead ha' menos
+    // de 24h: a barra e' de proposito, decisao do lado de la'.
+    if (/duplicado/.test(motivo)) return 'ja_avisado';
 
     // Sondado contra producao: um `codi_id` inventado devolve exatamente este
     // erro. Ou seja, `rota_nao_mapeada` significa que aquele codi_id nao tem
@@ -120,4 +142,5 @@ export function conferirEnvio(corpo: string): void {
       semRota,
     );
   }
+  return 'enviado';
 }
