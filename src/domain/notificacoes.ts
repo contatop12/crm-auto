@@ -25,7 +25,7 @@ export interface Notificacao {
   quando: string;
   /** Quantas vezes aconteceu (erros iguais viram uma notificacao so'). */
   quantidade: number;
-  /** Aba do cliente onde se conserta. */
+  /** Onde se conserta, no perfil do cliente: `aba` ou `aba/secao` (ex.: `google/conversoes`). */
   aba: string | null;
   /** Eventos que "resolver" marca — so' nas notificacoes de erro de evento. */
   ids?: number[];
@@ -60,10 +60,10 @@ export function chaveDoErro(m: string | null): string | null {
 
 function tituloDoErro(e: ErroEvento): { titulo: string; aba: string } {
   const m = String(e.motivo ?? '');
-  if (/pulseboard|grupo/i.test(m)) return { titulo: 'Aviso do lead no grupo não saiu', aba: 'atividade' };
+  if (/pulseboard|grupo/i.test(m)) return { titulo: 'Aviso do lead no grupo não saiu', aba: 'atividade/avisos' };
   if (/planilha|sheets/i.test(m)) return { titulo: 'Planilha não foi preenchida', aba: 'atividade' };
   switch (e.event_type) {
-    case 'kanban_conversao': return { titulo: 'Conversão não subiu para o Google Ads', aba: 'google' };
+    case 'kanban_conversao': return { titulo: 'Conversão não subiu para o Google Ads', aba: 'google/conversoes' };
     case 'assinatura_invalida': return { titulo: 'Webhook recusado (assinatura inválida)', aba: 'atividade' };
     case 'message_incoming': return { titulo: 'Mensagem do lead não foi processada', aba: 'atividade' };
     case 'message_outgoing': return { titulo: 'Resposta do vendedor não foi processada', aba: 'atividade' };
@@ -145,23 +145,23 @@ export function avisosDeConfiguracao(cfgs: ConfigCliente[], agora: string): Noti
     out.push({ chave: `cfg:${c.tenant_id}:${codigo}`, tipo, origem: 'configuracao', tenant_id: c.tenant_id, cliente: c.cliente, titulo, detalhe, quando: agora, quantidade: 1, aba });
   for (const c of cfgs) {
     if (c.cw_account_id && !c.tem_segredo) {
-      aviso(c, 'webhook', 'Webhook do Chatwoot não registrado', 'sem ele, nenhuma conversa deste cliente chega ao CRM', 'webhooks', 'erro');
+      aviso(c, 'webhook', 'Webhook do Chatwoot não registrado', 'sem ele, nenhuma conversa deste cliente chega ao CRM', 'canais/chatwoot', 'erro');
     }
     if (c.validate_only) {
-      aviso(c, 'sombra', 'Modo sombra ligado', 'as conversões só são validadas pelo Google, nada é contado', 'google');
+      aviso(c, 'sombra', 'Modo sombra ligado', 'as conversões só são validadas pelo Google, nada é contado', 'google/envio');
     }
     if (!c.pulseboard_ativo) {
-      aviso(c, 'pulseboard-off', 'Aviso do lead no grupo desligado', 'lead novo não é avisado no grupo do cliente', 'integracoes');
+      aviso(c, 'pulseboard-off', 'Aviso do lead no grupo desligado', 'lead novo não é avisado no grupo do cliente', 'canais/whatsapp');
     } else if (!c.pulseboard_url) {
-      aviso(c, 'pulseboard-url', 'Aviso no grupo sem endereço', 'ligado, mas falta a rota do Pulseboard no cadastro', 'integracoes', 'erro');
+      aviso(c, 'pulseboard-url', 'Aviso no grupo sem endereço', 'ligado, mas falta a rota do Pulseboard no cadastro', 'canais/whatsapp', 'erro');
     }
     if (!c.etapas) {
-      aviso(c, 'etapas', 'Etapas do funil não sincronizadas', 'sem etapas, card não anda e conversão não sobe', 'config', 'erro');
+      aviso(c, 'etapas', 'Etapas do funil não sincronizadas', 'sem etapas, card não anda e conversão não sobe', 'funil', 'erro');
     } else if (c.ga_customer_id && !c.etapas_com_meta) {
-      aviso(c, 'metas', 'Nenhuma etapa ligada a meta do Google Ads', 'o funil anda, mas nenhuma conversão sobe', 'google');
+      aviso(c, 'metas', 'Nenhuma etapa ligada a meta do Google Ads', 'o funil anda, mas nenhuma conversão sobe', 'google/metas');
     }
     if (c.etapas && !c.gatilhos) {
-      aviso(c, 'gatilhos', 'Sem frases-gatilho', 'o card só avança na mão (ou na primeira resposta)', 'config');
+      aviso(c, 'gatilhos', 'Sem frases-gatilho', 'o card só avança na mão (ou na primeira resposta)', 'funil');
     }
   }
   return out;

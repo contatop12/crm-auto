@@ -170,8 +170,11 @@
       .carregando { color: var(--tinta-3); font-size: 13px; }
       /* Ações da etiqueta: discretas até o olho procurar por elas. A linha é
          sobre a etiqueta, não sobre os botões. */
-      .acoes-etiqueta { display: flex; gap: var(--e1); justify-content: flex-end; }
+      /* Sem `display: flex` no <td>: tira a célula da tabela e a régua da
+         linha parava antes da coluna dos botões. */
+      .acoes-etiqueta { text-align: right; white-space: nowrap; }
       .acoes-etiqueta button { font-size: 12px; padding: var(--e0) var(--e1); }
+      .acoes-etiqueta button + button { margin-left: var(--e1); }
 
       /* Placar do Google Ads: os números que respondem "e daí?" antes da
          tabela. Cada um é um bloco fechado porque são grandezas distintas —
@@ -345,7 +348,7 @@
 
       .abas {
         display: flex; gap: 4px; border-bottom: 1px solid var(--linha);
-        margin: 24px 0 4px; overflow-x: auto;
+        margin: var(--e3) 0 0; overflow-x: auto;
       }
       .aba {
         border: 0; border-bottom: 2px solid transparent; border-radius: 0;
@@ -354,6 +357,72 @@
       }
       .aba:hover { color: var(--tinta); border-color: var(--linha-forte); }
       .aba[aria-selected='true'] { color: var(--tinta); border-color: var(--tinta); font-weight: 600; }
+      .painel { padding-top: var(--e4); }
+
+      /* ---------- perfil do cliente ---------- */
+
+      .perfil-topo {
+        display: flex; align-items: flex-end; justify-content: space-between;
+        gap: var(--e2); flex-wrap: wrap;
+      }
+      .perfil-nome { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 var(--e0); }
+      .perfil-topo .cliente-slug { margin: 0; }
+
+      /* Selo de estado no topo: diz como o cliente está sem abrir a aba. É
+         botão porque leva ao interruptor, que mora na aba do Google Ads. */
+      .selo {
+        display: inline-flex; align-items: center; gap: var(--e1);
+        padding: var(--e0) 12px; font-size: 12.5px; box-shadow: none;
+      }
+      .selo::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+      /* Enviando é o estado normal: só o ponto leva a cor. Texto verde ao lado
+         do interruptor vermelho (que marca "isto é irreversível") dizia duas
+         coisas sobre o mesmo estado. Modo sombra é aviso, e o selo inteiro diz. */
+      .selo-vivo { color: var(--tinta-2); }
+      .selo-vivo::before { background: var(--fluxo); }
+      .selo-espera { color: var(--espera); border-color: var(--espera); }
+
+      /* Menu lateral da aba: um grupo de seções por vez. A aba que tem um
+         assunto só não ganha menu — duas seções irmãs cabem na mesma tela. */
+      .secoes { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: var(--e4); }
+      .secoes-menu {
+        position: sticky; top: 72px; align-self: start;
+        display: flex; flex-direction: column; gap: 2px;
+      }
+      .secoes-menu button {
+        text-align: left; border: 0; border-radius: var(--r); box-shadow: none;
+        background: none; padding: var(--e1) 12px;
+        color: var(--tinta-2); font-size: 13.5px;
+      }
+      .secoes-menu button:hover { background: rgba(23, 25, 28, .04); color: var(--tinta); }
+      .secoes-menu button[aria-current='true'] {
+        background: var(--carta); color: var(--tinta); font-weight: 600;
+        box-shadow: inset 2px 0 0 var(--tinta);
+      }
+      .secao-grupo[hidden] { display: none; }
+
+      /* Cabeçalho da seção: o que é, à esquerda; o que dá para fazer, à direita. */
+      .secao-topo {
+        display: flex; align-items: flex-start; justify-content: space-between;
+        gap: var(--e1) var(--e3); flex-wrap: wrap; margin-bottom: var(--e2);
+      }
+      .secao-topo > div:first-child { flex: 1 1 320px; min-width: 0; }
+      .secao-topo .dica { margin-top: var(--e0); }
+      .form-linha { margin-bottom: var(--e2); }
+
+      @media (max-width: 860px) {
+        /* minmax(0, …): com `1fr` a fileira de botões sem quebra alargava a
+           coluna, e a página inteira passava da tela no celular */
+        .secoes { grid-template-columns: minmax(0, 1fr); gap: var(--e3); }
+        .secoes-menu {
+          position: static; flex-direction: row; gap: var(--e0); overflow-x: auto;
+          border-bottom: 1px solid var(--linha); padding-bottom: var(--e1);
+        }
+        .secoes-menu button { white-space: nowrap; }
+        .secoes-menu button[aria-current='true'] { box-shadow: inset 0 -2px 0 var(--tinta); }
+        /* tabela larga rola sozinha em vez de empurrar a página */
+        .painel table { display: block; overflow-x: auto; }
+      }
 
       /* ---------- avisos e vazios ---------- */
 
@@ -432,11 +501,11 @@
       .endereco .uso { margin-top: 8px; }
 
       dl.resumo {
-        display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px;
+        display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px;
         margin: 0 0 16px; font-size: 12.5px;
       }
       dl.resumo dt { color: var(--tinta-3); }
-      dl.resumo dd { margin: 0; font-family: var(--mono); }
+      dl.resumo dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
 
       /* ---------- interruptor ---------- */
 
@@ -757,215 +826,445 @@
         });
       }
 
+      /**
+       * Abre uma aba (ou `aba/seção`) do cliente que está na tela. Quem está
+       * fora do `verCliente` — o corpo do webhook, por exemplo — usa isto para
+       * não mostrar conteúdo dentro de um painel escondido.
+       */
+      let abrirDestino = null;
+
+      /** Resumo só de leitura do cadastro; vazio vira "não configurado". */
+      function desenharResumo(alvoId, linhas) {
+        const alvo = document.getElementById(alvoId);
+        if (!alvo) return;
+        alvo.innerHTML = '<dl class="resumo">' + linhas.map(function (l) {
+          return '<dt>' + esc(l[0]) + '</dt><dd>' +
+            (l[1] ? esc(l[1]) : '<span class="nada">não configurado</span>') + '</dd>';
+        }).join('') + '</dl>';
+      }
+
+      async function comCadastro(alvoId, promessa, montar) {
+        const alvo = document.getElementById(alvoId);
+        if (!alvo) return;
+        alvo.innerHTML = CARREGANDO;
+        try {
+          desenharResumo(alvoId, montar(await promessa));
+        } catch (e) {
+          alvo.innerHTML = '<p class="carregando">falhou: ' + esc(e.message) + '</p>';
+        }
+      }
+
+      function resumoChatwoot(promessa) {
+        return comCadastro('cw-resumo', promessa, function (c) {
+          return [
+            ['Conta', c.cw_account_id ? '#' + c.cw_account_id : null],
+            ['Board do funil de Ads', c.cw_board_funil_id ? '#' + c.cw_board_funil_id : null],
+            ['Board de entrada (Orgânico)', c.cw_board_organico_id ? '#' + c.cw_board_organico_id : null],
+          ];
+        });
+      }
+
+      function resumoAvisoGrupo(promessa) {
+        return comCadastro('aviso-resumo', promessa, function (c) {
+          return [
+            ['Aviso no grupo', c.pulseboard_ativo ? 'ligado' : 'desligado'],
+            ['Webhook do Pulseboard', c.pulseboard_url],
+          ];
+        });
+      }
+
+      function resumoGoogle(promessa) {
+        return comCadastro('ga-resumo', promessa, function (c) {
+          const conta = c.ga_customer_id ? String(c.ga_customer_id).replace(/^(\d{3})(\d{3})(\d{4})$/, '$1-$2-$3') : null;
+          return [
+            ['Conta do Google Ads', conta],
+            ['Janela de casamento pelo telefone', c.janela_match_dias ? c.janela_match_dias + ' dias' : null],
+          ];
+        });
+      }
+
       async function verCliente(id, abaInicial) {
         tela.innerHTML = CARREGANDO;
         const [cliente] = (await api('/overview')).filter((c) => String(c.tenant_id) === String(id));
 
+        const nome = cliente ? cliente.nome : 'Cliente ' + id;
+        const slug = cliente ? cliente.slug : '';
+
+        // Uma aba por assunto. A tela tinha sete abas e cada assunto espalhado
+        // por duas ou três delas: etiqueta em Configuração e em Integrações,
+        // webhook em Integrações e em Webhooks, Google em três lugares. Nas abas
+        // com mais de um grupo, o menu lateral mostra um grupo por vez.
         tela.innerHTML = `
           <div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>
-          <h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.02em">
-            ${esc(cliente ? cliente.nome : 'Cliente ' + id)}
-          </h2>
-          <p class="cliente-slug" style="margin:0 0 16px">${esc(cliente ? cliente.slug : '')}</p>
-          <div class="linha-acoes" style="margin:0 0 24px">
-            <button id="btn-editar">${ic('editar')} Editar cliente</button>
-            <label class="switch" data-dica="Ligado, a conversão é gravada no Google Ads de verdade">
-              <input type="checkbox" id="sw-envio" />
-              <span class="trilho"></span>
-              <span class="rotulo" id="sw-rotulo">…</span>
-            </label>
+          <div class="perfil-topo">
+            <div>
+              <h2 class="perfil-nome">${esc(nome)}</h2>
+              <p class="cliente-slug">${esc(slug)}</p>
+            </div>
+            <div class="linha-acoes">
+              <button class="selo" id="selo-google" hidden></button>
+              <button id="btn-editar">${ic('editar')} Editar cliente</button>
+            </div>
           </div>
 
           <div class="abas" role="tablist">
-            <button class="aba" role="tab" data-aba="fluxo" aria-selected="true">Fluxo</button>
-            <button class="aba" role="tab" data-aba="config" aria-selected="false">Configuração</button>
-            <button class="aba" role="tab" data-aba="integracoes" aria-selected="false">Integrações</button>
-            <button class="aba" role="tab" data-aba="atividade" aria-selected="false">Atividade</button>
+            <button class="aba" role="tab" data-aba="geral" aria-selected="true">Visão geral</button>
+            <button class="aba" role="tab" data-aba="funil" aria-selected="false">Funil</button>
+            <button class="aba" role="tab" data-aba="canais" aria-selected="false">Canais</button>
             <button class="aba" role="tab" data-aba="google" aria-selected="false">Google Ads</button>
-            <button class="aba" role="tab" data-aba="webhooks" aria-selected="false">Webhooks</button>
             <button class="aba" role="tab" data-aba="planilha" aria-selected="false">Planilha</button>
+            <button class="aba" role="tab" data-aba="atividade" aria-selected="false">Atividade</button>
           </div>
 
-          <div class="painel" data-painel="fluxo">
-          <section>
-            <h2>Fluxo do lead</h2>
-            <div id="fluxo"></div>
-          </section>
+          <div class="painel" data-painel="geral">
+            <section>
+              <header class="secao-topo">
+                <div>
+                  <h2>Fluxo do lead</h2>
+                  <p class="dica">Cada passo do lead, do clique à conversão, e se está funcionando agora.</p>
+                </div>
+              </header>
+              <div id="fluxo"></div>
+            </section>
+
+            <section>
+              <header class="secao-topo">
+                <div>
+                  <h2>Saúde das integrações</h2>
+                  <p class="dica">Consulta ao vivo o Chatwoot, o Google Ads, as etiquetas e o WhatsApp.</p>
+                </div>
+                <div class="linha-acoes">
+                  <span class="carregando" id="checagem-estado"></span>
+                  <button id="btn-checar">${ic('conferir')} Checar agora</button>
+                </div>
+              </header>
+              <div id="checagens"></div>
+            </section>
           </div>
 
-          <div class="painel" data-painel="config" hidden>
-          <section>
-            <h2>Etapas do funil</h2>
-            <div class="linha-acoes">
-              <button id="btn-sync">Sincronizar do board</button>
-              <span class="carregando" id="etapas-estado"></span>
-            </div>
-            <div id="etapas"></div>
-          </section>
+          <div class="painel" data-painel="funil" hidden>
+            <section>
+              <header class="secao-topo">
+                <div>
+                  <h2>Etapas do funil</h2>
+                  <p class="dica">Vêm do board do Chatwoot. Para mudar nome ou ordem, mude no board e sincronize.</p>
+                </div>
+                <div class="linha-acoes">
+                  <span class="carregando" id="etapas-estado"></span>
+                  <button id="btn-sync">Sincronizar do board</button>
+                </div>
+              </header>
+              <div id="etapas"></div>
+            </section>
 
-          <section>
-            <h2>Frases que movem os cards</h2>
-            <div class="linha-acoes">
-              <input id="g-frase" placeholder="segue a proposta" style="max-width:280px" />
-              <select id="g-tipo" style="max-width:130px" title="Contém: a frase aparece em qualquer ponto da mensagem. Fixo: a mensagem inteira é a frase.">
-                <option value="contem">Contém</option>
-                <option value="fixo">Fixo</option>
-              </select>
-              <select id="g-etapa" style="max-width:220px"></select>
-              <input id="g-emoji" placeholder="emoji (opcional)" style="max-width:150px" />
-              <button id="btn-gatilho" class="principal">Adicionar</button>
-              <span class="carregando" id="gatilho-estado"></span>
-            </div>
-            <div id="gatilhos"></div>
-          </section>
-
-          <section>
-            <h2>Cards sem conversa</h2>
-            <p class="mono">Cards do Kanban cuja conversa sumiu. Só leitura: nada é apagado daqui.</p>
-            <div class="linha-acoes">
-              <button id="btn-orfaos">Procurar</button>
-              <button id="btn-orfaos-csv" hidden>Baixar CSV</button>
-              <span class="carregando" id="orfaos-estado"></span>
-            </div>
-            <div id="orfaos"></div>
-          </section>
-
-          <section>
-            <h2>Etiquetas deste cliente</h2>
-            <div class="linha-acoes">
-              <input id="l-slug" placeholder="nome da etiqueta (ex: reagendar)" />
-              <input id="l-cor" type="color" value="#999999" style="width:52px;padding:4px" />
-              <input id="l-desc" placeholder="descrição" />
-              <button id="btn-l-add">Criar no Chatwoot</button>
-              <span class="carregando" id="etiquetas-estado"></span>
-            </div>
-            <div id="etiquetas"></div>
-          </section>
-
-          <section>
-            <h2>Metas de conversão no Google Ads</h2>
-            <div class="linha-acoes">
-              <button id="btn-metas">Gerar metas</button>
-              <button id="btn-meta-nova">Adicionar meta</button>
-              <span class="carregando" id="metas-estado">propõe a partir das etapas e mostra antes de publicar</span>
-            </div>
-            <div id="metas"></div>
-          </section>
-
-          <section>
-            <h2>Números de WhatsApp</h2>
-            <div id="instancias"></div>
-          </section>
+            <section>
+              <header class="secao-topo">
+                <div>
+                  <h2>Frases que movem os cards</h2>
+                  <p class="dica">Quando o vendedor manda uma destas frases, o card vai para a etapa escolhida.</p>
+                </div>
+                <span class="carregando" id="gatilho-estado"></span>
+              </header>
+              <div class="linha-acoes form-linha">
+                <input id="g-frase" placeholder="segue a proposta" style="max-width:280px" />
+                <select id="g-tipo" style="max-width:130px" title="Contém: a frase aparece em qualquer ponto da mensagem. Fixo: a mensagem inteira é a frase.">
+                  <option value="contem">Contém</option>
+                  <option value="fixo">Fixo</option>
+                </select>
+                <select id="g-etapa" style="max-width:220px"></select>
+                <input id="g-emoji" placeholder="emoji (opcional)" style="max-width:150px" />
+                <button id="btn-gatilho" class="principal">Adicionar</button>
+              </div>
+              <div id="gatilhos"></div>
+            </section>
           </div>
 
-          <div class="painel" data-painel="integracoes" hidden>
-          <section>
-            <h2>Integrações</h2>
-            <div class="linha-acoes">
-              <button id="btn-checar">${ic('conferir')} Checar agora</button>
-              <span class="carregando" id="checagem-estado">consulta Chatwoot, Google Ads, etiquetas e WhatsApp ao vivo</span>
+          <div class="painel" data-painel="canais" hidden>
+            <div class="secoes">
+              <nav class="secoes-menu" aria-label="Seções de Canais">
+                <button data-secao="chatwoot">Chatwoot</button>
+                <button data-secao="whatsapp">WhatsApp</button>
+                <button data-secao="site">Site e GTM</button>
+                <button data-secao="entradas">Endereços de entrada</button>
+              </nav>
+              <div class="secoes-corpo">
+                <div class="secao-grupo" data-secao="chatwoot">
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Conta</h2>
+                        <p class="dica">Onde as conversas e os cards deste cliente ficam no Chatwoot.</p>
+                      </div>
+                      <button class="btn-editar-cfg">${ic('editar')} Editar</button>
+                    </header>
+                    <div id="cw-resumo"></div>
+                  </section>
+
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Webhook do Chatwoot</h2>
+                        <p class="dica">Sem ele, nenhuma conversa deste cliente chega ao CRM.</p>
+                      </div>
+                      <div class="linha-acoes">
+                        <span class="carregando" id="webhook-estado"></span>
+                        <button id="btn-webhook">Registrar webhook do painel</button>
+                      </div>
+                    </header>
+                    <div id="webhooks"></div>
+                  </section>
+
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Etiquetas</h2>
+                        <p class="dica">As etiquetas da conta, e quais delas o CRM aplica sozinho.</p>
+                      </div>
+                      <span class="carregando" id="etiquetas-estado"></span>
+                    </header>
+                    <div class="linha-acoes form-linha">
+                      <input id="l-slug" placeholder="nome da etiqueta (ex: reagendar)" />
+                      <input id="l-cor" type="color" value="#999999" style="width:52px;padding:4px" />
+                      <input id="l-desc" placeholder="descrição" />
+                      <button id="btn-l-add">Criar no Chatwoot</button>
+                    </div>
+                    <div id="etiquetas"></div>
+                  </section>
+
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Padrão de etiquetas e atributos</h2>
+                        <p class="dica">Cria na conta o que falta do padrão definido em Padronizações.</p>
+                      </div>
+                      <div class="linha-acoes">
+                        <span class="carregando" id="prov-estado"></span>
+                        <button id="btn-prov" data-dica="Lê a conta antes de escrever — não cria nada">${ic('conferir')} Conferir</button>
+                        <button id="btn-prov-criar" class="principal">${ic('raio')} Gerar no Chatwoot</button>
+                      </div>
+                    </header>
+                    <div id="prov"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="whatsapp" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Números de WhatsApp</h2>
+                        <p class="dica">Qual instância da Evolution atende cada inbox do Chatwoot. É por ela que a etiqueta chega no WhatsApp.</p>
+                      </div>
+                    </header>
+                    <div id="instancias"></div>
+                  </section>
+
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Aviso de lead novo no grupo</h2>
+                        <p class="dica">Mensagem no grupo do cliente quando um lead de anúncio entra no funil. O histórico fica em Atividade.</p>
+                      </div>
+                      <button class="btn-editar-cfg">${ic('editar')} Editar</button>
+                    </header>
+                    <div id="aviso-resumo"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="site" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Google Tag Manager</h2>
+                        <p class="dica">A tag que registra o clique no site e leva o protocolo até o WhatsApp.</p>
+                      </div>
+                    </header>
+                    <div id="gtm"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="entradas" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Endereços de entrada</h2>
+                        <p class="dica">Cada webhook tem a própria chave. Gerar uma nova derruba
+                        <strong>só aquele endereço</strong> — os outros continuam funcionando.</p>
+                      </div>
+                      <div class="linha-acoes">
+                        <button id="btn-testar-chave">${ic('conferir')} Testar as chaves</button>
+                        <button id="btn-conferir-origem">${ic('atualizar')} Conferir a configuração</button>
+                      </div>
+                    </header>
+                    <p class="carregando" id="chave-estado">a chave confere se o endereço abre; a configuração, se o GTM e o Chatwoot apontam para cá</p>
+                    <div id="wh-lista"></div>
+                    <div class="aviso">A chave vai na própria URL, porque nem o GTM nem a automação do
+                    Chatwoot mandam header. No Make, prefira o header <code>X-Ingest-Key</code> —
+                    a URL aparece em log e em print de tela.</div>
+                  </section>
+                </div>
+              </div>
             </div>
-            <div id="checagens"></div>
-          </section>
-
-          <section>
-            <h2>Google Tag Manager</h2>
-            <div id="gtm"></div>
-          </section>
-
-          <section>
-            <h2>Endereços para colar</h2>
-            <p class="dica">Foram para a aba <strong>Webhooks</strong>, com uma chave por endereço.</p>
-          </section>
-
-          <section>
-            <h2>Etiquetas e atributos</h2>
-            <div class="linha-acoes">
-              <button id="btn-prov" data-dica="Lê a conta antes de escrever — não cria nada">${ic('conferir')} Conferir</button>
-              <button id="btn-prov-criar" class="principal">${ic('raio')} Gerar no Chatwoot</button>
-              <span class="carregando" id="prov-estado">cria o que falta, conforme as Padronizacoes</span>
-            </div>
-            <div id="prov"></div>
-          </section>
-
-          <section>
-            <h2>Webhooks no Chatwoot</h2>
-            <div class="linha-acoes">
-              <button id="btn-webhook">Registrar webhook do painel</button>
-              <span class="carregando" id="webhook-estado"></span>
-            </div>
-            <div id="webhooks"></div>
-          </section>
-          </div>
-
-          <div class="painel" data-painel="atividade" hidden>
-          <section>
-            <h2>Avisos de lead novo no grupo</h2>
-            <div id="avisos"></div>
-          </section>
-
-          <section>
-            <h2>Reprocessar o que ficou para trás</h2>
-            <div class="linha-acoes">
-              <button id="btn-reproc" data-dica="Só conta quantas conversas entrariam na fila">Conferir</button>
-              <button id="btn-reproc-aplicar" class="principal">${ic('atualizar')} Reprocessar</button>
-              <span class="carregando" id="reproc-estado">roda o pipeline atual sobre os webhooks já recebidos</span>
-            </div>
-          </section>
-
-          <section>
-            <h2>Últimos webhooks recebidos</h2>
-            <div id="eventos"><p class="carregando">carregando…</p></div>
-          </section>
-
-          <section id="secao-payload" hidden>
-            <h2>Corpo do webhook</h2>
-            <div id="payload-quem"></div>
-            <div class="aviso" id="payload-aviso"></div>
-            <div class="linha-acoes"><button id="btn-revelar">Revelar dados originais</button></div>
-            <pre id="payload"></pre>
-          </section>
-          </div>
-
-          <div class="painel" data-painel="webhooks" hidden>
-          <section>
-            <h2>Endereços de entrada</h2>
-            <p class="dica">Cada webhook tem a própria chave. Gerar uma nova derruba
-            <strong>só aquele endereço</strong> — os outros continuam funcionando.</p>
-            <div class="linha-acoes">
-              <button id="btn-testar-chave">${ic('conferir')} Testar as chaves</button>
-              <button id="btn-conferir-origem">${ic('atualizar')} Conferir a configuração</button>
-              <span class="carregando" id="chave-estado">a chave confere se o endereço abre; a configuração, se o GTM e o Chatwoot apontam para cá</span>
-            </div>
-            <div id="wh-lista"></div>
-            <div class="aviso">A chave vai na própria URL, porque nem o GTM nem a automação do
-            Chatwoot mandam header. No Make, prefira o header <code>X-Ingest-Key</code> —
-            a URL aparece em log e em print de tela.</div>
-          </section>
-          </div>
-
-          <div class="painel" data-painel="planilha" hidden>
-          <section>
-            <h2>Planilhas do cliente</h2>
-            <p class="dica">Cada <strong>clique</strong> vira a linha da aba Cliques do Banco de Dados. Cada
-            <strong>conversão enviada ao Google</strong> atualiza essa linha, entra na aba Conversoes e, se for
-            a de entrada, vira uma linha na planilha geral de leads. As colunas casam pelo nome do cabeçalho;
-            coluna que o time preenche à mão nunca é apagada.</p>
-            <div id="planilha"></div>
-          </section>
           </div>
 
           <div class="painel" data-painel="google" hidden>
-          <section>
-            <h2>Conversões enviadas ao Google Ads</h2>
-            <div id="conv-resumo"></div>
-            <div id="conversoes"><p class="carregando">carregando…</p></div>
-          </section>
+            <div class="secoes">
+              <nav class="secoes-menu" aria-label="Seções do Google Ads">
+                <button data-secao="envio">Envio</button>
+                <button data-secao="metas">Metas de conversão</button>
+                <button data-secao="conversoes">Conversões enviadas</button>
+              </nav>
+              <div class="secoes-corpo">
+                <div class="secao-grupo" data-secao="envio">
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Envio ao Google Ads</h2>
+                        <p class="dica">Em modo sombra o Google só valida a conversão e nada é contado. Ligado, ela é gravada de verdade e não volta atrás.</p>
+                      </div>
+                      <label class="switch" data-dica="Ligado, a conversão é gravada no Google Ads de verdade">
+                        <input type="checkbox" id="sw-envio" />
+                        <span class="trilho"></span>
+                        <span class="rotulo" id="sw-rotulo">…</span>
+                      </label>
+                    </header>
+                    <div id="ga-resumo"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="metas" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Metas de conversão</h2>
+                        <p class="dica">Propõe uma meta por etapa do funil e mostra tudo antes de publicar na conta do cliente.</p>
+                      </div>
+                      <div class="linha-acoes">
+                        <span class="carregando" id="metas-estado"></span>
+                        <button id="btn-meta-nova">Adicionar meta</button>
+                        <button id="btn-metas" class="principal">Gerar metas</button>
+                      </div>
+                    </header>
+                    <div id="metas"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="conversoes" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Conversões enviadas</h2>
+                        <p class="dica">O que subiu para o Google Ads e o motivo de cada recusa, com reenvio.</p>
+                      </div>
+                    </header>
+                    <div id="conv-resumo"></div>
+                    <div id="conversoes"><p class="carregando">carregando…</p></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="painel" data-painel="planilha" hidden>
+            <section>
+              <header class="secao-topo">
+                <div>
+                  <h2>Planilhas do cliente</h2>
+                  <p class="dica">Cada <strong>clique</strong> vira a linha da aba Cliques do Banco de Dados. Cada
+                  <strong>conversão enviada ao Google</strong> atualiza essa linha, entra na aba Conversoes e, se for
+                  a de entrada, vira uma linha na planilha geral de leads. As colunas casam pelo nome do cabeçalho;
+                  coluna que o time preenche à mão nunca é apagada.</p>
+                </div>
+              </header>
+              <div id="planilha"></div>
+            </section>
+          </div>
+
+          <div class="painel" data-painel="atividade" hidden>
+            <div class="secoes">
+              <nav class="secoes-menu" aria-label="Seções de Atividade">
+                <button data-secao="webhooks">Webhooks recebidos</button>
+                <button data-secao="avisos">Avisos no grupo</button>
+                <button data-secao="manutencao">Manutenção</button>
+              </nav>
+              <div class="secoes-corpo">
+                <div class="secao-grupo" data-secao="webhooks">
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Webhooks recebidos</h2>
+                        <p class="dica">Tudo que chegou deste cliente e o que o CRM fez com cada um.</p>
+                      </div>
+                    </header>
+                    <div id="eventos"><p class="carregando">carregando…</p></div>
+                  </section>
+
+                  <section id="secao-payload" hidden>
+                    <header class="secao-topo">
+                      <div><h2>Corpo do webhook</h2></div>
+                      <button id="btn-revelar">Revelar dados originais</button>
+                    </header>
+                    <div id="payload-quem"></div>
+                    <div class="aviso" id="payload-aviso"></div>
+                    <pre id="payload"></pre>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="avisos" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Avisos de lead novo no grupo</h2>
+                        <p class="dica">Cada aviso mandado ao grupo do cliente, com reenvio do que falhou.</p>
+                      </div>
+                    </header>
+                    <div id="avisos-grupo"></div>
+                  </section>
+                </div>
+
+                <div class="secao-grupo" data-secao="manutencao" hidden>
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Reprocessar o que ficou para trás</h2>
+                        <p class="dica">Roda o pipeline de hoje sobre os webhooks já recebidos.</p>
+                      </div>
+                      <div class="linha-acoes">
+                        <span class="carregando" id="reproc-estado"></span>
+                        <button id="btn-reproc" data-dica="Só conta quantas conversas entrariam na fila">Conferir</button>
+                        <button id="btn-reproc-aplicar" class="principal">${ic('atualizar')} Reprocessar</button>
+                      </div>
+                    </header>
+                  </section>
+
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Cards sem conversa</h2>
+                        <p class="dica">Cards do Kanban cuja conversa sumiu. Só leitura: nada é apagado daqui.</p>
+                      </div>
+                      <div class="linha-acoes">
+                        <span class="carregando" id="orfaos-estado"></span>
+                        <button id="btn-orfaos-csv" hidden>Baixar CSV</button>
+                        <button id="btn-orfaos">Procurar</button>
+                      </div>
+                    </header>
+                    <div id="orfaos"></div>
+                  </section>
+                </div>
+              </div>
+            </div>
           </div>`;
+
+        // O cadastro é lido uma vez e serve o interruptor do Google e os
+        // resumos de Canais. Editar continua sendo no formulário.
+        let cfgPromessa = null;
+        const lerCfg = () => cfgPromessa || (cfgPromessa = api('/tenants/' + id + '/config'));
 
         document.getElementById('btn-voltar').addEventListener('click', verOverview);
         document.getElementById('btn-editar').addEventListener('click', () => verFormulario(id));
-        montarSwitchEnvio(id);
+        tela.querySelectorAll('.btn-editar-cfg').forEach((b) => b.addEventListener('click', () => verFormulario(id)));
+        document.getElementById('selo-google').addEventListener('click', () => abrir('google/envio'));
+        montarSwitchEnvio(id, lerCfg());
         document.getElementById('btn-checar').addEventListener('click', () => checar(id));
         document.getElementById('btn-sync').addEventListener('click', () => sincronizarEtapas(id));
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
@@ -978,45 +1277,80 @@
         document.getElementById('btn-prov').addEventListener('click', () => provisionar(id, false));
         document.getElementById('btn-prov-criar').addEventListener('click', () => provisionar(id, true));
 
+        // O que cada aba ou seção busca na primeira vez que aparece. Metas e
+        // Manutenção não buscam nada sozinhas: as duas leem contas de terceiros
+        // e só rodam quando alguém aperta o botão.
+        const CARGAS = {
+          geral: () => carregarFluxo(id),
+          funil: () => { carregarEtapas(id); carregarGatilhos(id); },
+          'canais/chatwoot': () => {
+            resumoChatwoot(lerCfg());
+            carregarWebhooks(id, slug);
+            carregarEtiquetas(id);
+            provisionar(id, false);
+          },
+          'canais/whatsapp': () => { carregarInstancias(id); resumoAvisoGrupo(lerCfg()); },
+          'canais/site': () => carregarGtm(id),
+          'canais/entradas': () => carregarWebhooksTab(id, slug),
+          'google/envio': () => resumoGoogle(lerCfg()),
+          'google/conversoes': () => carregarConversoes(id, 0),
+          planilha: () => carregarPlanilha(id),
+          'atividade/webhooks': () => carregarEventos(id, 0),
+          'atividade/avisos': () => carregarAvisosGrupo(id, 0),
+        };
 
+        // Nomes das abas antigas. Chegam de notificações e links guardados;
+        // cada um leva para onde aquele conteúdo foi parar.
+        const APELIDOS = {
+          fluxo: 'geral',
+          config: 'funil',
+          integracoes: 'canais/chatwoot',
+          webhooks: 'canais/entradas',
+        };
 
         const carregadas = new Set();
-        const slug = cliente ? cliente.slug : '';
 
-        function abrirAba(nome) {
+        function abrir(destino) {
+          const [aba, pedida] = (APELIDOS[destino] || destino || 'geral').split('/');
+          const painel = tela.querySelector('.painel[data-painel="' + aba + '"]');
+          if (!painel) return abrir('geral');
+
           tela.querySelectorAll('.aba').forEach((b) => {
-            b.setAttribute('aria-selected', String(b.dataset.aba === nome));
+            b.setAttribute('aria-selected', String(b.dataset.aba === aba));
           });
-          tela.querySelectorAll('.painel').forEach((d) => {
-            d.hidden = d.dataset.painel !== nome;
-          });
+          tela.querySelectorAll('.painel').forEach((d) => { d.hidden = d !== painel; });
 
-          if (carregadas.has(nome)) return;
-          carregadas.add(nome);
+          let chave = aba;
+          const menu = painel.querySelector('.secoes-menu');
+          if (menu) {
+            const botoes = [...menu.querySelectorAll('button')];
+            const valida = (s) => botoes.some((b) => b.dataset.secao === s);
+            // sem seção pedida, volta para a última aberta nesta aba
+            const secao = valida(pedida) ? pedida : valida(painel.dataset.secaoAtual) ? painel.dataset.secaoAtual : botoes[0].dataset.secao;
+            painel.dataset.secaoAtual = secao;
+            botoes.forEach((b) => {
+              if (b.dataset.secao === secao) b.setAttribute('aria-current', 'true');
+              else b.removeAttribute('aria-current');
+            });
+            painel.querySelectorAll('.secao-grupo').forEach((g) => { g.hidden = g.dataset.secao !== secao; });
+            chave = aba + '/' + secao;
+          }
 
-          if (nome === 'fluxo') carregarFluxo(id);
-          if (nome === 'config') {
-            carregarEtapas(id);
-            carregarGatilhos(id);
-            carregarEtiquetas(id);
-            carregarInstancias(id);
-          }
-          if (nome === 'integracoes') {
-            carregarWebhooks(id, slug);
-            carregarGtm(id);
-            provisionar(id, false);
-          }
-          if (nome === 'atividade') { carregarAvisos(id, 0); carregarEventos(id, 0); }
-          if (nome === 'google') carregarConversoes(id, 0);
-          if (nome === 'webhooks') carregarWebhooksTab(id, slug);
-          if (nome === 'planilha') carregarPlanilha(id);
+          if (carregadas.has(chave)) return;
+          carregadas.add(chave);
+          if (CARGAS[chave]) CARGAS[chave]();
         }
+        abrirDestino = abrir;
 
         tela.querySelectorAll('.aba').forEach((b) => {
-          b.addEventListener('click', () => abrirAba(b.dataset.aba));
+          b.addEventListener('click', () => abrir(b.dataset.aba));
+        });
+        tela.querySelectorAll('.secoes-menu button').forEach((b) => {
+          const aba = b.closest('.painel').dataset.painel;
+          b.addEventListener('click', () => abrir(aba + '/' + b.dataset.secao));
         });
 
-        abrirAba(abaInicial || 'fluxo');
+        abrir(abaInicial || 'geral');
         rodape.textContent = new Date().toLocaleTimeString('pt-BR');
         menuAtivo(null);
       }
@@ -1185,8 +1519,11 @@
           '</tr>';
       }
 
-      async function carregarAvisos(id, offset) {
-        const alvo = document.getElementById('avisos');
+      // Nome proprio: existia outra `carregarAvisos` (a da central de
+      // notificacoes), e a segunda declaracao vencia a primeira. Esta secao
+      // chamava a do sino e nunca carregava; as duas ainda usavam id="avisos".
+      async function carregarAvisosGrupo(id, offset) {
+        const alvo = document.getElementById('avisos-grupo');
         let r;
         try {
           r = await api('/tenants/' + id + '/avisos?limit=' + porPagina('avisos') + '&offset=' + (offset || 0));
@@ -1225,10 +1562,10 @@
                <p class="mono">Dispara quando um card entra no board de Ads. Leads do Orgânico não avisam.</p>
              </div>`;
 
-        ligarPaginacao(alvo, function (o) { carregarAvisos(id, o); });
+        ligarPaginacao(alvo, function (o) { carregarAvisosGrupo(id, o); });
         ligarReenvio(alvo, '.reenviar-aviso', function (b) {
           return { rota: '/tenants/' + id + '/avisos/reenviar', corpo: { chave: b.dataset.chave } };
-        }, function () { carregarAvisos(id, offset || 0); });
+        }, function () { carregarAvisosGrupo(id, offset || 0); });
       }
 
       /**
@@ -1586,12 +1923,13 @@
         const botao = document.getElementById('btn-revelar');
 
         secao.hidden = false;
-        // o corpo do webhook fica na aba Atividade; se o clique veio de outra,
-        // mostrar o painel sem trocar de aba deixaria a tela em branco
+        // o corpo do webhook fica em Atividade → Webhooks recebidos; se o clique
+        // veio de outro lugar, mostrar sem trocar de aba e de seção deixaria a
+        // tela em branco
         const painel = secao.closest('.painel');
-        if (painel && painel.hidden) {
-          const b = document.querySelector('.aba[data-aba="' + painel.dataset.painel + '"]');
-          if (b) b.click();
+        const grupo = secao.closest('.secao-grupo');
+        if (painel && (painel.hidden || (grupo && grupo.hidden)) && abrirDestino) {
+          abrirDestino(painel.dataset.painel + (grupo ? '/' + grupo.dataset.secao : ''));
         }
         pre.textContent = 'carregando…';
         secao.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1901,7 +2239,7 @@
 
       // Os gatilhos sao a parte que mais muda: a equipe troca o texto do
       // atendimento e o funil para de andar sem ninguem perceber.
-      async function carregarGatilhos(id) {
+      async function carregarGatilhos(id, offset) {
         const alvo = document.getElementById('gatilhos');
         const sel = document.getElementById('g-etapa');
 
@@ -1916,23 +2254,26 @@
             }).join('')
           : '<option value="">sincronize as etapas antes</option>';
 
+        const pag = fatiar(gatilhos, 'gatilhos', offset);
         alvo.innerHTML = gatilhos.length
           ? '<table><thead><tr><th>Frase</th><th>Tipo</th><th>Emoji</th><th>Move para</th><th></th></tr></thead><tbody>' +
-            gatilhos.map(function (g) {
+            pag.itens.map(function (g) {
               return '<tr><td>' + esc(g.frase) + '</td>' +
                 '<td>' + (g.tipo === 'fixo' ? 'Fixo' : 'Contém') + '</td>' +
                 '<td>' + esc(g.emoji_obrigatorio || '') + '</td>' +
                 '<td class="motivo">' + esc(g.stage_nome) + '</td>' +
                 '<td><button class="g-del" data-g="' + g.id + '">remover</button></td></tr>';
-            }).join('') + '</tbody></table>'
+            }).join('') + '</tbody></table>' + pag.controles
           : '<div class="vazio"><p>Nenhuma frase cadastrada.</p>' +
             '<p class="mono">Sem frase, o card só avança pela resposta automática.</p></div>';
 
+        ligarPaginacao(alvo, function (o) { carregarGatilhos(id, o); });
         alvo.querySelectorAll('.g-del').forEach(function (b) {
           b.addEventListener('click', async function () {
             try {
               await enviar('/tenants/' + id + '/gatilhos/' + b.dataset.g, 'DELETE');
-              await carregarGatilhos(id);
+              // fica na mesma página; se ela esvaziou, `fatiar` recua uma
+              await carregarGatilhos(id, pag.inicio);
             } catch (e) {
               document.getElementById('gatilho-estado').textContent = 'falhou: ' + e.message;
             }
@@ -1961,17 +2302,24 @@
             return esc(b.board) + ': ' + b.orfaos + ' de ' + b.total;
           }).join(' · ');
           estado.textContent = '';
-          alvo.innerHTML =
-            (r.conversasCompletas ? '' : '<div class="aviso">A conta tem mais conversas do que foi lido: algum card marcado como "conversa apagada" pode ter a conversa viva.</div>') +
-            '<p class="mono">' + resumo + '</p>' +
-            (r.cards.length
-              ? '<table><thead><tr><th>Card</th><th>Board</th><th>Etapa</th><th>Título</th><th>Situação</th><th>Criado</th></tr></thead><tbody>' +
-                r.cards.map(function (o) {
-                  return '<tr><td class="mono">' + o.taskId + '</td><td>' + esc(o.board) + '</td><td>' + esc(o.etapa) + '</td>' +
-                    '<td>' + esc(o.titulo) + '</td><td class="motivo">' + SITUACAO_ORFAO[o.situacao] + '</td>' +
-                    '<td class="mono">' + esc((o.criadoEm || '').slice(0, 10)) + '</td></tr>';
-                }).join('') + '</tbody></table>'
-              : '<div class="vazio"><p>Nenhum card sem conversa.</p></div>');
+          // A busca lê a conta inteira do Chatwoot: trocar de página corta o
+          // que já veio, não busca de novo.
+          const desenhar = function (offset) {
+            const pag = fatiar(r.cards, 'orfaos', offset);
+            alvo.innerHTML =
+              (r.conversasCompletas ? '' : '<div class="aviso">A conta tem mais conversas do que foi lido: algum card marcado como "conversa apagada" pode ter a conversa viva.</div>') +
+              '<p class="mono">' + resumo + '</p>' +
+              (r.cards.length
+                ? '<table><thead><tr><th>Card</th><th>Board</th><th>Etapa</th><th>Título</th><th>Situação</th><th>Criado</th></tr></thead><tbody>' +
+                  pag.itens.map(function (o) {
+                    return '<tr><td class="mono">' + o.taskId + '</td><td>' + esc(o.board) + '</td><td>' + esc(o.etapa) + '</td>' +
+                      '<td>' + esc(o.titulo) + '</td><td class="motivo">' + SITUACAO_ORFAO[o.situacao] + '</td>' +
+                      '<td class="mono">' + esc((o.criadoEm || '').slice(0, 10)) + '</td></tr>';
+                  }).join('') + '</tbody></table>' + pag.controles
+                : '<div class="vazio"><p>Nenhum card sem conversa.</p></div>');
+            ligarPaginacao(alvo, desenhar);
+          };
+          desenhar(0);
           if (r.cards.length) {
             csv.hidden = false;
             csv.onclick = function () { baixarOrfaosCsv(id, r.cards); };
@@ -2264,20 +2612,27 @@
        * sair para fora e não dá para desfazer: conversão gravada no Google Ads
        * não volta atrás.
        */
-      async function montarSwitchEnvio(id) {
+      async function montarSwitchEnvio(id, cfgPronta) {
         const sw = document.getElementById('sw-envio');
         const rot = document.getElementById('sw-rotulo');
+        const selo = document.getElementById('selo-google');
         if (!sw) return;
 
         const pintar = function (enviando) {
           sw.checked = enviando;
           rot.textContent = enviando ? 'Enviando ao Google Ads' : 'Modo sombra';
           rot.className = 'rotulo ' + (enviando ? 'st-erro' : 'motivo');
+          // o selo do topo diz o estado sem abrir a aba; o interruptor mora nela
+          if (selo) {
+            selo.hidden = false;
+            selo.textContent = enviando ? 'Google Ads: enviando' : 'Google Ads: modo sombra';
+            selo.className = 'selo ' + (enviando ? 'selo-vivo' : 'selo-espera');
+          }
         };
 
         let cfg;
         try {
-          cfg = await api('/tenants/' + id + '/config');
+          cfg = await (cfgPronta || api('/tenants/' + id + '/config'));
         } catch (e) {
           rot.textContent = 'não foi possível ler a configuração';
           sw.disabled = true;
@@ -2362,7 +2717,7 @@
           }
           estado.textContent = 'reprocessado';
           await carregarEventos(id, 0);
-          await carregarAvisos(id, 0);
+          await carregarAvisosGrupo(id, 0);
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         } finally {
@@ -2422,6 +2777,22 @@
           seletor + '</div>';
       }
 
+      /**
+       * Paginação de lista que já veio inteira da API: corta no navegador, com
+       * os mesmos controles das listas paginadas no servidor. Lista curta não
+       * ganha controle — dez frases não precisam de "por página".
+       */
+      function fatiar(itens, secao, offset) {
+        const limite = porPagina(secao);
+        const ultima = Math.max(0, Math.ceil(itens.length / limite) - 1) * limite;
+        const inicio = Math.min(Math.max(offset || 0, 0), ultima);
+        return {
+          itens: itens.slice(inicio, inicio + limite),
+          inicio: inicio,
+          controles: itens.length > TAMANHOS[0] ? paginacao(secao, itens.length, limite, inicio) : '',
+        };
+      }
+
       function ligarPaginacao(alvo, recarregar) {
         alvo.querySelectorAll('.pag').forEach(function (b) {
           b.addEventListener('click', function () { recarregar(Number(b.dataset.offset)); });
@@ -2446,7 +2817,7 @@
        * mais tarde") aparece fora do vocabulário, e é assim que deve ficar —
        * não é etiqueta de atribuição.
        */
-      async function carregarEtiquetas(id) {
+      async function carregarEtiquetas(id, offset) {
         const alvo = document.getElementById('etiquetas');
         const estado = document.getElementById('etiquetas-estado');
         if (!alvo) return;
@@ -2472,6 +2843,7 @@
             }).join('');
         };
 
+        const pag = fatiar(r.etiquetas, 'etiquetas', offset);
         alvo.innerHTML =
           (r.orfas.length
             ? '<div class="aviso">No vocabulário mas não existem no Chatwoot: <span class="mono">' +
@@ -2479,7 +2851,7 @@
             : '') +
           (r.etiquetas.length
             ? '<table><thead><tr><th>Etiqueta</th><th>O motor usa</th><th>Nome no WhatsApp</th><th></th></tr></thead><tbody>' +
-              r.etiquetas.map(function (e) {
+              pag.itens.map(function (e) {
                 return '<tr>' +
                   '<td class="mono">' + esc(e.titulo) + '</td>' +
                   '<td><input type="checkbox" class="l-on" data-slug="' + esc(e.titulo) + '" ' +
@@ -2493,9 +2865,10 @@
                     '<button class="l-ren" data-slug="' + esc(e.titulo) + '">renomear</button>' +
                     '<button class="l-del perigo" data-slug="' + esc(e.titulo) + '">apagar</button>' +
                   '</td></tr>';
-              }).join('') + '</tbody></table>'
+              }).join('') + '</tbody></table>' + pag.controles
             : '<div class="vazio"><p>Nenhuma etiqueta nesta conta do Chatwoot.</p>' +
-              '<p class="mono">Use Integrações → Gerar no Chatwoot para criar as do padrão.</p></div>');
+              '<p class="mono">Use "Gerar no Chatwoot", logo abaixo, para criar as do padrão.</p></div>');
+        ligarPaginacao(alvo, function (o) { carregarEtiquetas(id, o); });
 
         /**
          * Renomear leva as conversas junto.
@@ -3241,7 +3614,7 @@
         tela.innerHTML =
           '<div class="voltar"><button id="btn-voltar">← Todos os clientes</button></div>' +
           '<h2 style="font-family:var(--ui);font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.02em">Padronizações</h2>' +
-          '<p class="carregando" style="margin:0 0 24px">O que todo cliente novo recebe. Depois é um clique em <strong>Gerar no Chatwoot</strong>, na aba Integrações do cliente.</p>' +
+          '<p class="carregando" style="margin:0 0 24px">O que todo cliente novo recebe. Depois é um clique em <strong>Gerar no Chatwoot</strong>, em Canais → Chatwoot, no perfil do cliente.</p>' +
 
           '<section><h2>Etiquetas</h2>' +
             '<div class="linha-acoes">' +

@@ -47,7 +47,7 @@ describe('agruparErros', () => {
     expect(n[0]!.ids).toEqual([1, 2]);
     expect(n[0]!.quando).toBe('2026-09-21 12:00:00');
     expect(n[0]!.titulo).toContain('Google Ads');
-    expect(n[0]!.aba).toBe('google');
+    expect(n[0]!.aba).toBe('google/conversoes');
   });
 
   test('clientes diferentes nao se misturam', () => {
