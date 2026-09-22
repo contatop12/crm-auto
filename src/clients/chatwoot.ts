@@ -383,4 +383,31 @@ export class ChatwootClient {
     );
     return Number(r.incoming_messages_count ?? 0);
   }
+  /**
+   * Textos que o vendedor mandou na conversa, do mais antigo ao mais novo.
+   *
+   * A rota devolve as 20 ultimas; `before` pagina para tras. Nota interna
+   * (`private`) fica de fora, pelo mesmo motivo da resposta ao vivo: e' bilhete
+   * para o time, nao fala com o lead.
+   */
+  async textosDoVendedor(acc: number, conversaId: number, tetoPaginas = 10): Promise<string[]> {
+    type Msg = { id: number; message_type: number; private?: boolean; content?: string | null; created_at: number };
+    const todas: Msg[] = [];
+    let antes: number | null = null;
+    for (let i = 0; i < tetoPaginas; i++) {
+      const r: { payload?: Msg[] } = await this.req(
+        'GET',
+        `/api/v1/accounts/${acc}/conversations/${conversaId}/messages` + (antes ? `?before=${antes}` : ''),
+      );
+      const lote = r.payload ?? [];
+      if (!lote.length) break;
+      todas.push(...lote);
+      antes = Math.min(...lote.map((m) => m.id));
+    }
+    return todas
+      .filter((m) => m.message_type === 1 && !m.private && typeof m.content === 'string' && m.content.trim())
+      .sort((a, b) => a.created_at - b.created_at || a.id - b.id)
+      .map((m) => (m.content as string).trim());
+  }
+
 }

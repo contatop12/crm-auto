@@ -2,6 +2,7 @@ import type { Env } from '../env';
 import { ChatwootClient } from '../clients/chatwoot';
 import { matchStage } from '../domain/triggers';
 import { canMove } from '../domain/movement';
+import { simularRespostas } from '../domain/historico';
 import { extractValue } from '../domain/value';
 import type { Stage, Trigger, ValuePattern } from '../domain/types';
 
@@ -261,4 +262,56 @@ async function cardAgora(
     console.log(JSON.stringify({ acao: 'card_agora_falhou', conversa: conversaId, erro: (e as Error).message }));
     return null;
   }
+}
+
+/**
+ * Card que acabou de entrar no funil: as respostas dadas antes contam agora.
+ *
+ * Enquanto o card estava no Organico, cada resposta do vendedor foi ignorada
+ * de proposito (`card no board X, nao no funil de Ads`). Sem esta releitura, o
+ * card promovido entra em Novo Lead e fica la' ate' o vendedor escrever de novo
+ * — o que pode nunca acontecer, se a conversa ja' andou. Ver `simularRespostas`.
+ *
+ * Le' o historico do Chatwoot, nao o log de eventos: webhook perdido tambem
+ * perde a resposta do log, e a conversa e' a fonte completa.
+ *
+ * Devolve o que fez, ou null quando nao havia o que mover.
+ */
+export async function recuperarRespostasAnteriores(
+  env: Env,
+  tenantId: number,
+  acc: number,
+  taskId: number,
+  conversaId: number,
+): Promise<string | null> {
+  if (!conversaId) return null;
+  const cw = ChatwootClient.fromEnv(env);
+
+  // o card de agora, nao o do webhook: outra regra pode te-lo movido no meio
+  const [card, stages, triggers, textos] = await Promise.all([
+    cw.tarefa(acc, taskId),
+    etapas(env, tenantId),
+    frases(env, tenantId),
+    cw.textosDoVendedor(acc, conversaId),
+  ]);
+  if (!card || !stages.length || !textos.length) return null;
+
+  const atual = stages.find((s) => s.cwStepId === num(card.board_step_id));
+  if (!atual) return null;
+
+  const { etapa, passos } = simularRespostas(atual.nome, textos, stages, triggers);
+  if (!etapa) return null;
+
+  const cwStepId = stages.find((s) => s.id === etapa.id)?.cwStepId;
+  if (!cwStepId) return null;
+  await cw.moverCard(acc, taskId, cwStepId);
+
+  const ultimo = passos[passos.length - 1];
+  await registrar(env, tenantId, {
+    taskId, conversaId, de: atual.nome, para: etapa.nome, moveu: true,
+    gatilho: ultimo?.frase ?? '', trecho: ultimo?.trecho ?? '',
+    motivo: `recuperado do historico: ${passos.length} passo(s) de respostas dadas antes do funil`,
+  });
+
+  return `card ${taskId} movido de "${atual.nome}" para "${etapa.nome}" pelas respostas dadas antes do funil`;
 }

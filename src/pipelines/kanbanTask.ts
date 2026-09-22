@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { parseKanbanTask } from '../domain/kanbanTask';
+import { recuperarRespostasAnteriores } from './sellerMessage';
 import { montarCanal } from '../domain/canal';
 import { detectOrigin, detectPlatform } from '../domain/platform';
 import { normFone } from '../domain/phone';
@@ -98,6 +99,19 @@ export async function avisarLeadNoGrupo(
   const proprios = lerNumerosProprios(cfg.numeros_proprios);
   if (ehNumeroProprio(t.telefone, proprios)) {
     return { status: 'ignorado', motivo: `card ${t.taskId} e' de um numero da propria empresa` };
+  }
+
+  // Respostas dadas enquanto o card estava no Organico passam a contar agora
+  // que ele entrou no funil. Falhar aqui nao pode impedir o aviso no grupo.
+  if (cfg.cw_account_id) {
+    try {
+      const recuperado = await recuperarRespostasAnteriores(
+        env, tenantId, cfg.cw_account_id, t.taskId, t.conversaDisplay,
+      );
+      if (recuperado) console.log(JSON.stringify({ acao: 'respostas_recuperadas', task: t.taskId, recuperado }));
+    } catch (e) {
+      console.log(JSON.stringify({ acao: 'recuperar_respostas_falhou', task: t.taskId, erro: (e as Error).message }));
+    }
   }
 
   /**
