@@ -79,3 +79,61 @@ describe('buildLabels', () => {
     expect(r.slugs.filter((s) => s === 'google')).toHaveLength(1);
   });
 });
+
+/** O esquema da Vita: origem / canal / trafego / pagina / campanha, sem `mensagem`. */
+const vita: LabelVocabulary[] = [
+  'google', 'instagram', 'facebook', 'site', 'msg-site', 'msg-nat', 'formulario-do-site',
+  'pago', 'organico', 'direto', 'search', 'aparelho-auditivo', 'aparelho-auditivo-preco',
+].map((s) => ({ slug: s, labelChatwoot: s, labelWhatsapp: null }));
+
+describe('buildLabels no esquema completo (Vita)', () => {
+  test('lead de anuncio do Google pelo botao do site', () => {
+    const r = buildLabels({
+      origem: 'mensagem', plataforma: 'google', campanhaSlug: 'search',
+      trafego: 'pago', canal: 'msg-site', pagina: 'https://audicao.vitaaudio.com.br/aparelho-auditivo-preco?gclid=x',
+    }, vita);
+    expect(r.slugs).toEqual(['google', 'msg-site', 'pago', 'aparelho-auditivo-preco', 'search']);
+    // `mensagem` nao existe na Vita: fica registrada como ignorada, nao vai
+    expect(r.ignoradas).toContain('mensagem');
+  });
+
+  test('pagina com sufixo do botao cai no primeiro trecho', () => {
+    const r = buildLabels({ origem: null, plataforma: 'google', pagina: 'https://audicao.vitaaudio.com.br/aparelho-auditivo/whatsapp' }, vita);
+    expect(r.slugs).toEqual(['google', 'aparelho-auditivo']);
+  });
+
+  test('clique do site sem anuncio: site, canal e organico', () => {
+    const r = buildLabels({ origem: 'mensagem', plataforma: 'outro', viaSite: true, canal: 'msg-site', trafego: 'organico' }, vita);
+    expect(r.slugs).toEqual(['site', 'msg-site', 'organico']);
+  });
+
+  test('contato sem lead: so o trafego direto, sem origem inventada', () => {
+    const r = buildLabels({ origem: null, plataforma: 'outro', trafego: 'direto' }, vita);
+    expect(r.slugs).toEqual(['direto']);
+  });
+
+  test('cliente sem esse esquema nao ganha etiqueta nova', () => {
+    // o vocabulario de sempre (Persianas antes, Taina) nao tem pago/msg-site/direto
+    const r = buildLabels({ origem: 'mensagem', plataforma: 'google', trafego: 'pago', canal: 'msg-site' }, vocab);
+    expect(r.slugs).toEqual(['mensagem', 'google']);
+  });
+});
+
+describe('buildLabels com o vocabulario antigo', () => {
+  const antigo: LabelVocabulary[] = ['mensagem', 'google-ads', 'meta-ads', 'search']
+    .map((s) => ({ slug: s, labelChatwoot: s, labelWhatsapp: null }));
+
+  test('google vira google-ads onde google nao existe (Taina, Locadora, Tile)', () => {
+    expect(buildLabels({ origem: 'mensagem', plataforma: 'google', campanhaSlug: 'search' }, antigo).slugs)
+      .toEqual(['mensagem', 'google-ads', 'search']);
+  });
+
+  test('instagram e facebook viram meta-ads', () => {
+    expect(buildLabels({ origem: 'mensagem', plataforma: 'meta', utmSource: 'ig' }, antigo).slugs).toEqual(['mensagem', 'meta-ads']);
+  });
+
+  test('onde os dois existem, vale o nome novo', () => {
+    const ambos = [...antigo, { slug: 'google', labelChatwoot: 'google', labelWhatsapp: null }];
+    expect(buildLabels({ origem: 'mensagem', plataforma: 'google' }, ambos).slugs).toEqual(['mensagem', 'google']);
+  });
+});

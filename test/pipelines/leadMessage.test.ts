@@ -331,6 +331,59 @@ describe('atribuirLead', () => {
     expect(chamadas.filter((c) => c.metodo !== 'GET')).toEqual([]);
   });
 
+  test('esquema completo: lead do Google pelo site ganha pago, canal e pagina', async () => {
+    const { env, exec } = cenario();
+    for (const s of ['pago', 'msg-site', 'aparelho-auditivo']) {
+      exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, '${s}', '${s}')`);
+    }
+    exec(`UPDATE leads SET page_url = 'https://audicao.vitaaudio.com.br/aparelho-auditivo/whatsapp' WHERE protocol = 'VITA-MRIAP9IN8WNQ'`);
+    await atribuirLead(env, 1, webhook());
+    const { labels } = corpoDe<{ labels: string[] }>(/\/labels$/);
+    expect(labels).toEqual(expect.arrayContaining(['mensagem', 'google', 'pago', 'msg-site', 'aparelho-auditivo']));
+  });
+
+  test('contato sem lead ganha "direto" quando o cliente usa essa etiqueta', async () => {
+    const { env, exec } = cenario();
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, 'direto', 'direto')`);
+    etiquetasAtuais = [];
+    const r = await atribuirLead(env, 1, webhook(
+      { content: 'Bom dia, preciso remarcar' },
+      { labels: [], meta: { sender: { name: 'Paciente', phone_number: '+5511900000000' } } },
+    ));
+    expect(r.status).toBe('ignorado');
+    expect(corpoDe<{ labels: string[] }>(/\/labels$/).labels).toEqual(['direto']);
+  });
+
+  test('conversa que ja tem "direto" nao chama o Chatwoot de novo', async () => {
+    const { env, exec } = cenario();
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, 'direto', 'direto')`);
+    await atribuirLead(env, 1, webhook(
+      { content: 'oi de novo' },
+      { labels: ['direto'], meta: { sender: { name: 'Paciente', phone_number: '+5511900000000' } } },
+    ));
+    expect(chamadas.filter((c) => /labels/.test(c.url))).toEqual([]);
+  });
+
+  test('protocolo do botao sem clique registrado: site e msg-site', async () => {
+    const { env, exec } = cenario();
+    for (const s of ['site', 'msg-site', 'direto']) {
+      exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, '${s}', '${s}')`);
+    }
+    etiquetasAtuais = [];
+    await atribuirLead(env, 1, webhook({ content: 'Olá [Protocolo: VITA-NAOEXISTE]' }, { labels: [] }));
+    expect(corpoDe<{ labels: string[] }>(/\/labels$/).labels).toEqual(['site', 'msg-site']);
+  });
+
+  test('mensagem da propria empresa nao ganha etiqueta de lead', async () => {
+    const { env, exec } = cenario();
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, 'direto', 'direto')`);
+    await atribuirLead(env, 1, webhook(
+      { content: 'Bom dia', message_type: 'outgoing' },
+      { labels: [], meta: { sender: { name: 'Paciente', phone_number: '+5511900000000' } } },
+    ));
+    expect(chamadas.filter((c) => /labels/.test(c.url))).toEqual([]);
+  });
+
   test('payload sem conversa nao quebra a fila', async () => {
     const { env } = cenario();
     expect((await atribuirLead(env, 1, '{}')).status).toBe('ignorado');

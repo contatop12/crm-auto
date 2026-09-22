@@ -14,8 +14,18 @@ import type { LabelVocabulary } from './types';
  * etiquetas sao criadas a mao pelo cliente.
  */
 
+/** De onde veio o trafego. */
+export type Trafego = 'pago' | 'organico' | 'direto';
+
+/**
+ * Por onde a conversa chegou, no esquema de quem separa canal de origem
+ * (a Vita tem `msg-site`, `msg-nat`, `formulario-do-site`, `formulario-nativo`).
+ */
+export type Canal = 'msg-site' | 'msg-nat' | 'formulario-do-site' | 'formulario-nativo';
+
 export interface LabelInput {
-  origem: Origem;
+  /** `null` no contato sem lead: nao se sabe se a mensagem veio de anuncio. */
+  origem: Origem | null;
   plataforma: Plataforma;
   /** 'p-max' | 'search' | 'display' — vem de `classifyCampaign`. */
   campanhaSlug?: string | null;
@@ -23,8 +33,13 @@ export interface LabelInput {
   quizValor?: number | null;
   /** `utm_source` cru. E' o que separa instagram de facebook dentro do Meta. */
   utmSource?: string | null;
-  /** Caminho da pagina do clique, quando vira etiqueta. */
+  /** Caminho (ou URL) da pagina do clique, quando vira etiqueta. */
   pagina?: string | null;
+  /** Anuncio pago, site sem anuncio, ou contato direto. */
+  trafego?: Trafego | null;
+  canal?: Canal | null;
+  /** Chegou pelo site sem anuncio: a origem e' o proprio site. */
+  viaSite?: boolean;
 }
 
 export interface LabelResult {
@@ -39,33 +54,47 @@ export interface LabelResult {
 }
 
 export function buildLabels(i: LabelInput, vocabulario: LabelVocabulary[]): LabelResult {
-  const brutas: string[] = [i.origem];
+  // Cada pedido e' uma lista de alternativas: vale a primeira que o vocabulario
+  // do cliente conhece. E' assim que um motor so' serve esquemas diferentes.
+  const pedidos: string[][] = [];
+  const quer = (...alternativas: string[]) => pedidos.push(alternativas);
+
+  if (i.origem) quer(i.origem);
 
   // A etiqueta passa a ser a REDE, nao "o anuncio veio de tal lugar":
   // `google-ads` virou `google`, e `meta-ads` se desdobra em `instagram` ou
   // `facebook` — dentro do Meta as duas redes se comportam diferente, e juntar
   // as duas numa etiqueta so' apagava a unica diferenca que interessa.
-  if (i.plataforma === 'google') brutas.push('google');
-  if (i.plataforma === 'meta') brutas.push(redeDoMeta(i.utmSource));
+  // O nome antigo fica de reserva: Taina, Locadora e Tile ainda tem o
+  // vocabulario de antes, e desde 11/09 os leads delas saiam sem a rede.
+  if (i.plataforma === 'google') quer('google', 'google-ads');
+  if (i.plataforma === 'meta') quer(redeDoMeta(i.utmSource), 'meta-ads');
+
+  if (i.viaSite) quer('site');
+  if (i.canal) quer(i.canal);
+  if (i.trafego) quer(i.trafego);
 
   // A pagina de entrada tambem e' etiqueta, quando o vocabulario a conhece.
-  if (i.pagina) brutas.push(etiquetaSlug(i.pagina));
-  if (i.campanhaSlug) brutas.push(i.campanhaSlug);
-  if (i.quizVersion) brutas.push('quiz-' + i.quizVersion);
+  // O caminho inteiro primeiro; senao o primeiro trecho — o botao do WhatsApp
+  // da Vita leva a "/aparelho-auditivo/whatsapp", e a pagina e' aparelho-auditivo.
+  if (i.pagina) quer(etiquetaSlug(i.pagina), etiquetaSlug(primeiroTrecho(i.pagina)));
+  if (i.campanhaSlug) quer(i.campanhaSlug);
+  if (i.quizVersion) quer('quiz-' + i.quizVersion);
   // Sem zero a esquerda: a etiqueta e' `r5`, nao `r05`. O zero ordenava melhor
   // na lista do Chatwoot, mas o nome que o time usa e' o que vale — e uma
   // etiqueta que ninguem reconhece nao e' aplicada por ninguem.
-  if (i.quizValor) brutas.push('r' + String(i.quizValor));
+  if (i.quizValor) quer('r' + String(i.quizValor));
 
   const porSlug = new Map(vocabulario.map((v) => [v.slug, v]));
   const slugs: string[] = [];
   const ignoradas: string[] = [];
 
-  for (const bruta of brutas) {
-    const s = String(bruta ?? '').trim().toLowerCase();
-    if (!s) continue;
-    if (!porSlug.has(s)) {
-      if (!ignoradas.includes(s)) ignoradas.push(s);
+  for (const alternativas of pedidos) {
+    const opcoes = [...new Set(alternativas.map((a) => String(a ?? '').trim().toLowerCase()).filter(Boolean))];
+    if (!opcoes.length) continue;
+    const s = opcoes.find((o) => porSlug.has(o));
+    if (!s) {
+      if (!ignoradas.includes(opcoes[0]!)) ignoradas.push(opcoes[0]!);
       continue;
     }
     if (!slugs.includes(s)) slugs.push(s);
@@ -106,6 +135,13 @@ export function etiquetaSlug(valor: string | null | undefined): string {
     .replace(/[^a-z0-9]+/g, '-')       // tudo que não é letra ou número separa
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+/** Primeiro trecho do caminho de uma URL ou caminho ("/a/b" -> "a"). */
+function primeiroTrecho(v: string): string {
+  const s = String(v ?? '').trim();
+  const caminho = s.match(/^https?:\/\/[^/]+(\/[^?#]*)?/i)?.[1] ?? s.split(/[?#]/)[0] ?? '';
+  return caminho.split('/').filter(Boolean)[0] ?? '';
 }
 
 /**

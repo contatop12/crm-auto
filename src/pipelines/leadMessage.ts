@@ -73,6 +73,8 @@ interface LinhaLead {
   evento: string | null;
   quiz_version: string | null;
   quiz_valor: number | null;
+  /** Pagina do clique. Ausente no lead que nasceu so' da frase. */
+  page_url?: string | null;
 }
 
 export async function atribuirLead(env: Env, tenantId: number, payload: string): Promise<Resultado> {
@@ -145,6 +147,14 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
     const semLead = protocoloDito
       ? `protocolo ${protocoloDito} nao esta na base de cliques`
       : `sem protocolo na mensagem, sem clique para o telefone e sem frase de entrada`;
+    // Sem lead a conversa tambem ganha identificacao: 61 das 85 da Vita estavam
+    // sem etiqueta nenhuma em 21/09. Protocolo no texto sem clique = passou pelo
+    // botao do site; o resto e' contato direto (paciente, indicacao, numero salvo).
+    if (str(p.message_type) !== 'outgoing' && chave) {
+      await etiquetarSemLead(env, tenantId, cfg.cw_account_id, conversaId, conv, protocoloDito
+        ? { origem: null, plataforma: 'outro', viaSite: true, canal: 'msg-site' }
+        : { origem: null, plataforma: 'outro', trafego: 'direto' });
+    }
     // Todo lead na planilha: quem chamou direto entra na Geral e na aba de lead
     // direto — so' no cliente que tem essa aba, e sem aviso no grupo.
     if (!cfg.sheets_aba_direto) return { status: 'ignorado', motivo: semLead };
@@ -301,6 +311,9 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
       });
   }
 
+  // Trafego e canal: anuncio e' pago; clique do site sem anuncio e' organico.
+  // O lead que nasceu so' da frase nao tem clique, e ai' nao ha' como cravar.
+  const veioDoSite = !!lead.page_url;
   const vocab = await vocabulario(env, tenantId);
   const etiquetas = buildLabels(
     {
@@ -310,6 +323,10 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
       campanhaSlug: campanha.slug,
       quizVersion: lead.quiz_version,
       quizValor: lead.quiz_valor,
+      pagina: lead.page_url,
+      trafego: daAds ? 'pago' : leadDoClique && veioDoSite ? 'organico' : null,
+      canal: anuncio ? 'msg-nat' : veioDoSite ? (origem === 'formulario' ? 'formulario-do-site' : 'msg-site') : null,
+      viaSite: !daAds && veioDoSite,
     },
     vocab,
   );
@@ -369,7 +386,29 @@ export async function atribuirLead(env: Env, tenantId: number, payload: string):
 }
 
 const COLUNAS = `protocol, nome, gclid, gbraid, wbraid, utm_source, utm_medium, utm_campaign,
-                 utm_id, utm_term, utm_content, fbc, origem, evento, quiz_version, quiz_valor`;
+                 utm_id, utm_term, utm_content, fbc, origem, evento, quiz_version, quiz_valor, page_url`;
+
+/**
+ * Etiqueta a conversa que nao virou lead. So' chama o Chatwoot quando ha'
+ * etiqueta do vocabulario do cliente a aplicar e ela ainda nao esta' la' — a
+ * conversa sem protocolo passa por aqui a cada mensagem.
+ */
+async function etiquetarSemLead(
+  env: Env,
+  tenantId: number,
+  acc: number,
+  conversaId: number,
+  conv: Record<string, unknown> | null,
+  entrada: Parameters<typeof buildLabels>[0],
+): Promise<void> {
+  const r = buildLabels(entrada, await vocabulario(env, tenantId));
+  if (!r.chatwoot.length) return;
+  const atuais = Array.isArray(conv?.labels) ? (conv!.labels as unknown[]).map(String) : null;
+  if (atuais && r.chatwoot.every((x) => atuais.includes(x))) return;
+  await ChatwootClient.fromEnv(env)
+    .acrescentarEtiquetas(acc, conversaId, r.chatwoot)
+    .catch((e: Error) => console.log(JSON.stringify({ acao: 'etiqueta_sem_lead_falhou', conversa: conversaId, erro: e.message.slice(0, 200) })));
+}
 
 function porProtocolo(env: Env, tenantId: number, protocolo: string) {
   return env.DB.prepare(`SELECT ${COLUNAS} FROM leads WHERE tenant_id = ? AND protocol = ?`)
