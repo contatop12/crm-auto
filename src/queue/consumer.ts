@@ -7,6 +7,7 @@ import { moverPelaResposta } from '../pipelines/sellerMessage';
 import { enviarConversao } from '../pipelines/stageChanged';
 import { registrarLeadMeta } from '../pipelines/metaLead';
 import { enviarEventoMeta } from '../pipelines/metaCapi';
+import { espelharEtapaNaGeral } from '../pipelines/etapaPlanilha';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -73,6 +74,11 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
       // Envio a Meta: criado pela etapa do funil, uma execucao por evento
       if (msg.eventType === 'meta_capi') {
         return enviarEventoMeta(env, msg.tenantId, payload);
+      }
+      // Regra generica do board: a etapa do card vai para a coluna Status da
+      // Geral. Nada de aviso nem conversao — isso e' das outras regras.
+      if (msg.eventType === 'kanban_etapa') {
+        return espelharEtapaNaGeral(env, msg.tenantId, payload);
       }
       return avisarLeadNoGrupo(env, msg.tenantId, payload, { tentativa });
 

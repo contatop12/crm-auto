@@ -261,7 +261,12 @@ ingest.post('/:slug/kanban', async (c) => {
   // card avancando de etapa (sobe conversao ao Google). Sem esta distincao, a
   // regra de "Evento Compra" dispararia um aviso de "lead novo" para um lead
   // que ja fechou.
-  const evento = c.req.query('evento') === 'conversao' ? 'kanban_conversao' : 'kanban_entrada';
+  // `etapa` e' a regra generica do board (qualquer atualizacao de card): so'
+  // espelha a etapa na planilha de leads, nao avisa nem sobe conversao.
+  const pedido = c.req.query('evento');
+  const evento = pedido === 'conversao' ? 'kanban_conversao'
+    : pedido === 'etapa' ? 'kanban_etapa'
+    : 'kanban_entrada';
 
   await aceitar(c.env, tenant.id, 'kanban', evento, raw, null);
   return c.json({ ok: true });
