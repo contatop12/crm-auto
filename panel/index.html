@@ -3520,6 +3520,15 @@
               caixaDaGeral('meta', 'Meta (mensagem)') +
               caixaDaGeral('direto', 'WhatsApp direto (sem anúncio)') +
               '<p class="dica">O lead sempre entra na aba do canal dele. Desmarcado, ele não vai para a Geral.</p></div>' +
+            // a etapa do card do Kanban na coluna Status da Geral, pela linha do telefone
+            '<div class="campo"><label><input type="checkbox" id="pl-status-etapa"' + (r.status_etapa ? ' checked' : '') + ' /> ' +
+              'Espelhar a etapa do card do Kanban na coluna <strong>Status</strong> da aba Geral</label>' +
+              '<p class="dica">Acha a linha pelo telefone do lead e escreve só o Status. Precisa da regra no Chatwoot ' +
+              '(botão abaixo) para pegar toda mudança de etapa, inclusive as que não têm meta.</p>' +
+              '<div class="linha-acoes"><button id="pl-status-regra">Criar regra no Chatwoot</button>' +
+              '<button id="pl-status-sync">Sincronizar status agora</button>' +
+              '<span class="carregando" id="pl-status-estado"></span></div>' +
+              '<div id="pl-status-saida"></div></div>' +
             '<p class="dica">' + (r.conta_servico
               ? 'Compartilhe as duas planilhas com <code>' + esc(r.conta_servico) + '</code> como <strong>Editor</strong>.'
               : '<span class="st-erro">A service account não está configurada no Worker (GOOGLE_SA_KEY).</span>') + '</p>' +
@@ -3565,8 +3574,45 @@
             },
             geral_canais: Array.prototype.map.call(
               alvo.querySelectorAll('input[name="pl-geral"]:checked'), function (i) { return i.value; }),
+            status_etapa: document.getElementById('pl-status-etapa').checked,
           };
         };
+
+        // Os dois botoes do Status: a regra no Chatwoot (uma vez) e o lote dos
+        // cards que ja estao no Kanban. O lote escreve na planilha do cliente.
+        const estStatus = document.getElementById('pl-status-estado');
+        const saidaStatus = document.getElementById('pl-status-saida');
+        document.getElementById('pl-status-regra').addEventListener('click', async function () {
+          estStatus.className = 'carregando';
+          estStatus.textContent = 'criando regra…';
+          try {
+            const res = await enviar('/tenants/' + id + '/planilha/status/regra', 'POST', {});
+            if (res.error) throw new Error(res.error);
+            estStatus.className = 'st-ok';
+            estStatus.textContent = res.adotada
+              ? 'a regra já existia no Chatwoot' + (res.ativa ? '' : ' (desligada — ligue lá)')
+              : 'regra criada no Chatwoot';
+          } catch (e) {
+            estStatus.className = 'st-erro';
+            estStatus.textContent = 'falhou: ' + e.message;
+          }
+        });
+        document.getElementById('pl-status-sync').addEventListener('click', async function () {
+          if (!confirm('Escrever a etapa atual de todos os cards do funil na coluna Status da aba Geral?')) return;
+          estStatus.className = 'carregando';
+          estStatus.textContent = 'sincronizando…';
+          saidaStatus.innerHTML = '';
+          try {
+            const res = await enviar('/tenants/' + id + '/planilha/status/sincronizar', 'POST', {});
+            if (!res.ok) throw new Error(res.erro);
+            estStatus.className = 'st-ok';
+            estStatus.textContent = res.cards + ' cards · ' + res.gravadas + ' linhas atualizadas';
+            saidaStatus.innerHTML = '<ul class="dica">' + res.detalhes.map(function (d) { return '<li>' + esc(d) + '</li>'; }).join('') + '</ul>';
+          } catch (e) {
+            estStatus.className = 'st-erro';
+            estStatus.textContent = 'falhou: ' + e.message;
+          }
+        });
 
         document.getElementById('pl-conferir').addEventListener('click', async function () {
           const saida = document.getElementById('pl-conferencia');

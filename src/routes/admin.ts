@@ -20,6 +20,7 @@ import {
 } from '../domain/planilha';
 import { SheetsClient } from '../clients/sheets';
 import { escreverNasPlanilhas } from '../pipelines/planilha';
+import { sincronizarEtapasNaGeral } from '../pipelines/etapaPlanilha';
 import { etiquetaSlug } from '../domain/labels';
 import { proporMetas, metasForaDoCatalogo, type MetaProposta } from '../domain/metas';
 import {
@@ -124,7 +125,7 @@ admin.get('/tenants/:id/planilha', async (c) => {
   const cfg = await c.env.DB.prepare(
     `SELECT sheets_ativo, planilha_modo, planilha_webhook_url, sheets_doc_id,
             sheets_leads_doc_id, sheets_leads_aba, sheets_aba_geral, sheets_aba_google, sheets_aba_meta,
-            sheets_aba_direto, sheets_geral_canais
+            sheets_aba_direto, sheets_geral_canais, sheets_status_etapa
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(id)
@@ -132,7 +133,7 @@ admin.get('/tenants/:id/planilha', async (c) => {
       sheets_ativo: number; planilha_modo: string; planilha_webhook_url: string | null;
       sheets_doc_id: string | null; sheets_leads_doc_id: string | null; sheets_leads_aba: string | null;
       sheets_aba_geral: string | null; sheets_aba_google: string | null; sheets_aba_meta: string | null;
-      sheets_aba_direto: string | null; sheets_geral_canais: string | null;
+      sheets_aba_direto: string | null; sheets_geral_canais: string | null; sheets_status_etapa: number;
     }>();
 
   return c.json({
@@ -149,6 +150,8 @@ admin.get('/tenants/:id/planilha', async (c) => {
     },
     // os canais que entram na Geral, ja' resolvidos: NULL no banco = todos
     geral_canais: lerCanaisDaGeral(cfg?.sheets_geral_canais) ?? [...CANAIS_DA_GERAL],
+    // a etapa do card do Kanban na coluna Status da Geral (regra do Chatwoot)
+    status_etapa: Number(cfg?.sheets_status_etapa ?? 0) === 1,
     conta_servico: SheetsClient.email(c.env),
     campos: CAMPOS_PLANILHA,
   });
@@ -161,6 +164,7 @@ admin.put('/tenants/:id/planilha', async (c) => {
     banco_doc?: string; leads_doc?: string;
     leads_abas?: { geral?: string; google?: string; meta?: string; direto?: string };
     geral_canais?: string[];
+    status_etapa?: boolean;
   }>();
 
   const modo = b.modo === 'n8n' ? 'n8n' : 'sistema';
@@ -183,6 +187,8 @@ admin.put('/tenants/:id/planilha', async (c) => {
   // idem: tela sem os canais da Geral nao volta o cliente para "todos"
   const mexeNosCanais = Array.isArray(b.geral_canais);
   const canais = mexeNosCanais ? gravarCanaisDaGeral(b.geral_canais!.map(String)) : null;
+  // e a tela sem a caixa do Status nao desliga o espelho de quem ja' o tem
+  const mexeNoStatus = typeof b.status_etapa === 'boolean';
 
   // ligar sem destino encheria o log de falha a cada lead
   const temDestino = modo === 'n8n' ? !!url : !!(banco || (leads && (abas.geral || abas.google || abas.meta)));
@@ -194,17 +200,77 @@ admin.put('/tenants/:id/planilha', async (c) => {
          sheets_leads_doc_id = ?, sheets_aba_geral = ?, sheets_aba_google = ?, sheets_aba_meta = ?,
          sheets_aba_direto = CASE WHEN ? = 1 THEN ? ELSE sheets_aba_direto END,
          sheets_geral_canais = CASE WHEN ? = 1 THEN ? ELSE sheets_geral_canais END,
+         sheets_status_etapa = CASE WHEN ? = 1 THEN ? ELSE sheets_status_etapa END,
          updated_at = datetime('now')
      WHERE tenant_id = ?`,
   )
     .bind(
       ativo, modo, url, banco, leads, abas.geral, abas.google, abas.meta,
-      mexeNoDireto ? 1 : 0, direto, mexeNosCanais ? 1 : 0, canais, id,
+      mexeNoDireto ? 1 : 0, direto, mexeNosCanais ? 1 : 0, canais,
+      mexeNoStatus ? 1 : 0, b.status_etapa ? 1 : 0, id,
     )
     .run();
 
   console.log(JSON.stringify({ acao: 'salvar_planilha', por: c.get('identity').email, tenant_id: id, modo, ativo }));
   return c.json({ ok: true, ativo: ativo === 1, modo });
+});
+
+/**
+ * Os cards que ja' estao no Kanban hoje, de uma vez: a etapa de cada um vai
+ * para a coluna Status da Geral. Escreve na planilha do cliente de verdade.
+ */
+admin.post('/tenants/:id/planilha/status/sincronizar', async (c) => {
+  const id = Number(c.req.param('id'));
+  try {
+    const r = await sincronizarEtapasNaGeral(c.env, id);
+    console.log(JSON.stringify({ acao: 'sincronizar_status', por: c.get('identity').email, tenant_id: id, cards: r.cards, gravadas: r.gravadas }));
+    return c.json({ ok: true, ...r });
+  } catch (e) {
+    return c.json({ ok: false, erro: (e as Error).message });
+  }
+});
+
+/** Nome da regra no Chatwoot. Pelo nome ela e' reconhecida e nao duplicada. */
+const NOME_REGRA_ETAPA = '[PAINEL] Etapa do card → planilha';
+
+/**
+ * A regra do Chatwoot que faz o espelho funcionar sozinho: qualquer atualizacao
+ * de card do board do funil chama a ingestao com `evento=etapa`.
+ *
+ * As regras de conversao nao servem: cobrem so' as etapas com meta, e o card
+ * movido para "Qualificando" ou "Oportunidade Perdida" nunca chegaria aqui.
+ */
+admin.post('/tenants/:id/planilha/status/regra', async (c) => {
+  const id = Number(c.req.param('id'));
+  const t = await c.env.DB.prepare(
+    `SELECT t.slug, c.cw_account_id, c.cw_board_funil_id, COALESCE(k.chave, c.ingest_key) AS chave
+     FROM tenants t JOIN tenant_config c ON c.tenant_id = t.id
+     LEFT JOIN ingest_keys k ON k.tenant_id = t.id AND k.canal = 'kanban'
+     WHERE t.id = ?`,
+  )
+    .bind(id)
+    .first<{ slug: string; cw_account_id: number | null; cw_board_funil_id: number | null; chave: string | null }>();
+
+  if (!t) return c.json({ error: 'cliente nao encontrado' }, 404);
+  if (!t.cw_account_id) return c.json({ error: 'cliente sem conta do Chatwoot' }, 400);
+  if (!t.cw_board_funil_id) return c.json({ error: 'board do funil nao configurado' }, 400);
+  if (!t.chave) return c.json({ error: 'cliente sem chave de ingestao do Kanban' }, 400);
+
+  const cw = ChatwootClient.fromEnv(c.env);
+  const existe = (await cw.automacoes(t.cw_account_id)).find((r) => r.nome === NOME_REGRA_ETAPA);
+  if (existe) return c.json({ ok: true, adotada: true, ativa: existe.ativa, urls: existe.urls });
+
+  const url = `${new URL(c.req.url).origin}/ingest/${t.slug}/kanban?k=${t.chave}&evento=etapa`;
+  await cw.criarAutomacao(t.cw_account_id, {
+    name: NOME_REGRA_ETAPA,
+    description: 'Espelha a etapa do card na coluna Status da planilha de leads (CRM P12).',
+    event_name: 'kanban_task_updated',
+    conditions: [{ attribute_key: 'kanban_board_id', filter_operator: 'equal_to', values: [t.cw_board_funil_id], custom_attribute_type: '' }],
+    actions: [{ action_name: 'send_webhook_event', action_params: [url] }],
+  });
+
+  console.log(JSON.stringify({ acao: 'criar_regra_etapa', por: c.get('identity').email, tenant_id: id, board: t.cw_board_funil_id }));
+  return c.json({ ok: true, adotada: false, url });
 });
 
 /**

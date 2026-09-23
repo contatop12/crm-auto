@@ -135,6 +135,23 @@ export class ChatwootClient {
     }));
   }
 
+  /**
+   * Cria uma regra de automacao. O corpo vai achatado, no formato que a
+   * propria tela do Chatwoot manda (sondado nas regras existentes da Vita).
+   */
+  async criarAutomacao(
+    acc: number,
+    regra: {
+      name: string;
+      description: string;
+      event_name: string;
+      conditions: Array<Record<string, unknown>>;
+      actions: Array<{ action_name: string; action_params: unknown[] }>;
+    },
+  ): Promise<void> {
+    await this.req('POST', `/api/v1/accounts/${acc}/automation_rules`, { ...regra, active: true });
+  }
+
   async labels(acc: number): Promise<string[]> {
     const r = await this.req<{ payload: Array<{ title: string }> }>(
       'GET',
