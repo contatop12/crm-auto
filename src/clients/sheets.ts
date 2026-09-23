@@ -103,4 +103,19 @@ export class SheetsClient {
       { values: [valores] },
     );
   }
+
+  /**
+   * Varias celulas soltas numa chamada so' (`values:batchUpdate`).
+   *
+   * E' o que o espelho da etapa usa: uma celula por card, e a cota do Sheets
+   * e' por minuto — trinta PUTs seguidos estourariam.
+   */
+  async gravarCelulas(doc: string, aba: string, celulas: Array<{ celula: string; valor: string }>): Promise<void> {
+    if (!celulas.length) return;
+    const nome = `'${aba.replace(/'/g, "''")}'`;
+    await this.req('POST', `/${doc}/values:batchUpdate`, {
+      valueInputOption: 'RAW',
+      data: celulas.map((c) => ({ range: `${nome}!${c.celula}`, values: [[c.valor]] })),
+    });
+  }
 }
