@@ -1,7 +1,7 @@
 import type { Env } from '../env';
 import { parseKanbanTask } from '../domain/kanbanTask';
 import { recuperarRespostasAnteriores } from './sellerMessage';
-import { montarCanal } from '../domain/canal';
+import { montarCanal, tipoDoCanal } from '../domain/canal';
 import { detectOrigin, detectPlatform } from '../domain/platform';
 import { normFone } from '../domain/phone';
 import { PulseboardClient, ErroPulseboard, type ResultadoAviso } from '../clients/pulseboard';
@@ -210,11 +210,13 @@ export async function avisarLeadNoGrupo(
     quizVersion: lead?.quiz_version ?? t.quizVersion,
   };
 
-  const canal = montarCanal({
+  const entrada = {
     origem: detectOrigin(sinais),
     plataforma: detectPlatform(sinais),
     quizVersion: sinais.quizVersion,
-  });
+  };
+  const canal = montarCanal(entrada);
+  const tipo = tipoDoCanal(entrada);
 
   // o Pulseboard espera so digitos, com DDI e sem '+'
   const telefone = (normFone(lead?.phone_e164 ?? t.telefone) || '').replace('+', '');
@@ -230,6 +232,24 @@ export async function avisarLeadNoGrupo(
     )
       .bind(status, erro ?? null, canal, nome, telefone, tenantId, chaveDedupe)
       .run();
+
+  /**
+   * Formulario e quiz ja' tem quem avise: o fluxo do proprio formulario, que
+   * manda para o endereco daquele canal — e' de la' que sai o titulo certo no
+   * grupo ("- LP Andaime", "- Quiz"). O CRM so' tem um endereco por cliente, o
+   * de mensagem, entao o aviso dele saia com o titulo errado.
+   *
+   * Sem isto o mesmo lead era avisado duas vezes. Na Locadora (23/09/2026) o
+   * formulario avisou no dia 21 e o CRM de novo no dia 23, quando a vendedora
+   * abriu conversa e o telefone casou com o clique — parecendo lead novo.
+   * Quando os dois avisos caem juntos, quem barra e' a Pulseboard; com dias de
+   * diferenca, nao.
+   */
+  if (tipo !== 'Mensagem') {
+    const msg = `lead de ${tipo.toLowerCase()}: quem avisa o grupo e' o fluxo do ${tipo.toLowerCase()}`;
+    await marcar('ignorado', msg);
+    return { status: 'ignorado', motivo: `${msg} · ${nome} · ${canal}` };
+  }
 
   // Cliente que nao usa o aviso no grupo. Sem isto, cada lead novo virava um
   // erro e a fila retentava um cadastro inexistente.

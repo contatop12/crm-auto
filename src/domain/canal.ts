@@ -24,8 +24,14 @@ const PLATAFORMA: Record<string, string> = {
   meta: 'Meta',
 };
 
+/** Como o lead chegou: pelo quiz, por um formulario, ou chamando no WhatsApp. */
+export type TipoDeCanal = 'Quiz' | 'Formulário' | 'Mensagem';
+
+export function tipoDoCanal(i: CanalInput): TipoDeCanal {
+  return i.quizVersion ? 'Quiz' : i.origem === 'formulario' ? 'Formulário' : 'Mensagem';
+}
+
 export function montarCanal(i: CanalInput): string {
-  const tipo = i.quizVersion ? 'Quiz' : i.origem === 'formulario' ? 'Formulário' : 'Mensagem';
   const onde = PLATAFORMA[String(i.plataforma ?? '')] ?? 'Direto';
-  return `Campanha de ${tipo} - ${onde}`;
+  return `Campanha de ${tipoDoCanal(i)} - ${onde}`;
 }

@@ -125,14 +125,50 @@ describe('avisarLeadNoGrupo', () => {
 
   test('monta o canal a partir dos dados do clique', async () => {
     const { env, exec } = cenario();
-    exec(`INSERT INTO leads (tenant_id, protocol, nome, quiz_version, gclid, page_url)
-          VALUES (1, 'PERS-1720000000000-ABC', 'Carol do Quiz', 'v2', 'Cj0KC', 'https://x.com.br/quiz/v2?a=1')`);
+    exec(`INSERT INTO leads (tenant_id, protocol, nome, origem, evento, gclid, page_url)
+          VALUES (1, 'PERS-1720000000000-ABC', 'Carol Nunes', 'clique', 'whatsapp_click', 'Cj0KC',
+                  'https://x.com.br/cortinas?a=1')`);
 
     await avisarLeadNoGrupo(env, 1, task());
 
-    expect(enviados[0]!.Canal).toBe('Campanha de Quiz - Google');
-    expect(enviados[0]!.nome).toBe('Carol do Quiz');
-    expect(enviados[0]!.URL).toBe('https://x.com.br/quiz/v2');
+    expect(enviados[0]!.Canal).toBe('Campanha de Mensagem - Google');
+    expect(enviados[0]!.nome).toBe('Carol Nunes');
+    expect(enviados[0]!.URL).toBe('https://x.com.br/cortinas');
+  });
+
+  // Locadora, 23/09/2026: o lead do formulario da LP foi avisado pelo fluxo do
+  // formulario, com o endereco e o titulo certos, e de novo pelo CRM dois dias
+  // depois, quando a vendedora abriu a conversa. Formulario e quiz tem cada um
+  // o seu aviso; o CRM avisa quem chegou por mensagem.
+  test('nao avisa lead de formulario: quem avisa e o fluxo do formulario', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO leads (tenant_id, protocol, nome, origem, evento, gclid, page_url)
+          VALUES (1, 'PERS-1720000000000-ABC', 'Waldira Ferreira', 'formulario', 'form_submit', 'Cj0KC',
+                  'https://andaime.x.com.br/itaquera?a=1')`);
+
+    const r = await avisarLeadNoGrupo(env, 1, task());
+
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('formulário');
+    expect(enviados).toHaveLength(0);
+    const linha = consultar<{ status: string; canal: string }>(
+      'SELECT status, canal FROM group_notifications WHERE tenant_id = 1',
+    )[0]!;
+    expect(linha.status).toBe('ignorado');
+    expect(linha.canal).toBe('Campanha de Formulário - Google');
+  });
+
+  test('nao avisa lead de quiz: quem avisa e o fluxo do quiz', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO leads (tenant_id, protocol, nome, quiz_version, gclid, page_url)
+          VALUES (1, 'PERS-1720000000000-ABC', 'Carol do Quiz', 'v2', 'Cj0KC', 'https://x.com.br/quiz/v2?a=1')`);
+
+    const r = await avisarLeadNoGrupo(env, 1, task());
+
+    expect(r.status).toBe('ignorado');
+    expect(enviados).toHaveLength(0);
+    expect(consultar<{ canal: string }>('SELECT canal FROM group_notifications WHERE tenant_id = 1')[0]!.canal)
+      .toBe('Campanha de Quiz - Google');
   });
 
   test('lead sem clique registrado ainda avisa, com canal generico', async () => {
