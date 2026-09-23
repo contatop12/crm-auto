@@ -349,9 +349,9 @@ describe('planilha de leads: formato do TELEFONE', () => {
 });
 
 describe('planilha de leads: colunas que cada cliente usa', () => {
-  test('URL da Locadora e a pagina, sem a barra', () => {
-    expect(campoDaColunaLeads('URL')).toBe('pagina_slug');
-    expect(montarRegistro(conversao, lead).pagina_slug).toBe('cortinas');
+  test('URL da Locadora e a pagina de entrada inteira, com dominio e sem parametros', () => {
+    expect(campoDaColunaLeads('URL')).toBe('pagina_url');
+    expect(montarRegistro(conversao, lead).pagina_url).toBe('https://persianaspaulista.com.br/cortinas');
   });
 
   test('versao do quiz e form id da Persianas', () => {

@@ -25,7 +25,7 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'plataforma', rotulo: 'Plataforma (google / meta)' },
   { campo: 'campanha', rotulo: 'Campanha' },
   { campo: 'pagina', rotulo: 'Página de entrada, sem domínio' },
-  { campo: 'pagina_slug', rotulo: 'Página de entrada, sem a barra (coluna URL)' },
+  { campo: 'pagina_url', rotulo: 'Página de entrada com domínio, sem parâmetros (coluna URL)' },
   { campo: 'quiz_version', rotulo: 'Versão do quiz' },
   { campo: 'form_id', rotulo: 'FORM ID do quiz' },
   { campo: 'anuncio', rotulo: 'Anúncio do Meta (título)' },
@@ -134,6 +134,23 @@ function caminho(url: string | null | undefined): string {
     return new URL(url).pathname;
   } catch {
     return url.split('?')[0]!.replace(/^https?:\/\/[^/]+/, '');
+  }
+}
+
+/**
+ * Pagina de entrada com dominio e sem parametros: `https://andaime.x.com.br/itaquera`.
+ *
+ * Locadora (22/09/2026): a coluna URL das abas dela guarda a URL inteira,
+ * como o n8n dos formularios ja grava, porque `/itaquera` sozinho escondia
+ * que o lead entrou pela landing page de outro subdominio.
+ */
+function urlDaPagina(url: string | null | undefined): string {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return url.split('?')[0]!;
   }
 }
 
@@ -248,7 +265,7 @@ export function montarRegistro(
     plataforma,
     campanha: t(lead?.utm_campaign),
     pagina: caminho(lead?.page_url),
-    pagina_slug: caminho(lead?.page_url).replace(/^\/+|\/+$/g, ''),
+    pagina_url: urlDaPagina(lead?.page_url),
     quiz_version: t(lead?.quiz_version),
     form_id: t(lead?.quiz_form_id),
     // o lead da campanha de mensagem do Meta guarda o anuncio: titulo em
@@ -339,8 +356,8 @@ const COLUNAS_LEADS: Record<string, string> = {
   'pagina': 'pagina',
   'campanha': 'campanha',
   'protocolo': 'protocolo',
-  // Locadora: a coluna URL guarda a pagina de entrada, `landing-page-andaimes-itaquera`
-  'url': 'pagina_slug',
+  // Locadora: a coluna URL guarda a pagina de entrada inteira, com dominio
+  'url': 'pagina_url',
   // Persianas: a Geral nasceu para o quiz
   'versao do quiz': 'quiz_version',
   'form id': 'form_id',
