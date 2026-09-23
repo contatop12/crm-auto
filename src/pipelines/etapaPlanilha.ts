@@ -29,6 +29,7 @@ export interface Resultado {
 interface Config {
   cw_account_id: number | null;
   cw_board_funil_id: number | null;
+  cw_board_organico_id: number | null;
   sheets_ativo: number;
   planilha_modo: string;
   sheets_leads_doc_id: string | null;
@@ -39,7 +40,8 @@ interface Config {
 interface Destino {
   doc: string;
   aba: string;
-  board: number;
+  /** O board do funil e, quando ha', o Organico: o lead que nunca foi promovido fica la'. */
+  boards: number[];
   acc: number | null;
 }
 
@@ -57,8 +59,8 @@ export async function espelharEtapaNaGeral(env: Env, tenantId: number, payload: 
   const destino = destinoPronto(cfg);
   if (typeof destino === 'string') return { status: 'ignorado', motivo: destino };
 
-  if (t.boardId !== destino.board) {
-    return { status: 'ignorado', motivo: `card ${t.taskId} no board ${t.boardId}, nao no do funil (${destino.board})` };
+  if (!destino.boards.includes(t.boardId)) {
+    return { status: 'ignorado', motivo: `card ${t.taskId} no board ${t.boardId}, que nao e' o do funil nem o Organico` };
   }
 
   const etapa = await nomeDaEtapa(env, tenantId, t);
@@ -69,7 +71,7 @@ export async function espelharEtapaNaGeral(env: Env, tenantId: number, payload: 
 
   const sheets = new SheetsClient(env);
   const linhas = await sheets.tudo(destino.doc, destino.aba);
-  const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa);
+  const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, soVazia(destino, t));
   if ('resultado' in alvo) return alvo.resultado;
 
   await sheets.gravarCelulas(destino.doc, destino.aba, [{ celula: alvo.celula, valor: etapa }]);
@@ -96,10 +98,15 @@ export async function sincronizarEtapasNaGeral(
 
   const cw = ChatwootClient.fromEnv(env);
   const cards: TaskDoKanban[] = [];
-  for (let page = 1, mais = true; mais && page <= 20; page++) {
-    const r = await cw.tasks(destino.acc, destino.board, page, 100);
-    cards.push(...r.tasks.map((x) => parseKanbanTask(x)));
-    mais = r.hasMore;
+  // a lista de cards da API vem sem o nome da etapa: os steps de cada board dao o nome
+  const nomeDoStep = new Map<number, string>();
+  for (const board of destino.boards) {
+    for (const s of await cw.steps(destino.acc, board)) nomeDoStep.set(s.id, s.name);
+    for (let page = 1, mais = true; mais && page <= 20; page++) {
+      const r = await cw.tasks(destino.acc, board, page, 100);
+      cards.push(...r.tasks.map((x) => parseKanbanTask(x)));
+      mais = r.hasMore;
+    }
   }
 
   const sheets = new SheetsClient(env);
@@ -108,13 +115,13 @@ export async function sincronizarEtapasNaGeral(
   const detalhes: string[] = [];
 
   for (const t of cards) {
-    const etapa = await nomeDaEtapa(env, tenantId, t);
+    const etapa = (await nomeDaEtapa(env, tenantId, t)) || (nomeDoStep.get(t.boardStepId) ?? '').trim();
     const telefone = etapa ? await telefoneDoCard(env, tenantId, destino.acc, t) : '';
     if (!etapa || !telefone) {
       detalhes.push(`card ${t.taskId} (${t.nome || t.titulo}): ${etapa ? 'sem telefone' : 'sem etapa'}`);
       continue;
     }
-    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa);
+    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, soVazia(destino, t));
     if ('resultado' in alvo) {
       if (alvo.resultado.status === 'erro') throw new Error(alvo.resultado.motivo);
       detalhes.push(`card ${t.taskId} (${t.nome || t.titulo}): ${alvo.resultado.motivo}`);
@@ -130,8 +137,8 @@ export async function sincronizarEtapasNaGeral(
 
 async function lerConfig(env: Env, tenantId: number): Promise<Config | null> {
   return env.DB.prepare(
-    `SELECT cw_account_id, cw_board_funil_id, sheets_ativo, planilha_modo, sheets_leads_doc_id,
-            sheets_aba_geral, sheets_status_etapa
+    `SELECT cw_account_id, cw_board_funil_id, cw_board_organico_id, sheets_ativo, planilha_modo,
+            sheets_leads_doc_id, sheets_aba_geral, sheets_status_etapa
      FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(tenantId)
@@ -146,7 +153,12 @@ function destinoPronto(cfg: Config | null): Destino | string {
   if (cfg.planilha_modo !== 'sistema') return 'planilha escrita pelo n8n: o espelho da etapa so vale no modo sistema';
   if (!cfg.sheets_leads_doc_id || !cfg.sheets_aba_geral) return 'cliente sem planilha de leads ou sem aba Geral';
   if (!cfg.cw_board_funil_id) return 'board do funil nao configurado para este cliente';
-  return { doc: cfg.sheets_leads_doc_id, aba: cfg.sheets_aba_geral, board: cfg.cw_board_funil_id, acc: cfg.cw_account_id };
+  return {
+    doc: cfg.sheets_leads_doc_id,
+    aba: cfg.sheets_aba_geral,
+    boards: [cfg.cw_board_funil_id, ...(cfg.cw_board_organico_id ? [cfg.cw_board_organico_id] : [])],
+    acc: cfg.cw_account_id,
+  };
 }
 
 /** O nome sincronizado da etapa; o do payload so' quando o funil nao a conhece. */
@@ -192,12 +204,22 @@ async function telefoneDoCard(env: Env, tenantId: number, acc: number | null, t:
   return '';
 }
 
+/**
+ * O card do Organico so' preenche Status VAZIO. "Orgânico" e' a unica etapa
+ * daquele board e diz pouco; o "Agendou" que o time escreveu a mao diz mais.
+ * No funil o CRM e' a fonte: a etapa sobrescreve o que estiver la'.
+ */
+function soVazia(destino: Destino, t: TaskDoKanban): boolean {
+  return t.boardId !== destino.boards[0];
+}
+
 /** A celula a gravar, ou o resultado que explica por que nenhuma. */
 function celulaDoStatus(
   linhas: string[][],
   aba: string,
   telefone: string,
   etapa: string,
+  soVazia = false,
 ): { celula: string; linha: number; antes: string } | { resultado: Resultado } {
   const cab = linhas[0] ?? [];
   const iStatus = colunaStatus(cab);
@@ -213,6 +235,9 @@ function celulaDoStatus(
   const antes = String(corpo[i]?.[iStatus] ?? '').trim();
   if (antes === etapa) {
     return { resultado: { status: 'ignorado', motivo: `linha ${linha} da "${aba}" ja esta "${etapa}"` } };
+  }
+  if (soVazia && antes) {
+    return { resultado: { status: 'ignorado', motivo: `linha ${linha} da "${aba}" ja tem Status "${antes}" (card do Organico nao sobrescreve)` } };
   }
   return { celula: `${indiceParaColuna(iStatus)}${linha}`, linha, antes };
 }

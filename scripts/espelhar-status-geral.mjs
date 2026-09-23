@@ -30,6 +30,8 @@ const board = Number(arg('board'));
 const doc = arg('doc');
 const aba = arg('aba', 'Geral');
 const gravar = process.argv.includes('--gravar');
+// board Organico: so' preenche Status vazio, o "Agendou" do time vale mais que "Orgânico"
+const soVazias = process.argv.includes('--so-vazias');
 if (!conta || !board || !doc) {
   console.error('faltou --conta, --board ou --doc');
   process.exit(1);
@@ -111,6 +113,7 @@ async function main() {
     if (i < 0) { console.log(`- card ${t.id} (${nome}): telefone nao esta na aba "${aba}"`); continue; }
     const antes = String(corpo[i][iStatus] ?? '').trim();
     if (antes === etapa) { console.log(`= card ${t.id} (${nome}): linha ${i + 2} ja esta "${etapa}"`); continue; }
+    if (soVazias && antes) { console.log(`= card ${t.id} (${nome}): linha ${i + 2} ja tem "${antes}", nao sobrescreve`); continue; }
     celulas.push({ range: `'${aba.replace(/'/g, "''")}'!${letra(iStatus)}${i + 2}`, values: [[etapa]] });
     console.log(`+ card ${t.id} (${nome}): linha ${i + 2} "${antes}" -> "${etapa}"`);
   }

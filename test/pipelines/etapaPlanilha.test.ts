@@ -117,9 +117,27 @@ describe('espelharEtapaNaGeral', () => {
     expect(gravadas).toHaveLength(0);
   });
 
-  test('card do board Organico nao mexe na planilha', async () => {
+  test('card do board Organico escreve a etapa dele: o lead nunca promovido tambem tem status', async () => {
     const { env } = cenario();
-    const r = await espelharEtapaNaGeral(env, 3, card({ board_id: 8 }));
+    const r = await espelharEtapaNaGeral(env, 3, card({ board_id: 8, board_step_id: 33, board_step: { id: 33, name: 'Orgânico' } }));
+    expect(r.status).toBe('ok');
+    expect(gravadas).toEqual([{ range: "'Geral'!I2", valor: 'Orgânico' }]);
+  });
+
+  test('card do Organico nao sobrescreve o Status que o time preencheu', async () => {
+    const { env } = cenario();
+    const r = await espelharEtapaNaGeral(env, 3, card({
+      board_id: 8, board_step_id: 33, board_step: { id: 33, name: 'Orgânico' },
+      custom_attributes: {}, contacts: [{ name: 'Fabiana', phone_number: '+5511947001173' }],
+    }));
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('nao sobrescreve');
+    expect(gravadas).toHaveLength(0);
+  });
+
+  test('card de um board que nao e o funil nem o Organico nao mexe na planilha', async () => {
+    const { env } = cenario();
+    const r = await espelharEtapaNaGeral(env, 3, card({ board_id: 99 }));
     expect(r.status).toBe('ignorado');
     expect(r.motivo).toContain('board');
     expect(gravadas).toHaveLength(0);
