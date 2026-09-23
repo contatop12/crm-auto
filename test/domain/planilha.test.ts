@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral, linhaDoTelefone, colunaStatus } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -363,5 +363,36 @@ describe('planilha de leads: colunas que cada cliente usa', () => {
     const r = montarRegistro(conversao, lead);
     expect(linhaDeLeads(['SEQUENCIA', 'TELEFONE', 'NOME'], r, { telefoneComoLink: true }))
       .toEqual(['', 'https://wa.me/5511971036500', 'Amanda Constantino']);
+  });
+});
+
+describe('etapa do card na coluna Status da Geral', () => {
+  const cab = ['URL WHATSAPP', 'Canal', 'SEQUENCIA', 'DATA', 'HORA', 'NOME', 'TELEFONE', 'Pagina', 'Status'];
+  const corpo = [
+    ['https://wa.me/5542999003333', 'Campanha de Mensagem - Google', '13SET', '17/09/2026', '09:29:57', 'Marcia', '5542999003333', '/x', ''],
+    ['https://wa.me/11947001173', 'Campanha de Mensagem - Google', '01SET', '01/09/2026', '13:22:54', 'Fabiana', '11947001173', '', 'Novo Lead'],
+    ['', 'Formulário do site', '29AGO', '14/08/2026', '11:35', 'Ismael', '', '', ''],
+  ];
+
+  test('acha a linha pelo telefone, ignorando DDI e nono digito', () => {
+    expect(linhaDoTelefone(cab, corpo, '+5542999003333')).toBe(0);
+    // a planilha antiga guardava sem o 55; o WhatsApp manda com o 55 e o 9
+    expect(linhaDoTelefone(cab, corpo, '+5511947001173')).toBe(1);
+  });
+
+  test('casa tambem pelo link do WhatsApp quando a coluna TELEFONE esta vazia', () => {
+    const so_link = [['https://wa.me/5519991234567', '', '', '', '', 'Ana', '', '', '']];
+    expect(linhaDoTelefone(cab, so_link, '5519991234567')).toBe(0);
+  });
+
+  test('-1 quando o telefone nao esta na aba ou e vazio', () => {
+    expect(linhaDoTelefone(cab, corpo, '+5511999999999')).toBe(-1);
+    expect(linhaDoTelefone(cab, corpo, '')).toBe(-1);
+  });
+
+  test('coluna Status pelo nome, sem caixa nem acento', () => {
+    expect(colunaStatus(cab)).toBe(8);
+    expect(colunaStatus(['NOME', 'STATUS'])).toBe(1);
+    expect(colunaStatus(['NOME', 'Situação'])).toBe(-1);
   });
 });

@@ -498,3 +498,25 @@ export function jaTemTelefone(coluna: string[], telefone: string): boolean {
   if (!alvo) return false;
   return coluna.some((v) => phoneKey(v) === alvo);
 }
+
+/**
+ * A linha (indice em `corpo`, sem o cabecalho) do lead com este telefone, ou -1.
+ *
+ * Mesma chave do `jaTemTelefone`: DDD + 8 ultimos digitos, entao o numero
+ * antigo sem o 55, o link `wa.me/55...` e o E.164 do WhatsApp sao o mesmo lead.
+ * Olha a coluna TELEFONE e a do link — a Geral de alguns clientes so' tem o link.
+ */
+export function linhaDoTelefone(cabecalho: string[], corpo: string[][], telefone: string): number {
+  const alvo = phoneKey(telefone);
+  if (!alvo) return -1;
+  const colunas = cabecalho
+    .map((h, i) => ({ campo: campoDaColunaLeads(h), i }))
+    .filter((c) => c.campo === 'telefone' || c.campo === 'link_whatsapp')
+    .map((c) => c.i);
+  return corpo.findIndex((l) => colunas.some((i) => phoneKey(l[i] ?? '') === alvo));
+}
+
+/** Indice da coluna "Status" (sem caixa nem acento), ou -1 se a aba nao tem. */
+export function colunaStatus(cabecalho: string[]): number {
+  return cabecalho.findIndex((h) => normalizar(h) === 'status');
+}
