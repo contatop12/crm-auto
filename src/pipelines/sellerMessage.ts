@@ -4,6 +4,7 @@ import { matchStage } from '../domain/triggers';
 import { canMove } from '../domain/movement';
 import { simularRespostas } from '../domain/historico';
 import { extractValue } from '../domain/value';
+import { ehRespostaAutomatica } from '../domain/respostasAutomaticas';
 import type { Stage, Trigger, ValuePattern } from '../domain/types';
 
 /**
@@ -99,6 +100,19 @@ export async function moverPelaResposta(
     };
   }
 
+  /**
+   * Boas-vindas e continuidade do formulário são `outgoing`, mas não são o
+   * atendente: chegam em segundos e levavam o card para "Qualificando" antes de
+   * alguém olhar o lead. O card fica em "Novo Lead" até uma resposta de gente.
+   */
+  const automaticas = await respostasAutomaticas(env, tenantId);
+  if (ehRespostaAutomatica(texto, automaticas)) {
+    return {
+      status: 'ignorado',
+      motivo: `conversa ${conversaId}: resposta automatica, o card espera o atendente`,
+    };
+  }
+
   const [stages, triggers, padroes] = await Promise.all([
     etapas(env, tenantId),
     frases(env, tenantId),
@@ -190,6 +204,15 @@ async function frases(env: Env, tenantId: number): Promise<Trigger[]> {
   )
     .bind(tenantId)
     .all<{ stageId: number; frase: string; emojiObrigatorio: string | null; tipo: 'contem' | 'fixo' }>();
+  return results;
+}
+
+async function respostasAutomaticas(env: Env, tenantId: number): Promise<Array<{ frase: string }>> {
+  const { results } = await env.DB.prepare(
+    'SELECT frase FROM respostas_automaticas WHERE tenant_id = ?',
+  )
+    .bind(tenantId)
+    .all<{ frase: string }>();
   return results;
 }
 

@@ -190,3 +190,49 @@ describe('moverPelaResposta', () => {
     expect((await moverPelaResposta(env, 1, '{}')).status).toBe('ignorado');
   });
 });
+
+describe('resposta automatica nao conta como resposta do atendente', () => {
+  // Locadora, 22/09/2026: a mensagem de boas-vindas saiu 4 s depois do lead
+  // chegar e levou o card de "Novo Lead" para "Qualificando". O card deve
+  // esperar o atendente de verdade.
+  const cenarioLocadora = () => {
+    const c = cenario();
+    c.exec(`INSERT INTO respostas_automaticas (tenant_id, frase)
+            VALUES (1, 'Seja muito bem-vindo(a) à Locadora Exatidão')`);
+    c.exec(`INSERT INTO respostas_automaticas (tenant_id, frase)
+            VALUES (1, 'Vi que você se cadastrou em nosso site em busca de')`);
+    return c;
+  };
+
+  test('a mensagem de boas-vindas nao move o card', async () => {
+    const { env } = cenarioLocadora();
+    const r = await moverPelaResposta(env, 1, msg({
+      content: 'Olá! Seja muito bem-vindo(a) à Locadora Exatidão 🤝\nConta pra gente como podemos ajudar!',
+    }, { board_step: { name: 'Novo Lead' } }));
+
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('resposta automatica');
+    expect(moveu()).toBeUndefined();
+  });
+
+  test('a mensagem do fluxo do formulario tambem nao move', async () => {
+    const { env } = cenarioLocadora();
+    const r = await moverPelaResposta(env, 1, msg({
+      content: 'Olá, Everton! Tudo bem?\n\nAqui é a Vania da Locadora Exatidão. Vi que você se cadastrou '
+        + 'em nosso site em busca de *Locação de Andaimes* e já quero agilizar o seu orçamento!',
+    }, { board_step: { name: 'Novo Lead' } }));
+
+    expect(r.status).toBe('ignorado');
+    expect(moveu()).toBeUndefined();
+  });
+
+  test('a resposta do atendente continua movendo', async () => {
+    const { env } = cenarioLocadora();
+    const r = await moverPelaResposta(env, 1, msg({
+      content: 'Bom dia! O andaime de 1,5 m sai por R$ 120 a semana.',
+    }, { board_step: { name: 'Novo Lead' } }));
+
+    expect(r.status).toBe('ok');
+    expect(moveu()).toBeDefined();
+  });
+});
