@@ -270,6 +270,19 @@ export async function atribuirLead(
     try {
       const nomes = await GoogleAdsClient.fromEnv(env).nomesDeCampanha(cfg.ga_customer_id, [lead.utm_id!]);
       nomeCampanha = nomes.get(lead.utm_id!) ?? lead.utm_campaign;
+      // Guardado no lead: antes o nome ia so' para o card e era jogado fora, e
+      // a planilha e o banco ficavam com o ID da campanha.
+      if (nomeCampanha && nomeCampanha !== lead.utm_campaign) {
+        await env.DB.prepare(
+          `UPDATE leads SET utm_campaign_nome = ?, updated_at = datetime('now')
+           WHERE tenant_id = ? AND protocol = ?`,
+        )
+          .bind(nomeCampanha, tenantId, lead.protocol)
+          .run()
+          .catch((e: Error) => {
+            console.log(JSON.stringify({ acao: 'nome_campanha_no_lead_falhou', erro: e.message }));
+          });
+      }
     } catch (e) {
       console.log(JSON.stringify({ acao: 'nome_campanha_falhou', erro: (e as Error).message }));
     }

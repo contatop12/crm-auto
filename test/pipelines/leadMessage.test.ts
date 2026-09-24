@@ -277,6 +277,16 @@ describe('atribuirLead', () => {
     expect(attrs.utm_campaign).toBe('Vita - Search - Aparelhos');
   });
 
+  test('o nome da campanha fica guardado no lead, para a planilha', async () => {
+    // antes o nome ia so' para o card e era jogado fora: a planilha e o banco
+    // ficavam com o ID da campanha ("23920679510")
+    const { env, consultar } = cenario();
+    await atribuirLead(env, 1, webhook());
+    expect(consultar<{ utm_campaign_nome: string }>(
+      `SELECT utm_campaign_nome FROM leads WHERE protocol = 'VITA-MRIAP9IN8WNQ'`,
+    )[0]!.utm_campaign_nome).toBe('Vita - Search - Aparelhos');
+  });
+
   test('aplica as etiquetas de atribuicao sem apagar as que ja existem', async () => {
     const { env } = cenario();
     etiquetasAtuais = ['mensagem', 'Ligar mais tarde'];

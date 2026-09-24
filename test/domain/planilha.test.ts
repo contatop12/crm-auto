@@ -396,3 +396,43 @@ describe('etapa do card na coluna Status da Geral', () => {
     expect(colunaStatus(['NOME', 'Situação'])).toBe(-1);
   });
 });
+
+describe('UTMs na aba Geral', () => {
+  // Locadora, 24/09/2026: a Geral passou a mostrar de qual campanha veio o
+  // lead. O Google manda o ID na utm_campaign quando a macro {campaignname}
+  // nao esta' preenchida; o nome vem da API e fica guardado no lead.
+  const comUtms = {
+    ...lead,
+    utm_source: 'google',
+    utm_medium: 'cpc',
+    utm_campaign: '21802734158',
+    utm_term: 'aluguel de martelete',
+    utm_content: '716913836627',
+  };
+
+  test('a campanha e o nome quando o Google devolveu', () => {
+    const r = montarRegistro(conversao, { ...comUtms, utm_campaign_nome: 'WD - Search - 11/10/24' });
+    expect(r.campanha).toBe('WD - Search - 11/10/24');
+  });
+
+  test('sem o nome, a campanha fica com o id — dado nenhum seria pior', () => {
+    expect(montarRegistro(conversao, comUtms).campanha).toBe('21802734158');
+  });
+
+  test('cada coluna da Geral aponta para a sua UTM', () => {
+    expect(campoDaColunaLeads('ORIGEM')).toBe('utm_source');
+    expect(campoDaColunaLeads('MIDIA')).toBe('utm_medium');
+    expect(campoDaColunaLeads('CAMPANHA')).toBe('campanha');
+    expect(campoDaColunaLeads('TERMO')).toBe('utm_term');
+    expect(campoDaColunaLeads('CONTEUDO')).toBe('utm_content');
+  });
+
+  test('a linha sai na ordem do cabecalho da Geral', () => {
+    const r = montarRegistro(conversao, { ...comUtms, utm_campaign_nome: 'WD - Search - 11/10/24' });
+    expect(linhaDeLeads(['CANAL', 'ORIGEM', 'MIDIA', 'CAMPANHA', 'TERMO', 'CONTEUDO', 'NOME'], r))
+      .toEqual([
+        'Campanha de Mensagem - Google', 'google', 'cpc', 'WD - Search - 11/10/24',
+        'aluguel de martelete', '716913836627', 'Amanda Constantino',
+      ]);
+  });
+});

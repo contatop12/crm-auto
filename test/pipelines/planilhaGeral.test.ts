@@ -48,6 +48,11 @@ beforeEach(() => {
         abas[aba]!.push(...(JSON.parse(String(init.body)) as { values: string[][] }).values);
         return Response.json({});
       }
+      if (init.method === 'PUT') {
+        const n = Number(u.match(/!A(\d+):/)?.[1] ?? 0);
+        abas[aba]![n - 1] = (JSON.parse(String(init.body)) as { values: string[][] }).values[0]!;
+        return Response.json({});
+      }
       return Response.json({ values: abas[aba] });
     }
     return Response.json({ ok: true });
@@ -82,5 +87,45 @@ describe('Tainã: Geral so com lead do Meta', () => {
     await espelharNaPlanilha(env, 5, { tipo: 'conversao', protocolo: 'TAINA-GOOGLE', ensaio: false, conversao: conversa });
     expect(abas.Geral!.length).toBe(2);
     expect(abas['Google Mensagem']!.length).toBe(2);
+  });
+});
+
+describe('linha que ja esta na Geral', () => {
+  const CAB_UTM = ['DATA', 'HORA', 'Canal', 'CAMPANHA', 'TERMO', 'NOME', 'TELEFONE', 'STATUS'];
+
+  // Locadora, 24/09/2026: a linha do lead da LP e' escrita pelo fluxo do
+  // formulario, que nao sabe a campanha. Quando o lead chama no WhatsApp o
+  // sistema ja' sabe — e completa o que estava vazio, sem repetir a linha nem
+  // mexer no que o time escreveu.
+  const comLinha = (over: string[] = []) => {
+    abas.Geral = [CAB_UTM, ['22/09/2026', '09:00:00', '', '', '', 'Douglas', '5511996201147', 'em atendimento', ...over]];
+  };
+
+  test('completa as UTMs que estavam vazias', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET sheets_geral_canais = NULL WHERE tenant_id = 5`);
+    exec(`UPDATE leads SET utm_campaign = '21802734158', utm_campaign_nome = 'WD - Search', utm_term = 'aluguel de andaime'
+          WHERE protocol = 'TAINA-GOOGLE'`);
+    comLinha();
+
+    await espelharNaPlanilha(env, 5, { tipo: 'conversao', protocolo: 'TAINA-GOOGLE', ensaio: false, conversao: conversa });
+
+    expect(abas.Geral!.length).toBe(2);
+    const linha = abas.Geral![1]!;
+    expect(linha[3]).toBe('WD - Search');
+    expect(linha[4]).toBe('aluguel de andaime');
+    expect(linha[7]).toBe('em atendimento');
+  });
+
+  test('nao reescreve o que ja estava preenchido', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET sheets_geral_canais = NULL WHERE tenant_id = 5`);
+    exec(`UPDATE leads SET utm_campaign_nome = 'WD - Search' WHERE protocol = 'TAINA-GOOGLE'`);
+    abas.Geral = [CAB_UTM, ['22/09/2026', '09:00:00', 'Canal escrito a mao', 'Campanha antiga', '', 'Douglas', '5511996201147', '']];
+
+    await espelharNaPlanilha(env, 5, { tipo: 'conversao', protocolo: 'TAINA-GOOGLE', ensaio: false, conversao: conversa });
+
+    expect(abas.Geral![1]![2]).toBe('Canal escrito a mao');
+    expect(abas.Geral![1]![3]).toBe('Campanha antiga');
   });
 });

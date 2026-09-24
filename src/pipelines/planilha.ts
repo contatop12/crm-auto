@@ -70,7 +70,7 @@ export async function espelharNaPlanilha(
 
   const lead = await env.DB.prepare(
     `SELECT nome, email, phone_e164, gclid, gbraid, wbraid, utm_source, utm_medium,
-            utm_campaign, utm_id, utm_term, utm_content, fbp, fbc, client_id, origem,
+            utm_campaign, utm_campaign_nome, utm_id, utm_term, utm_content, fbp, fbc, client_id, origem,
             evento, page_url, whatsapp_url, referrer, user_agent, ip_address, quiz_version,
             quiz_valor, quiz_form_id, valor_proposta, created_at
      FROM leads WHERE tenant_id = ? AND protocol = ?`,
@@ -184,11 +184,30 @@ async function acrescentarLead(
   const iFone = cab.findIndex((h) => campoDaColunaLeads(h) === 'telefone');
   const iLink = cab.findIndex((h) => campoDaColunaLeads(h) === 'link_whatsapp');
   const telefone = String(registro.telefone ?? '');
-  if (telefone && jaTemTelefone([...coluna(iFone), ...coluna(iLink)], telefone)) return;
+  const linha = linhaDeLeads(cab, registro, { telefoneComoLink: telefoneEmLink(coluna(iFone)) });
 
-  await sheets.acrescentar(doc, aba, linhaDeLeads(cab, registro, {
-    telefoneComoLink: telefoneEmLink(coluna(iFone)),
-  }));
+  /**
+   * O lead ja' tem linha: completa nela o que estiver VAZIO.
+   *
+   * A linha do lead de formulario e' escrita pelo fluxo do formulario, que nao
+   * sabe a campanha nem o termo de busca — isso o sistema so' descobre quando o
+   * lead chama no WhatsApp. Antes daqui a linha ficava como nasceu, e as
+   * colunas de UTM da Geral nunca se preenchiam nesse lead.
+   *
+   * So' o que esta' em branco: o que o time escreveu na mao fica.
+   */
+  const n = telefone
+    ? corpo.findIndex((l) => jaTemTelefone([l[iFone] ?? '', l[iLink] ?? ''], telefone))
+    : -1;
+  if (n >= 0) {
+    const atual = corpo[n]!;
+    const completa = cab.map((_, i) => (String(atual[i] ?? '').trim() ? String(atual[i]) : (linha[i] ?? '')));
+    if (completa.every((v, i) => v === String(atual[i] ?? ''))) return;
+    await sheets.atualizar(doc, aba, n + 2, indiceParaColuna(cab.length - 1), completa);
+    return;
+  }
+
+  await sheets.acrescentar(doc, aba, linha);
 }
 
 /**

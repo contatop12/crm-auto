@@ -42,6 +42,7 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'utm_source', rotulo: 'utm_source' },
   { campo: 'utm_medium', rotulo: 'utm_medium' },
   { campo: 'utm_term', rotulo: 'utm_term' },
+  { campo: 'utm_content', rotulo: 'utm_content (anúncio)' },
   { campo: 'cliente', rotulo: 'Cliente' },
   { campo: 'ensaio', rotulo: 'Modo sombra (true/false)' },
   { campo: 'teste', rotulo: 'Linha de teste (true/false)' },
@@ -60,6 +61,8 @@ export interface LeadDaPlanilha {
   utm_source?: string | null;
   utm_medium?: string | null;
   utm_campaign?: string | null;
+  /** Nome da campanha, resolvido pelo ID contra a API do Google Ads. */
+  utm_campaign_nome?: string | null;
   utm_id?: string | null;
   utm_term?: string | null;
   utm_content?: string | null;
@@ -263,7 +266,10 @@ export function montarRegistro(
       ? CANAL_DIRETO_SITE
       : montarCanal({ origem, plataforma, quizVersion: null }),
     plataforma,
-    campanha: t(lead?.utm_campaign),
+    // O nome da campanha, quando o Google devolveu (a `utm_campaign` chega com
+    // o ID quando a macro {campaignname} nao esta' preenchida no anuncio). Sem
+    // o nome fica o ID: dado nenhum seria pior.
+    campanha: t(lead?.utm_campaign_nome || lead?.utm_campaign),
     pagina: caminho(lead?.page_url),
     pagina_url: urlDaPagina(lead?.page_url),
     quiz_version: t(lead?.quiz_version),
@@ -286,6 +292,7 @@ export function montarRegistro(
     utm_source: t(lead?.utm_source),
     utm_medium: t(lead?.utm_medium),
     utm_term: t(lead?.utm_term),
+    utm_content: t(lead?.utm_content),
     cliente: ctx.cliente,
     ensaio: ctx.ensaio,
     teste: ctx.teste === true,
@@ -356,6 +363,16 @@ const COLUNAS_LEADS: Record<string, string> = {
   'pagina': 'pagina',
   'campanha': 'campanha',
   'protocolo': 'protocolo',
+  // UTMs na Geral: de onde veio o lead, com o nome da campanha em vez do ID
+  'origem': 'utm_source',
+  'utm_source': 'utm_source',
+  'midia': 'utm_medium',
+  'utm_medium': 'utm_medium',
+  'utm_campaign': 'campanha',
+  'termo': 'utm_term',
+  'utm_term': 'utm_term',
+  'conteudo': 'utm_content',
+  'utm_content': 'utm_content',
   // Locadora: a coluna URL guarda a pagina de entrada inteira, com dominio
   'url': 'pagina_url',
   // Persianas: a Geral nasceu para o quiz
