@@ -347,3 +347,55 @@ describe('enviarConversao', () => {
     expect(r.status).toBe('ignorado');
   });
 });
+
+describe('lead de formulario e a conversa de entrada', () => {
+  // Locadora, 24/09/2026: o lead da LP de andaimes ja' chegou pelo formulario,
+  // e o formulario tem a conversao dele no proprio site. Subir "Conversa
+  // Iniciada" quando ele chama no WhatsApp conta o mesmo lead duas vezes. As
+  // etapas seguintes continuam subindo.
+  const naEntrada = (over: Record<string, unknown> = {}) =>
+    card({ board_step_id: 27, board_step: { id: 27, name: 'Novo Lead' }, ...over });
+
+  test('nao sobe a conversa de entrada quando o cliente pediu assim', async () => {
+    const { env, consultar, exec } = cenario();
+    exec(`UPDATE tenant_config SET conversa_de_formulario = 0 WHERE tenant_id = 1`);
+    exec(`UPDATE leads SET origem = 'formulario', evento = 'form_submit' WHERE protocol = 'VITA-123'`);
+
+    const r = await enviarConversao(env, 1, naEntrada());
+
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('formulario');
+    expect(chamadas).toHaveLength(0);
+    expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
+  });
+
+  test('as etapas seguintes do mesmo lead continuam subindo', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET conversa_de_formulario = 0 WHERE tenant_id = 1`);
+    exec(`UPDATE leads SET origem = 'formulario', evento = 'form_submit' WHERE protocol = 'VITA-123'`);
+
+    const r = await enviarConversao(env, 1, card());
+
+    expect(r.status).toBe('ok');
+    expect(chamadas.length).toBeGreaterThan(0);
+  });
+
+  test('lead que chegou por mensagem sobe a conversa de entrada como sempre', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET conversa_de_formulario = 0 WHERE tenant_id = 1`);
+    exec(`UPDATE leads SET origem = 'clique', evento = 'whatsapp_click' WHERE protocol = 'VITA-123'`);
+
+    const r = await enviarConversao(env, 1, naEntrada());
+
+    expect(r.status).toBe('ok');
+  });
+
+  test('cliente sem a regra continua subindo a conversa do formulario', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE leads SET origem = 'formulario', evento = 'form_submit' WHERE protocol = 'VITA-123'`);
+
+    const r = await enviarConversao(env, 1, naEntrada());
+
+    expect(r.status).toBe('ok');
+  });
+});

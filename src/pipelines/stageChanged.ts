@@ -36,6 +36,8 @@ interface Config {
   ga_customer_id: string | null;
   ga_currency: string;
   validate_only: number;
+  /** 0 = lead de formulario nao sobe "Conversa Iniciada"; o formulario ja' contou. */
+  conversa_de_formulario: number;
 }
 
 interface Etapa {
@@ -58,6 +60,7 @@ interface Lead {
   utm_source: string | null;
   fbc: string | null;
   ctwa_clid: string | null;
+  origem: string | null;
   evento: string | null;
   created_at: string;
 }
@@ -110,7 +113,7 @@ export async function enviarConversao(
 
   const lead = await env.DB.prepare(
     `SELECT email, phone_e164, phone_key, gclid, gbraid, wbraid, valor_proposta, utm_source, fbc,
-            ctwa_clid, evento, created_at
+            ctwa_clid, origem, evento, created_at
      FROM leads WHERE tenant_id = ? AND protocol = ?`,
   )
     .bind(tenantId, protocolo)
@@ -145,12 +148,31 @@ export async function enviarConversao(
   }
 
   const cfg = await env.DB.prepare(
-    'SELECT ga_customer_id, ga_currency, validate_only FROM tenant_config WHERE tenant_id = ?',
+    `SELECT ga_customer_id, ga_currency, validate_only, conversa_de_formulario
+     FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(tenantId)
     .first<Config>();
   if (!cfg?.ga_customer_id) {
     return { status: 'ignorado', motivo: 'cliente sem conta do Google Ads no perfil' };
+  }
+
+  /**
+   * O lead que chegou por formulário já foi contado pelo próprio formulário.
+   *
+   * A LP de andaimes da Locadora tem a conversão no site; a "Conversa Iniciada"
+   * de quando ele chama no WhatsApp contaria o mesmo lead de novo. As etapas
+   * seguintes continuam subindo — essas o formulário não tem como saber.
+   */
+  if (
+    cfg.conversa_de_formulario === 0
+    && etapa.conversion_event === 'conversa'
+    && lead.origem === 'formulario'
+  ) {
+    return {
+      status: 'ignorado',
+      motivo: `${protocolo}: lead de formulario, a conversa de entrada e' do proprio formulario`,
+    };
   }
 
   const { valor, semValorReal } = valorDaConversao(etapa.conversion_value, num(p.value), lead.valor_proposta);
