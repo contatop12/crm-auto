@@ -99,6 +99,18 @@ async function main() {
     iStatus = cab.length;
     const celula = `'${aba.replace(/'/g, "''")}'!${letra(iStatus)}1`;
     if (gravar) {
+      // a grade da aba pode acabar antes da coluna nova: amplia antes de escrever
+      const meta = await (await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${doc}?fields=sheets.properties(sheetId,title,gridProperties(columnCount))`, {
+        headers: { authorization: `Bearer ${tok}` },
+      })).json();
+      const sh = (meta.sheets ?? []).map((s) => s.properties).find((p) => p.title === aba);
+      if (sh && sh.gridProperties.columnCount <= iStatus) {
+        const g = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${doc}:batchUpdate`, {
+          method: 'POST', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ requests: [{ appendDimension: { sheetId: sh.sheetId, dimension: 'COLUMNS', length: iStatus + 1 - sh.gridProperties.columnCount } }] }),
+        });
+        if (!g.ok) throw new Error(`Sheets ${g.status} ao ampliar a grade da aba "${aba}"`);
+      }
       const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${doc}/values/${encodeURIComponent(celula)}?valueInputOption=RAW`, {
         method: 'PUT', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
         body: JSON.stringify({ values: [['Status']] }),
