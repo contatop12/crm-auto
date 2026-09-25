@@ -93,8 +93,22 @@ async function main() {
   })).json();
   const linhas = (lidas.values ?? []).map((l) => l.map(String));
   const cab = linhas[0] ?? [];
-  const iStatus = cab.findIndex((h) => normalizar(h) === 'status');
-  if (iStatus < 0) throw new Error(`a aba "${aba}" nao tem a coluna Status`);
+  let iStatus = cab.findIndex((h) => normalizar(h) === 'status');
+  if (iStatus < 0 && process.argv.includes('--criar-status')) {
+    // a coluna nasce no fim do cabecalho, para nao deslocar o que o time ja usa
+    iStatus = cab.length;
+    const celula = `'${aba.replace(/'/g, "''")}'!${letra(iStatus)}1`;
+    if (gravar) {
+      const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${doc}/values/${encodeURIComponent(celula)}?valueInputOption=RAW`, {
+        method: 'PUT', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ values: [['Status']] }),
+      });
+      if (!r.ok) throw new Error(`Sheets ${r.status} ao criar a coluna Status`);
+    }
+    console.log(`coluna Status criada em ${celula}${gravar ? '' : ' (simulado)'}`);
+    cab.push('Status');
+  }
+  if (iStatus < 0) throw new Error(`a aba "${aba}" nao tem a coluna Status (use --criar-status)`);
   const colFone = cab.map((h, i) => (colunaTelefone(h) ? i : -1)).filter((i) => i >= 0);
   const corpo = linhas.slice(1);
 
