@@ -2,6 +2,7 @@ import { montarCanal } from './canal';
 import { detectOrigin, detectPlatform } from './platform';
 import { phoneKey } from './phone';
 import { nomeParaExibir, nomeUtil } from './nomeLead';
+import { origemDoAnuncio } from './origemAnuncio';
 
 /**
  * O registro que vai para as planilhas do cliente.
@@ -23,6 +24,7 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'hora', rotulo: 'Hora do clique' },
   { campo: 'canal', rotulo: 'Canal do anúncio' },
   { campo: 'plataforma', rotulo: 'Plataforma (google / meta)' },
+  { campo: 'origem_anuncio', rotulo: 'Origem do anúncio (google / facebook / instagram / gpt / outro) — coluna ORIGEM' },
   { campo: 'campanha', rotulo: 'Campanha' },
   { campo: 'pagina', rotulo: 'Página de entrada, sem domínio' },
   { campo: 'pagina_url', rotulo: 'Página de entrada com domínio, sem parâmetros (coluna URL)' },
@@ -266,6 +268,10 @@ export function montarRegistro(
       ? CANAL_DIRETO_SITE
       : montarCanal({ origem, plataforma, quizVersion: null }),
     plataforma,
+    origem_anuncio: origemDoAnuncio({
+      utm_source: lead?.utm_source, gclid: lead?.gclid, gbraid: lead?.gbraid, wbraid: lead?.wbraid,
+      fbc: lead?.fbc, referrer: lead?.referrer,
+    }),
     // O nome da campanha, quando o Google devolveu (a `utm_campaign` chega com
     // o ID quando a macro {campaignname} nao esta' preenchida no anuncio). Sem
     // o nome fica o ID: dado nenhum seria pior.
@@ -363,8 +369,9 @@ const COLUNAS_LEADS: Record<string, string> = {
   'pagina': 'pagina',
   'campanha': 'campanha',
   'protocolo': 'protocolo',
-  // UTMs na Geral: de onde veio o lead, com o nome da campanha em vez do ID
-  'origem': 'utm_source',
+  // ORIGEM e' a plataforma normalizada (google, facebook, instagram, gpt...):
+  // e' por ela que o time filtra. A utm_source crua vai na coluna de mesmo nome.
+  'origem': 'origem_anuncio',
   'utm_source': 'utm_source',
   'midia': 'utm_medium',
   'utm_medium': 'utm_medium',

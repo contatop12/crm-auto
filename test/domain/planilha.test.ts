@@ -420,7 +420,8 @@ describe('UTMs na aba Geral', () => {
   });
 
   test('cada coluna da Geral aponta para a sua UTM', () => {
-    expect(campoDaColunaLeads('ORIGEM')).toBe('utm_source');
+    expect(campoDaColunaLeads('ORIGEM')).toBe('origem_anuncio');
+    expect(campoDaColunaLeads('utm_source')).toBe('utm_source');
     expect(campoDaColunaLeads('MIDIA')).toBe('utm_medium');
     expect(campoDaColunaLeads('CAMPANHA')).toBe('campanha');
     expect(campoDaColunaLeads('TERMO')).toBe('utm_term');

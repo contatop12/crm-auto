@@ -7,6 +7,7 @@ import { admin } from './routes/admin';
 import { consumir } from './queue/consumer';
 import { expurgarPayloadsAntigos } from './db/observability';
 import { vigiarWhatsapp } from './pipelines/vigiaWhatsapp';
+import { preencherOrigemNasGerais } from './pipelines/origemPlanilha';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -57,6 +58,12 @@ export default {
     ctx.waitUntil(
       vigiarWhatsapp(env).catch((e) =>
         console.log(JSON.stringify({ acao: 'vigia_whatsapp_erro', erro: String((e as Error).message).slice(0, 300) })),
+      ),
+    );
+    // e a ORIGEM das linhas que o n8n/Make escreveram sem ela
+    ctx.waitUntil(
+      preencherOrigemNasGerais(env).catch((e) =>
+        console.log(JSON.stringify({ acao: 'origem_planilha_erro', erro: String((e as Error).message).slice(0, 300) })),
       ),
     );
   },
