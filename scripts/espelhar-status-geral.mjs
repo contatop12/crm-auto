@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Espelha a etapa de cada card do Kanban na coluna Status da aba Geral.
+ * Espelha a etapa de cada card do Kanban na aba Geral: coluna ETAPA quando a aba
+ * tem uma (o Status da Taina e' do time), senao a Status.
  *
  * Mesma regra do Worker (src/pipelines/etapaPlanilha.ts), rodando da maquina
  * com as credenciais do .env — para os cards que ja' estao no Kanban antes de o
@@ -9,6 +10,7 @@
  * Uso:
  *   node scripts/espelhar-status-geral.mjs --conta 2 --board 7 --doc 1KMnw... --aba Geral
  *   node scripts/espelhar-status-geral.mjs ... --gravar        (sem isto so' mostra)
+ *   node scripts/espelhar-status-geral.mjs ... --criar-etapa   (cria a coluna ETAPA no fim)
  *
  * .env: CHATWOOT_DOMAIN, CHATWOOT_TOKEN_ACCESS, CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN
  */
@@ -93,8 +95,12 @@ async function main() {
   })).json();
   const linhas = (lidas.values ?? []).map((l) => l.map(String));
   const cab = linhas[0] ?? [];
-  let iStatus = cab.findIndex((h) => normalizar(h) === 'status');
-  if (iStatus < 0 && process.argv.includes('--criar-status')) {
+  // mesma regra do colunaDaEtapa do Worker: ETAPA quando ha', senao Status
+  const iEtapa = cab.findIndex((h) => normalizar(h) === 'etapa');
+  let iStatus = iEtapa >= 0 ? iEtapa : cab.findIndex((h) => normalizar(h) === 'status');
+  const criar = process.argv.includes('--criar-etapa') ? (iEtapa < 0 ? 'ETAPA' : null)
+    : process.argv.includes('--criar-status') ? (iStatus < 0 ? 'Status' : null) : null;
+  if (criar) {
     // a coluna nasce no fim do cabecalho, para nao deslocar o que o time ja usa
     iStatus = cab.length;
     const celula = `'${aba.replace(/'/g, "''")}'!${letra(iStatus)}1`;
@@ -113,14 +119,14 @@ async function main() {
       }
       const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${doc}/values/${encodeURIComponent(celula)}?valueInputOption=RAW`, {
         method: 'PUT', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ values: [['Status']] }),
+        body: JSON.stringify({ values: [[criar]] }),
       });
-      if (!r.ok) throw new Error(`Sheets ${r.status} ao criar a coluna Status`);
+      if (!r.ok) throw new Error(`Sheets ${r.status} ao criar a coluna ${criar}`);
     }
-    console.log(`coluna Status criada em ${celula}${gravar ? '' : ' (simulado)'}`);
-    cab.push('Status');
+    console.log(`coluna ${criar} criada em ${celula}${gravar ? '' : ' (simulado)'}`);
+    cab.push(criar);
   }
-  if (iStatus < 0) throw new Error(`a aba "${aba}" nao tem a coluna Status (use --criar-status)`);
+  if (iStatus < 0) throw new Error(`a aba "${aba}" nao tem a coluna ETAPA nem Status (use --criar-etapa ou --criar-status)`);
   const colFone = cab.map((h, i) => (colunaTelefone(h) ? i : -1)).filter((i) => i >= 0);
   const corpo = linhas.slice(1);
 

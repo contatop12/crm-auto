@@ -2,14 +2,15 @@ import type { Env } from '../env';
 import { SheetsClient } from '../clients/sheets';
 import { ChatwootClient } from '../clients/chatwoot';
 import { parseKanbanTask, type TaskDoKanban } from '../domain/kanbanTask';
-import { linhaDoTelefone, colunaStatus, indiceParaColuna } from '../domain/planilha';
+import { linhaDoTelefone, colunaDaEtapa, indiceParaColuna } from '../domain/planilha';
 
 /**
- * A etapa do card no Kanban, espelhada na coluna Status da aba Geral.
+ * A etapa do card no Kanban, espelhada na aba Geral: na coluna ETAPA quando a
+ * aba tem uma (o Status da Taina e' do time), senao na Status.
  *
  * O time da Vita abre a planilha, nao o Chatwoot: sem isto a Geral diz que o
  * lead chegou e mais nada. A linha e' achada pelo telefone (a chave que a
- * planilha e o WhatsApp tem em comum) e so' a coluna Status muda.
+ * planilha e o WhatsApp tem em comum) e so' essa coluna muda.
  *
  * Quem chama e' a regra "[PAINEL] Etapa do card -> planilha" do Chatwoot, a
  * cada atualizacao de card do board do funil (`?evento=etapa`). As regras de
@@ -22,7 +23,7 @@ import { linhaDoTelefone, colunaStatus, indiceParaColuna } from '../domain/plani
 export interface Resultado {
   status: 'ok' | 'ignorado' | 'erro';
   motivo: string;
-  /** false = erro de cadastro (aba sem coluna Status): retentar repete o erro. */
+  /** false = erro de cadastro (aba sem coluna ETAPA nem Status): retentar repete o erro. */
   retentar?: boolean;
 }
 
@@ -77,7 +78,7 @@ export async function espelharEtapaNaGeral(env: Env, tenantId: number, payload: 
   await sheets.gravarCelulas(destino.doc, destino.aba, [{ celula: alvo.celula, valor: etapa }]);
   return {
     status: 'ok',
-    motivo: `card ${t.taskId}: linha ${alvo.linha} da "${destino.aba}" · Status "${alvo.antes}" -> "${etapa}"`,
+    motivo: `card ${t.taskId}: linha ${alvo.linha} da "${destino.aba}" · ${alvo.coluna} "${alvo.antes}" -> "${etapa}"`,
   };
 }
 
@@ -205,7 +206,7 @@ async function telefoneDoCard(env: Env, tenantId: number, acc: number | null, t:
 }
 
 /**
- * O card do Organico so' preenche Status VAZIO. "Orgânico" e' a unica etapa
+ * O card do Organico so' preenche a celula VAZIA. "Orgânico" e' a unica etapa
  * daquele board e diz pouco; o "Agendou" que o time escreveu a mao diz mais.
  * No funil o CRM e' a fonte: a etapa sobrescreve o que estiver la'.
  */
@@ -220,11 +221,11 @@ function celulaDoStatus(
   telefone: string,
   etapa: string,
   soVazia = false,
-): { celula: string; linha: number; antes: string } | { resultado: Resultado } {
+): { celula: string; linha: number; antes: string; coluna: string } | { resultado: Resultado } {
   const cab = linhas[0] ?? [];
-  const iStatus = colunaStatus(cab);
-  if (iStatus < 0) {
-    return { resultado: { status: 'erro', motivo: `a aba "${aba}" nao tem a coluna Status`, retentar: false } };
+  const iCol = colunaDaEtapa(cab);
+  if (iCol < 0) {
+    return { resultado: { status: 'erro', motivo: `a aba "${aba}" nao tem a coluna ETAPA nem Status`, retentar: false } };
   }
   const corpo = linhas.slice(1);
   const i = linhaDoTelefone(cab, corpo, telefone);
@@ -232,12 +233,12 @@ function celulaDoStatus(
     return { resultado: { status: 'ignorado', motivo: `telefone ${telefone} nao esta na aba "${aba}"` } };
   }
   const linha = i + 2;
-  const antes = String(corpo[i]?.[iStatus] ?? '').trim();
+  const antes = String(corpo[i]?.[iCol] ?? '').trim();
   if (antes === etapa) {
     return { resultado: { status: 'ignorado', motivo: `linha ${linha} da "${aba}" ja esta "${etapa}"` } };
   }
   if (soVazia && antes) {
-    return { resultado: { status: 'ignorado', motivo: `linha ${linha} da "${aba}" ja tem Status "${antes}" (card do Organico nao sobrescreve)` } };
+    return { resultado: { status: 'ignorado', motivo: `linha ${linha} da "${aba}" ja tem ${cab[iCol]} "${antes}" (card do Organico nao sobrescreve)` } };
   }
-  return { celula: `${indiceParaColuna(iStatus)}${linha}`, linha, antes };
+  return { celula: `${indiceParaColuna(iCol)}${linha}`, linha, antes, coluna: cab[iCol] ?? '' };
 }

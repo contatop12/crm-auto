@@ -540,7 +540,13 @@ export function linhaDoTelefone(cabecalho: string[], corpo: string[][], telefone
   return corpo.findIndex((l) => colunas.some((i) => phoneKey(l[i] ?? '') === alvo));
 }
 
-/** Indice da coluna "Status" (sem caixa nem acento), ou -1 se a aba nao tem. */
-export function colunaStatus(cabecalho: string[]): number {
-  return cabecalho.findIndex((h) => normalizar(h) === 'status');
+/**
+ * Indice da coluna que recebe a etapa do card (sem caixa nem acento), ou -1.
+ *
+ * "ETAPA" quando a aba tem: na Taina o Status e' do time, preenchido a mao, e
+ * a etapa do CRM ganhou coluna propria. Sem ela, a "Status" de sempre.
+ */
+export function colunaDaEtapa(cabecalho: string[]): number {
+  const etapa = cabecalho.findIndex((h) => normalizar(h) === 'etapa');
+  return etapa >= 0 ? etapa : cabecalho.findIndex((h) => normalizar(h) === 'status');
 }

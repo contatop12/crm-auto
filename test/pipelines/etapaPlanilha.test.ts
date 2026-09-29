@@ -161,6 +161,16 @@ describe('espelharEtapaNaGeral', () => {
     expect(gravadas).toHaveLength(0);
   });
 
+  test('Geral com coluna ETAPA: a etapa vai nela e o Status do time fica como esta', async () => {
+    // Taina, 29/09: o Status e' preenchido a mao
+    const { env } = cenario();
+    geral = [[...CAB, 'ORIGEM', 'ETAPA'], [...MARCIA.slice(0, 8), 'Qualificado', 'google', '']];
+    const r = await espelharEtapaNaGeral(env, 3, card());
+    expect(r.status).toBe('ok');
+    expect(r.motivo).toContain('ETAPA "" -> "Agendamento Realizado"');
+    expect(gravadas).toEqual([{ range: "'Geral'!K2", valor: 'Agendamento Realizado' }]);
+  });
+
   test('Geral sem coluna Status e erro de cadastro, sem retentativa', async () => {
     const { env } = cenario();
     geral = [CAB.slice(0, 8), MARCIA.slice(0, 8)];

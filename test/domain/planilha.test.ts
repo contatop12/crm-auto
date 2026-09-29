@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral, linhaDoTelefone, colunaStatus } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral, linhaDoTelefone, colunaDaEtapa } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -391,9 +391,15 @@ describe('etapa do card na coluna Status da Geral', () => {
   });
 
   test('coluna Status pelo nome, sem caixa nem acento', () => {
-    expect(colunaStatus(cab)).toBe(8);
-    expect(colunaStatus(['NOME', 'STATUS'])).toBe(1);
-    expect(colunaStatus(['NOME', 'Situação'])).toBe(-1);
+    expect(colunaDaEtapa(cab)).toBe(8);
+    expect(colunaDaEtapa(['NOME', 'STATUS'])).toBe(1);
+    expect(colunaDaEtapa(['NOME', 'Situação'])).toBe(-1);
+  });
+
+  test('coluna ETAPA vence a Status: a Status e do time', () => {
+    // Taina: Status e' preenchido a mao, a etapa do CRM vai para a ETAPA
+    expect(colunaDaEtapa(['NOME', 'Status', 'ORIGEM', 'ETAPA'])).toBe(3);
+    expect(colunaDaEtapa(['Etapa', 'Status'])).toBe(0);
   });
 });
 
