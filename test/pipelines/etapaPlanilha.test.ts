@@ -52,10 +52,13 @@ function card(over: Record<string, unknown> = {}) {
 
 let geral: string[][];
 let gravadas: Array<{ range: string; valor: string }>;
+/** A aba como fica depois da proxima leitura inteira: o script da planilha reordenando. */
+let depoisDaLeitura: string[][] | null;
 
 beforeEach(() => {
   geral = [CAB, MARCIA, FABIANA];
   gravadas = [];
+  depoisDaLeitura = null;
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const u = decodeURIComponent(String(url));
     if (/oauth2\.googleapis\.com/.test(u)) return Response.json({ access_token: 'tok' });
@@ -66,7 +69,13 @@ beforeEach(() => {
       return Response.json({ totalUpdatedCells: b.data.length });
     }
     const aba = u.match(/\/values\/'([^']+)'!/)?.[1];
-    if (aba === 'Geral') return Response.json({ values: geral });
+    const umaLinha = u.match(/!A(\d+):[A-Z]+\d+/);
+    if (aba === 'Geral' && umaLinha) return Response.json({ values: [geral[Number(umaLinha[1]) - 1] ?? []] });
+    if (aba === 'Geral') {
+      const r = Response.json({ values: geral });
+      if (depoisDaLeitura) [geral, depoisDaLeitura] = [depoisDaLeitura, null];
+      return r;
+    }
     return Response.json({ error: { message: 'aba nao existe' } }, { status: 400 });
   });
 });
@@ -169,6 +178,16 @@ describe('espelharEtapaNaGeral', () => {
     expect(r.status).toBe('ok');
     expect(r.motivo).toContain('ETAPA "" -> "Agendamento Realizado"');
     expect(gravadas).toEqual([{ range: "'Geral'!K2", valor: 'Agendamento Realizado' }]);
+  });
+
+  test('aba reordenada entre a leitura e a gravacao: grava na linha nova do lead', async () => {
+    // Vita, 30/09: o script da planilha ordena a Geral a cada 5 min. A posicao
+    // lida um instante antes pode ser, na hora de gravar, a de outro lead.
+    const { env } = cenario();
+    depoisDaLeitura = [CAB, FABIANA, MARCIA];
+    const r = await espelharEtapaNaGeral(env, 3, card());
+    expect(r.status).toBe('ok');
+    expect(gravadas).toEqual([{ range: "'Geral'!I3", valor: 'Agendamento Realizado' }]);
   });
 
   test('Geral sem coluna Status e erro de cadastro, sem retentativa', async () => {

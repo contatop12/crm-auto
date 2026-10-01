@@ -34,9 +34,12 @@ function cenario() {
 }
 
 let abas: Record<string, string[][]>;
+/** A Geral como fica depois da proxima leitura inteira: o script da planilha reordenando. */
+let geralDepoisDaLeitura: string[][] | null;
 
 beforeEach(() => {
   abas = { Geral: [CAB], 'Google Mensagem': [CAB], 'Meta Mensagem': [CAB] };
+  geralDepoisDaLeitura = null;
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const u = decodeURIComponent(String(url));
     if (/oauth2\.googleapis\.com/.test(u)) return Response.json({ access_token: 'tok' });
@@ -53,7 +56,11 @@ beforeEach(() => {
         abas[aba]![n - 1] = (JSON.parse(String(init.body)) as { values: string[][] }).values[0]!;
         return Response.json({});
       }
-      return Response.json({ values: abas[aba] });
+      const umaLinha = u.match(/!A(\d+):[A-Z]+\d+/);
+      if (umaLinha) return Response.json({ values: [abas[aba]![Number(umaLinha[1]) - 1] ?? []] });
+      const r = Response.json({ values: abas[aba] });
+      if (aba === 'Geral' && /!A:ZZ/.test(u) && geralDepoisDaLeitura) [abas.Geral, geralDepoisDaLeitura] = [geralDepoisDaLeitura, null];
+      return r;
     }
     return Response.json({ ok: true });
   });
@@ -115,6 +122,25 @@ describe('linha que ja esta na Geral', () => {
     expect(linha[3]).toBe('WD - Search');
     expect(linha[4]).toBe('aluguel de andaime');
     expect(linha[7]).toBe('em atendimento');
+  });
+
+  test('aba reordenada entre a leitura e a gravacao: completa a linha do lead, nao a de outro', async () => {
+    // Vita, 30/09: o script da planilha ordena a Geral a cada 5 min. Gravar na
+    // posicao lida um instante antes copiou um lead por cima de outros dois.
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET sheets_geral_canais = NULL WHERE tenant_id = 5`);
+    exec(`UPDATE leads SET utm_campaign_nome = 'WD - Search' WHERE protocol = 'TAINA-GOOGLE'`);
+    const douglas = ['22/09/2026', '09:00:00', '', '', '', 'Douglas', '5511996201147', ''];
+    const vilma = ['22/09/2026', '11:42:04', 'Google', '', '', 'Vilma', '5519997479153', 'Novo Lead'];
+    abas.Geral = [CAB_UTM, douglas, vilma];
+    geralDepoisDaLeitura = [CAB_UTM, vilma, douglas];
+
+    await espelharNaPlanilha(env, 5, { tipo: 'conversao', protocolo: 'TAINA-GOOGLE', ensaio: false, conversao: conversa });
+
+    expect(abas.Geral).toHaveLength(3);
+    expect(abas.Geral![1]).toEqual(vilma);
+    expect(abas.Geral![2]![5]).toBe('Douglas');
+    expect(abas.Geral![2]![3]).toBe('WD - Search');
   });
 
   test('nao reescreve o que ja estava preenchido', async () => {

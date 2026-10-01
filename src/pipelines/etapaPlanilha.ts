@@ -71,15 +71,25 @@ export async function espelharEtapaNaGeral(env: Env, tenantId: number, payload: 
   if (!telefone) return { status: 'ignorado', motivo: `card ${t.taskId}: sem telefone para achar a linha` };
 
   const sheets = new SheetsClient(env);
-  const linhas = await sheets.tudo(destino.doc, destino.aba);
-  const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, soVazia(destino, t));
-  if ('resultado' in alvo) return alvo.resultado;
+  // A Geral e' reordenada pelo script da planilha a cada 5 min: a linha achada
+  // na leitura inteira e' relida e conferida pelo telefone antes de gravar,
+  // senao o Status cairia no lead que tomou aquele lugar.
+  for (let tentativa = 0; tentativa < 3; tentativa++) {
+    const linhas = await sheets.tudo(destino.doc, destino.aba);
+    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, soVazia(destino, t));
+    if ('resultado' in alvo) return alvo.resultado;
 
-  await sheets.gravarCelulas(destino.doc, destino.aba, [{ celula: alvo.celula, valor: etapa }]);
-  return {
-    status: 'ok',
-    motivo: `card ${t.taskId}: linha ${alvo.linha} da "${destino.aba}" · ${alvo.coluna} "${alvo.antes}" -> "${etapa}"`,
-  };
+    const cab = linhas[0] ?? [];
+    const naHora = await sheets.linha(destino.doc, destino.aba, alvo.linha, indiceParaColuna(cab.length - 1));
+    if (linhaDoTelefone(cab, [naHora], telefone) !== 0) continue;
+
+    await sheets.gravarCelulas(destino.doc, destino.aba, [{ celula: alvo.celula, valor: etapa }]);
+    return {
+      status: 'ok',
+      motivo: `card ${t.taskId}: linha ${alvo.linha} da "${destino.aba}" · ${alvo.coluna} "${alvo.antes}" -> "${etapa}"`,
+    };
+  }
+  return { status: 'erro', motivo: `card ${t.taskId}: a linha do lead mudou de lugar a cada leitura da "${destino.aba}"` };
 }
 
 /**
@@ -110,10 +120,9 @@ export async function sincronizarEtapasNaGeral(
     }
   }
 
-  const sheets = new SheetsClient(env);
-  const linhas = await sheets.tudo(destino.doc, destino.aba);
   const celulas: Array<{ celula: string; valor: string }> = [];
   const detalhes: string[] = [];
+  const pendentes: Array<{ t: TaskDoKanban; etapa: string; telefone: string }> = [];
 
   for (const t of cards) {
     const etapa = (await nomeDaEtapa(env, tenantId, t)) || (nomeDoStep.get(t.boardStepId) ?? '').trim();
@@ -122,6 +131,15 @@ export async function sincronizarEtapasNaGeral(
       detalhes.push(`card ${t.taskId} (${t.nome || t.titulo}): ${etapa ? 'sem telefone' : 'sem etapa'}`);
       continue;
     }
+    pendentes.push({ t, etapa, telefone });
+  }
+
+  // A aba e' lida so' agora, depois das chamadas ao Chatwoot (que demoram): o
+  // script da planilha a reordena a cada 5 min, e as posicoes lidas antes do
+  // laco podiam ja' ser de outros leads na hora de gravar.
+  const sheets = new SheetsClient(env);
+  const linhas = await sheets.tudo(destino.doc, destino.aba);
+  for (const { t, etapa, telefone } of pendentes) {
     const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, soVazia(destino, t));
     if ('resultado' in alvo) {
       if (alvo.resultado.status === 'erro') throw new Error(alvo.resultado.motivo);

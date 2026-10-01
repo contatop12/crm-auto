@@ -196,18 +196,38 @@ async function acrescentarLead(
    *
    * So' o que esta' em branco: o que o time escreveu na mao fica.
    */
-  const n = telefone
-    ? corpo.findIndex((l) => jaTemTelefone([l[iFone] ?? '', l[iLink] ?? ''], telefone))
-    : -1;
-  if (n >= 0) {
-    const atual = corpo[n]!;
-    const completa = cab.map((_, i) => (String(atual[i] ?? '').trim() ? String(atual[i]) : (linha[i] ?? '')));
-    if (completa.every((v, i) => v === String(atual[i] ?? ''))) return;
-    await sheets.atualizar(doc, aba, n + 2, indiceParaColuna(cab.length - 1), completa);
+  const doLead = (l: string[]) => jaTemTelefone([l[iFone] ?? '', l[iLink] ?? ''], telefone);
+  const completar = (atual: string[]) =>
+    cab.map((_, i) => (String(atual[i] ?? '').trim() ? String(atual[i]) : (linha[i] ?? '')));
+  const igual = (a: string[], atual: string[]) => a.every((v, i) => v === String(atual[i] ?? ''));
+
+  let n = telefone ? corpo.findIndex(doLead) : -1;
+  if (n < 0) {
+    await sheets.acrescentar(doc, aba, linha);
     return;
   }
+  if (igual(completar(corpo[n]!), corpo[n]!)) return;
 
-  await sheets.acrescentar(doc, aba, linha);
+  /**
+   * A posicao lida acima pode nao ser mais a do lead: o script da planilha
+   * reordena a Geral a cada 5 min. Gravar a linha inteira nela copiava este
+   * lead por cima de outro (Vita, 30/09: um lead em 3 linhas, dois sumidos).
+   * Por isso a linha e' relida e o telefone conferido antes de gravar; se mudou
+   * de lugar, acha de novo.
+   */
+  const ultima = indiceParaColuna(cab.length - 1);
+  for (let tentativa = 0; tentativa < 3; tentativa++) {
+    const atual = await sheets.linha(doc, aba, n + 2, ultima);
+    if (doLead(atual)) {
+      const completa = completar(atual);
+      if (!igual(completa, atual)) await sheets.atualizar(doc, aba, n + 2, ultima, completa);
+      return;
+    }
+    n = (await sheets.tudo(doc, aba)).slice(1).findIndex(doLead);
+    // apagado da aba neste meio tempo: foi o time, nao recria
+    if (n < 0) return;
+  }
+  throw new Error(`o lead mudou de linha a cada leitura da "${aba}"; nada gravado`);
 }
 
 /**
