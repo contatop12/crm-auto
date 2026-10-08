@@ -28,6 +28,11 @@ export interface MetaLead {
   conjunto: string | null;
   anuncio: string | null;
   formId: string | null;
+  /**
+   * A rede onde o formulario foi preenchido. `null` quando nao veio ou nao e'
+   * nenhuma das duas (Audience Network, Messenger): o lead continua da Meta.
+   */
+  rede: 'instagram' | 'facebook' | null;
 }
 
 type Rec = Record<string, unknown>;
@@ -110,7 +115,21 @@ export function parseMetaLead(raw: unknown): MetaLead | null {
     conjunto: primeiro(p, ['adset_name', 'adsetName', 'conjunto', 'adset']),
     anuncio: primeiro(p, ['ad_name', 'adName', 'anuncio', 'ad']),
     formId: primeiro(p, ['form_id', 'formId', 'formulario_id', 'form']),
+    rede: redeDoFormulario(primeiro(p, ['platform', 'plataforma'])),
   };
+}
+
+/**
+ * Instagram ou Facebook, pelo `platform` do Make (`ig`/`fb`).
+ *
+ * Sem isto todo lead de formulario era gravado como `meta` e a etiqueta caia
+ * no padrao `facebook` — os do Instagram inclusive (Persianas, 08/10/2026).
+ */
+function redeDoFormulario(v: string | null): MetaLead['rede'] {
+  const s = (v ?? '').trim().toLowerCase();
+  if (s === 'ig' || s === 'instagram') return 'instagram';
+  if (s === 'fb' || s === 'facebook') return 'facebook';
+  return null;
 }
 
 /**

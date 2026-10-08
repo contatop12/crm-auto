@@ -137,4 +137,20 @@ describe('parseMetaLead — formato do Make', () => {
     const { data: _data, ...semData } = make;
     expect(parseMetaLead(semData)?.telefone).toBe('+5511912345678');
   });
+
+  // Persianas, 08/10/2026: todo lead de formulario do Meta saia com a etiqueta
+  // `facebook`, inclusive os do Instagram. O Make manda a rede em `platform`.
+  test('le a rede do anuncio em `platform`', () => {
+    expect(parseMetaLead({ ...make, platform: 'ig' })?.rede).toBe('instagram');
+    expect(parseMetaLead({ ...make, platform: 'fb' })?.rede).toBe('facebook');
+    expect(parseMetaLead({ ...make, platform: 'Instagram' })?.rede).toBe('instagram');
+  });
+
+  test('rede desconhecida ou ausente fica sem rede, e o lead segue da Meta', () => {
+    // Audience Network e Messenger nao sao Instagram nem Facebook: chutar uma
+    // das duas seria repetir o erro que isto corrige
+    expect(parseMetaLead({ ...make, platform: 'an' })?.rede).toBeNull();
+    const { platform: _p, ...semRede } = make;
+    expect(parseMetaLead(semRede)?.rede).toBeNull();
+  });
 });

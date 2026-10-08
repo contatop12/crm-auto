@@ -48,12 +48,17 @@ export async function registrarLeadMeta(
 
   // `COALESCE` porque a automação pode reenviar o mesmo lead: o reenvio
   // atualiza o que veio preenchido e não apaga o que já estava.
+  //
+  // A rede vai em `utm_source`: é dela que saem a etiqueta (instagram/facebook)
+  // e a ORIGEM. Sem rede conhecida fica `meta`, que ainda diz "veio da Meta".
+  // O reenvio com a rede corrige um `meta` antigo, nunca o contrário.
   await env.DB.prepare(
     `INSERT INTO leads (tenant_id, protocol, nome, email, phone_raw, phone_e164, phone_key,
                         utm_source, utm_medium, utm_campaign, utm_content, utm_term,
                         origem, evento)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'meta', 'lead_form', ?, ?, ?, 'formulario', 'meta_lead_form')
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lead_form', ?, ?, ?, 'formulario', 'meta_lead_form')
      ON CONFLICT (tenant_id, protocol) DO UPDATE SET
+       utm_source   = CASE WHEN leads.utm_source = 'meta' THEN excluded.utm_source ELSE leads.utm_source END,
        nome         = COALESCE(excluded.nome, leads.nome),
        email        = COALESCE(excluded.email, leads.email),
        phone_e164   = COALESCE(excluded.phone_e164, leads.phone_e164),
@@ -65,7 +70,7 @@ export async function registrarLeadMeta(
   )
     .bind(
       tenantId, protocolo, lead.nome, lead.email, lead.telefone, lead.telefone, lead.phoneKey,
-      lead.campanha, lead.anuncio, lead.conjunto,
+      lead.rede ?? 'meta', lead.campanha, lead.anuncio, lead.conjunto,
     )
     .run();
 
