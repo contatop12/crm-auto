@@ -6,6 +6,8 @@ import { detectOrigin, detectPlatform } from '../domain/platform';
 import { normFone } from '../domain/phone';
 import { PulseboardClient, ErroPulseboard, type ResultadoAviso } from '../clients/pulseboard';
 import { nomeParaExibir, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLead';
+import { ChatwootClient } from '../clients/chatwoot';
+import { utmsDoCard } from '../domain/padroes';
 
 /**
  * Quantas entregas do webhook do card esperam o protocolo antes de avisar sem
@@ -134,6 +136,12 @@ export async function avisarLeadNoGrupo(
     }
   }
   const chaveDedupe = protocolo || `task:${t.taskId}`;
+
+  // Antes de qualquer saida por duplicata: o card precisa do protocolo mesmo
+  // quando o grupo ja' soube do lead.
+  if (!t.protocolo && protocolo && cfg.cw_account_id) {
+    await completarCard(env, cfg.cw_account_id, t.taskId, t.conversaDisplay, protocolo);
+  }
 
   /**
    * O MESMO card avisa uma vez, mesmo trocando de nome no meio.
@@ -299,6 +307,46 @@ export async function avisarLeadNoGrupo(
 
   await marcar('enviado');
   return { status: 'ok', motivo: `grupo avisado: ${nome} · ${canal}` };
+}
+
+/**
+ * Grava no card o protocolo e as UTMs que a atribuicao deixou na conversa.
+ *
+ * A atribuicao grava no card quando o webhook da mensagem ja' traz o
+ * `kanban_task`. Quando a conversa e' atribuida no mesmo segundo em que nasce,
+ * o card ainda nao existe (Persianas, conversa 910: card criado 0,5 s depois)
+ * e ficava sem nada — eram 130 cards assim nos cinco funis em 08/10/2026. Aqui
+ * o card ja' esta' no funil, entao existe.
+ *
+ * Copia da conversa porque e' la' que esta' o nome da campanha ja' resolvido.
+ * Falhar aqui nao pode impedir o aviso no grupo.
+ */
+async function completarCard(
+  env: Env,
+  acc: number,
+  taskId: number,
+  conversaDisplay: number,
+  protocolo: string,
+): Promise<void> {
+  try {
+    const cw = ChatwootClient.fromEnv(env);
+    const conversa = conversaDisplay ? await cw.conversa(acc, conversaDisplay) : null;
+    const ca = (conversa?.custom_attributes ?? {}) as Record<string, unknown>;
+    const s = (v: unknown) => (typeof v === 'string' ? v : null);
+    await cw.mesclarAtributosDoCard(acc, taskId, utmsDoCard({
+      protocolo: s(ca.protocolo) ?? protocolo,
+      gclid: s(ca.gclid),
+      utmSource: s(ca.utm_source),
+      utmMedium: s(ca.utm_medium),
+      utmCampaign: s(ca.utm_campaign),
+      utmId: s(ca.utm_id),
+      utmTerm: s(ca.utm_term),
+      utmContent: s(ca.utm_content),
+    }));
+    console.log(JSON.stringify({ acao: 'card_completado', task: taskId, protocolo }));
+  } catch (e) {
+    console.log(JSON.stringify({ acao: 'completar_card_falhou', task: taskId, erro: (e as Error).message.slice(0, 200) }));
+  }
 }
 
 /** Protocolo que a atribuicao ja' gravou para a conversa (ou o card) do lead. */

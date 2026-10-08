@@ -388,6 +388,103 @@ describe('card sem protocolo ainda (Vita, setembro: 8 de 10 avisos sairam "Diret
   });
 });
 
+describe('card que entra no funil sem os atributos do lead', () => {
+  // Persianas, 07/10/2026 (conversa 910): a atribuicao rodou no mesmo segundo
+  // em que a conversa nasceu, e o card so' foi criado meio segundo depois. O
+  // webhook da mensagem veio sem `kanban_task`, a atribuicao nao teve card onde
+  // gravar, e o card ficou sem protocolo e sem UTM. Em 08/10 eram 130 cards
+  // assim nos cinco funis.
+  let chamadas: Array<{ url: string; metodo: string; corpo: Record<string, unknown> | null }>;
+
+  function stub(atributosDaConversa: Record<string, string>) {
+    chamadas = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const u = String(url);
+      const metodo = init.method ?? 'GET';
+      const corpo = init.body ? JSON.parse(String(init.body)) : null;
+      chamadas.push({ url: u, metodo, corpo });
+      const json = (o: unknown) => new Response(JSON.stringify(o), { status: 200 });
+      if (u.includes('/conversations/28/messages')) return json({ payload: [] });
+      if (u.includes('/conversations/28')) return json({ id: 28, custom_attributes: atributosDaConversa });
+      if (u.includes('/kanban/tasks/719')) return json({ id: 719, board_step_id: 50, custom_attributes: {} });
+      return new Response('ok', { status: 200 });
+    });
+  }
+
+  function comChatwoot() {
+    const c = cenario();
+    (c.env as unknown as Record<string, string>).CHATWOOT_API_TOKEN = 't';
+    c.exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol) VALUES (1, 28, 'PERSI-MUYIE0GC6DMJ')`);
+    return c;
+  }
+
+  const gravacoesNoCard = () =>
+    chamadas.filter((c) => c.metodo === 'PUT' && c.url.endsWith('/kanban/tasks/719'));
+
+  test('copia protocolo e UTM da conversa para o card', async () => {
+    stub({ protocolo: 'PERSI-MUYIE0GC6DMJ', gclid: 'Cj0KC', utm_source: 'google', utm_campaign: '[Search] Rolo', funil: 'Lead' });
+    const { env } = comChatwoot();
+
+    await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+
+    const [put] = gravacoesNoCard();
+    expect(put).toBeDefined();
+    const attrs = (put!.corpo!.task as { custom_attributes: Record<string, string> }).custom_attributes;
+    expect(attrs).toMatchObject({
+      protocolo: 'PERSI-MUYIE0GC6DMJ', gclid: 'Cj0KC', utm_source: 'google', utm_campaign: '[Search] Rolo',
+    });
+    // `funil` e' da conversa (o atuador da promocao), nao do card
+    expect(attrs).not.toHaveProperty('funil');
+  });
+
+  test('conversa sem os atributos ainda leva o protocolo achado no banco', async () => {
+    stub({});
+    const { env } = comChatwoot();
+
+    await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+
+    const attrs = (gravacoesNoCard()[0]!.corpo!.task as { custom_attributes: Record<string, string> }).custom_attributes;
+    expect(attrs).toEqual({ protocolo: 'PERSI-MUYIE0GC6DMJ' });
+  });
+
+  test('card que ja tem protocolo nao e regravado', async () => {
+    stub({ protocolo: 'PERS-1720000000000-ABC' });
+    const { env } = comChatwoot();
+
+    await avisarLeadNoGrupo(env, 1, task());
+
+    expect(gravacoesNoCard()).toHaveLength(0);
+  });
+
+  test('completa o card mesmo quando o grupo ja foi avisado', async () => {
+    stub({ protocolo: 'PERSI-MUYIE0GC6DMJ' });
+    const { env, exec } = comChatwoot();
+    exec(`INSERT INTO group_notifications (tenant_id, chave, task_id, protocolo, status)
+          VALUES (1, 'PERSI-MUYIE0GC6DMJ', 719, 'PERSI-MUYIE0GC6DMJ', 'enviado')`);
+
+    const r = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+
+    expect(r.motivo).toContain('ja avisado');
+    expect(gravacoesNoCard()).toHaveLength(1);
+  });
+
+  test('falha ao gravar no card nao impede o aviso', async () => {
+    chamadas = [];
+    const pulseboard: unknown[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      if (String(url).startsWith('https://cw.teste')) return new Response('fora', { status: 500 });
+      pulseboard.push(JSON.parse(String(init.body)));
+      return new Response('ok', { status: 200 });
+    });
+    const { env } = comChatwoot();
+
+    const r = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+
+    expect(r.status).toBe('ok');
+    expect(pulseboard).toHaveLength(1);
+  });
+});
+
 describe('nome no aviso', () => {
   test('nome de perfil sem letra vira o aviso claro', async () => {
     const { env } = cenario();
