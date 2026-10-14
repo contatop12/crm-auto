@@ -11,8 +11,17 @@
 
 const CELULAR_PRIMEIRO_DIGITO = '6789';
 
+/**
+ * Link do WhatsApp (`wa.me/55...`, `...send?phone=55...`): o numero e' o do link.
+ * O TELEFONE do quiz da Persianas e' o link com a mensagem no `?text=`, e as
+ * medidas do texto ("Larg: 290", "Altura: 200") viravam os ultimos digitos.
+ */
+const LINK_WHATSAPP = /wa\.me\/\+?(\d{8,15})|[?&]phone=\+?(\d{8,15})/i;
+
 function apenasDigitos(raw: string | null | undefined): string {
-  return String(raw ?? '').replace(/\D/g, '');
+  const texto = String(raw ?? '');
+  const link = texto.match(LINK_WHATSAPP);
+  return (link ? (link[1] ?? link[2] ?? '') : texto).replace(/\D/g, '');
 }
 
 /** Tira o DDI 55 quando presente, deixando o numero nacional (10 ou 11 digitos). */

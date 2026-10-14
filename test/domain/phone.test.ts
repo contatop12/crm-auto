@@ -54,4 +54,25 @@ describe('phoneKey — DDD + ultimos 8 digitos', () => {
     expect(phoneKey('123')).toBe('');
     expect(phoneKey('')).toBe('');
   });
+
+  test('link wa.me com texto: o numero e o do link, nao os digitos da mensagem', () => {
+    // TELEFONE do quiz da Persianas: as medidas do texto (290, 200, 3%) entravam na chave
+    const link =
+      'https://wa.me/5511915022887?text=Ol%C3%A1%2C%20somos%20da%20Persianas%20Paulista!%0A' +
+      'Tecido%3A%20Tela%20Solar%203%25%0ALarg%3A%20290%0AAltura%3A%20200';
+    expect(phoneKey(link)).toBe(phoneKey('+5511915022887'));
+  });
+
+  test('link wa.me com + e link api.whatsapp.com com phone=', () => {
+    expect(phoneKey('https://wa.me/+5511983693558')).toBe(phoneKey('11983693558'));
+    expect(phoneKey('https://api.whatsapp.com/send?phone=5511963755843&text=Larg%20527')).toBe(
+      phoneKey('11963755843'),
+    );
+  });
+});
+
+describe('normFone — link do WhatsApp', () => {
+  test('tira o numero do link, ignorando o texto da mensagem', () => {
+    expect(normFone('https://wa.me/5511915022887?text=Larg%3A%20290%0AAltura%3A%20200')).toBe('+5511915022887');
+  });
 });
