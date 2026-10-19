@@ -113,6 +113,98 @@ admin.get('/tenants/:id/config', async (c) => {
   });
 });
 
+admin.post('/tenants', async (c) => {
+  const body = await c.req.json<Record<string, unknown>>();
+  const entrada = {
+    nome: String(body.nome ?? ''),
+    slug: String(body.slug ?? ''),
+    cw_account_id: Number(body.cw_account_id) || null,
+    cw_board_funil_id: Number(body.cw_board_funil_id) || null,
+    cw_board_organico_id: Number(body.cw_board_organico_id) || null,
+  };
+
+  const { erros, slug } = validarCliente(entrada);
+  if (erros.length) return c.json({ error: erros.join(' · '), erros }, 400);
+
+  const repetido = await c.env.DB.prepare('SELECT id FROM tenants WHERE slug = ?')
+    .bind(slug)
+    .first();
+  if (repetido) return c.json({ error: `ja existe um cliente com o endereco "${slug}"` }, 409);
+
+  const t = await c.env.DB.prepare(
+    'INSERT INTO tenants (slug, nome, ativo) VALUES (?, ?, 1) RETURNING id',
+  )
+    .bind(slug, entrada.nome.trim())
+    .first<{ id: number }>();
+
+  // Uma chave por canal, como a aba Webhooks espera. A do clique tambem vai
+  // para `ingest_key`, a chave antiga que a ingestao usa de reserva.
+  const chaves = { click: gerarIngestKey(), kanban: gerarIngestKey(), meta: gerarIngestKey() };
+
+  await c.env.DB.prepare(
+    `INSERT INTO tenant_config
+       (tenant_id, cw_account_id, cw_board_funil_id, cw_board_organico_id,
+        ga_customer_id, ga_login_customer_id, evo_instancia, pulseboard_url,
+        ingest_key, ingest_key_revelada, validate_only, pulseboard_ativo)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1,
+             CASE WHEN ? IS NULL THEN 0 ELSE 1 END)`,
+  )
+    .bind(
+      t!.id,
+      entrada.cw_account_id,
+      entrada.cw_board_funil_id,
+      entrada.cw_board_organico_id,
+      String(body.ga_customer_id ?? '') || null,
+      c.env.GOOGLE_ADS_MCC_ID,
+      String(body.evo_instancia ?? '') || null,
+      String(body.pulseboard_url ?? '') || null,
+      chaves.click,
+      // o aviso nasce desligado enquanto nao ha URL do grupo: sem ela o
+      // primeiro lead do cliente novo vira erro, e erro de cadastro na
+      // estreia e' o pior momento para descobrir que falta preencher algo
+      String(body.pulseboard_url ?? '') || null,
+    )
+    .run();
+
+  for (const [canal, chave] of Object.entries(chaves)) {
+    await c.env.DB.prepare('INSERT INTO ingest_keys (tenant_id, canal, chave, revelada) VALUES (?, ?, ?, 0)')
+      .bind(t!.id, canal, chave)
+      .run();
+  }
+
+  console.log(JSON.stringify({ acao: 'criar_cliente', por: c.get('identity').email, slug }));
+  return c.json({ ok: true, id: t!.id, slug }, 201);
+});
+
+admin.patch('/tenants/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  const body = await c.req.json<Record<string, unknown>>();
+
+  if (typeof body.nome === 'string' && body.nome.trim()) {
+    await c.env.DB.prepare("UPDATE tenants SET nome = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(body.nome.trim(), id)
+      .run();
+  }
+  if (body.ativo !== undefined) {
+    await c.env.DB.prepare('UPDATE tenants SET ativo = ? WHERE id = ?')
+      .bind(body.ativo ? 1 : 0, id)
+      .run();
+  }
+
+  for (const campo of CAMPOS_CONFIG) {
+    if (!(campo in body)) continue;
+    const v = body[campo];
+    await c.env.DB.prepare(`UPDATE tenant_config SET ${campo} = ? WHERE tenant_id = ?`)
+      .bind(v === '' || v === null || v === undefined ? null : (v as string | number), id)
+      .run();
+  }
+
+  console.log(
+    JSON.stringify({ acao: 'editar_cliente', por: c.get('identity').email, tenant_id: id }),
+  );
+  return c.json({ ok: true });
+});
+
 /**
  * Planilhas do cliente: quem escreve (o sistema ou o n8n) e onde.
  *

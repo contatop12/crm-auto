@@ -431,19 +431,28 @@ api.get('/tenants/:id/webhooks/conferir', async (c) => {
 
   if (!cfg?.ingest_key) return c.json({ error: 'cliente sem chave de ingestao' }, 400);
 
+  // Cada canal confere com a sua chave, a mesma que a ingestao exige. A antiga
+  // so' vale para o canal que ainda nao tem chave propria.
+  const { results: chaves } = await c.env.DB.prepare(
+    'SELECT canal, chave FROM ingest_keys WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .all<{ canal: string; chave: string }>();
+  const k = (canal: string) =>
+    `?k=${encodeURIComponent(chaves.find((x) => x.canal === canal)?.chave ?? cfg.ingest_key!)}`;
+
   const base = `${new URL(c.req.url).origin}/ingest/${cfg.slug}`;
-  const k = `?k=${encodeURIComponent(cfg.ingest_key)}`;
 
   // Contas diferentes, uma nao depende da outra: vao juntas.
   const [gtm, chatwoot] = await Promise.all([
-    lerGtm(c.env, cfg, `${base}/click${k}`),
+    lerGtm(c.env, cfg, `${base}/click${k('click')}`),
     lerRegrasDoChatwoot(c.env, cfg.cw_account_id),
   ]);
 
   return c.json({
     click: gtm,
-    kanban_entrada: chatwoot(`${base}/kanban${k}`),
-    kanban_conversao: chatwoot(`${base}/kanban${k}&evento=conversao`),
+    kanban_entrada: chatwoot(`${base}/kanban${k('kanban')}`),
+    kanban_conversao: chatwoot(`${base}/kanban${k('kanban')}&evento=conversao`),
   });
 });
 
