@@ -176,7 +176,11 @@ Como o node HTTP tem `onError: continueRegularOutput`, essa chamada falha em
 silêncio hoje em produção: a classificação de tipo de campanha vem caindo no
 palpite pelo nome desde que a v21 foi desligada.
 
-- Endpoint: `POST https://googleads.googleapis.com/v22/customers/{cid}/googleAds:search`
+**Versão atual: `v25`** (20/10/2026). A `v22` passou a recusar gravação com
+`UNSUPPORTED_VERSION` ("Version v22 is deprecated"); a consulta ainda respondia.
+A constante é `ADS_VERSAO` em `src/clients/googleAds.ts`.
+
+- Endpoint: `POST https://googleads.googleapis.com/v25/customers/{cid}/googleAds:search`
 - Headers: `authorization: Bearer <token>`, `developer-token`, `login-customer-id: 3780611396`
 - OAuth: refresh token do `.env` funciona; escopo `https://www.googleapis.com/auth/adwords` presente; access token dura 3600s (cachear em KV com TTL de ~55min).
 

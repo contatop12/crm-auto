@@ -8,14 +8,18 @@ const ESCOPO_DM = ['https://www.googleapis.com/auth/datamanager'];
 /**
  * Cliente da Google Ads API.
  *
- * VERSAO v22. As anteriores (v16..v21) devolvem 404 HTML — os workflows n8n
- * ainda chamam v21 e por isso falham em silencio. Ver docs/api-reference.md.
+ * VERSAO v25. Em 20/10/2026 a v22 passou a recusar gravacao com
+ * UNSUPPORTED_VERSION ("Version v22 is deprecated") — criar meta pelo painel
+ * falhava — enquanto a consulta ainda respondia. As tres consultas daqui e a
+ * criacao de meta foram conferidas na v25 contra contas reais antes da troca.
+ * Versao antiga desligada devolve 404 HTML. Ver docs/api-reference.md.
  *
  * O access token dura 3600s e e' cacheado em KV com folga, para nao gastar uma
  * ida ao OAuth a cada checagem de saude.
  */
 
-const V = 'v22';
+export const ADS_VERSAO = 'v25';
+const V = ADS_VERSAO;
 const CACHE_TOKEN = 'gads:access_token';
 const TTL_TOKEN = 3300; // 55min, com folga sobre os 60 reais
 
