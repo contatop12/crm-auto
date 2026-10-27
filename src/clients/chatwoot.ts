@@ -245,6 +245,13 @@ export class ChatwootClient {
     });
   }
 
+  /** Troca o titulo do card. So' o titulo vai no PUT: o resto fica como esta'. */
+  async renomearCard(acc: number, taskId: number, titulo: string): Promise<void> {
+    await this.req('PUT', `/api/v1/accounts/${acc}/kanban/tasks/${taskId}`, {
+      task: { title: titulo },
+    });
+  }
+
   /**
    * Move o card para outra etapa DO MESMO board.
    *

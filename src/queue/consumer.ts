@@ -8,6 +8,7 @@ import { enviarConversao } from '../pipelines/stageChanged';
 import { registrarLeadMeta } from '../pipelines/metaLead';
 import { enviarEventoMeta } from '../pipelines/metaCapi';
 import { espelharEtapaNaGeral } from '../pipelines/etapaPlanilha';
+import { telefoneNoTituloDoCard } from '../pipelines/tituloCard';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -41,6 +42,11 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
       return registrarClique(env, msg.tenantId, payload);
 
     case 'chatwoot':
+      // Toda mensagem traz o telefone: o card troca o nome do perfil por ele.
+      // So' na primeira entrega — a retentativa traz o mesmo retrato da conversa.
+      if (tentativa === 1 && /^message_/.test(msg.eventType)) {
+        await telefoneNoTituloDoCard(env, msg.tenantId, payload);
+      }
       switch (msg.eventType) {
         case 'conversation_created':
           return {
