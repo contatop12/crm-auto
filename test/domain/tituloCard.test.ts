@@ -19,6 +19,19 @@ describe('tituloDoCard', () => {
       .toBe('#4 - 5511932347701 - Meire');
   });
 
+  test('celular sem o nono digito ganha o 9: o card nao fica trocando de numero', () => {
+    // card 3849 da Taina: a resposta do vendedor regrava o contato com o JID
+    // sem o 9 (+551186571182) e a mensagem seguinte do lead traz o 9 de volta
+    expect(tituloDoCard('Conversa #946 - Quezia', '+551186571182', 'Quezia')).toBe('#946 - 5511986571182 - Quezia');
+    expect(tituloDoCard('#946 - 5511986571182 - Quezia', '+551186571182', 'Quezia')).toBeNull();
+    expect(tituloDoCard('#946 - 551186571182 - Quezia', '+5511986571182', 'Quezia')).toBe('#946 - 5511986571182 - Quezia');
+  });
+
+  test('fixo e numero de fora ficam como vieram', () => {
+    expect(tituloDoCard('Conversa #20 - Loja', '+551149480466', 'Loja')).toBe('#20 - 551149480466 - Loja');
+    expect(tituloDoCard('Conversa #7 - John', '+14155552671', 'John')).toBe('#7 - 14155552671 - John');
+  });
+
   test('ja no formato: nada a trocar', () => {
     expect(tituloDoCard('#1240 - 5511932346062 - Vital', FONE, 'Vital')).toBeNull();
   });

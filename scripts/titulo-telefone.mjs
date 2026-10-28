@@ -75,7 +75,9 @@ const tituloDoCard = (titulo, telefone, nome) => {
   const atual = String(titulo ?? '');
   const m = /^(?:Conversa\s*)?#(\d+)\s*(?:-\s*([\s\S]*))?$/i.exec(atual);
   if (!m) return null;
-  const digitos = String(telefone ?? '').replace(/\D/g, '');
+  let digitos = String(telefone ?? '').replace(/\D/g, '');
+  // celular brasileiro sempre com o nono digito (JID do WhatsApp as vezes vem sem)
+  if (/^55\d{2}[6-9]\d{7}$/.test(digitos)) digitos = digitos.slice(0, 4) + '9' + digitos.slice(4);
   if (digitos.length < 10) return null;
   const doTitulo = (m[2] ?? '').replace(/^\+?\d{10,}\s*(?:-\s*)?/, '');
   const quem = nomeUtil(nome, telefone) ?? nomeUtil(doTitulo, telefone);

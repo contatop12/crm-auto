@@ -1,4 +1,5 @@
 import { nomeUtil } from './nomeLead';
+import { normFone } from './phone';
 
 /**
  * Titulo do card do Kanban: "#1240 - 5511932346062 - Vital".
@@ -28,7 +29,12 @@ export function tituloDoCard(
 
   // so' digitos, sem o '+': e' o formato que o proprio Chatwoot usa quando o
   // contato chega sem nome ("Conversa #828 - 5511963925521")
-  const digitos = String(telefone ?? '').replace(/\D/g, '');
+  const crus = String(telefone ?? '').replace(/\D/g, '');
+  // Celular brasileiro sempre com o nono digito. A resposta do vendedor
+  // regrava o contato com o JID do WhatsApp, que as vezes vem sem o 9
+  // (+551186571182), e a mensagem seguinte do lead traz o 9 de volta: sem
+  // isso o card trocava de numero a cada mensagem. Numero de fora fica como veio.
+  const digitos = /^55\d{10,11}$/.test(crus) ? normFone(crus).slice(1) || crus : crus;
   // grupo e Instagram nao tem telefone: o titulo fica
   if (digitos.length < 10) return null;
 
