@@ -9,6 +9,7 @@ import { registrarLeadMeta } from '../pipelines/metaLead';
 import { enviarEventoMeta } from '../pipelines/metaCapi';
 import { espelharEtapaNaGeral } from '../pipelines/etapaPlanilha';
 import { telefoneNoTituloDoCard } from '../pipelines/tituloCard';
+import { voltarDoPendente } from '../pipelines/pendente';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -46,6 +47,8 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
       // So' na primeira entrega — a retentativa traz o mesmo retrato da conversa.
       if (tentativa === 1 && /^message_/.test(msg.eventType)) {
         await telefoneNoTituloDoCard(env, msg.tenantId, payload);
+        // lead que respondeu sai de "Pendente"
+        await voltarDoPendente(env, msg.tenantId, payload);
       }
       switch (msg.eventType) {
         case 'conversation_created':

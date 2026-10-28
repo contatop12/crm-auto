@@ -408,6 +408,29 @@ export class ChatwootClient {
     return Number(r.incoming_messages_count ?? 0);
   }
   /**
+   * Quando o lead mandou a ultima mensagem (ms), ou null se nao mandou nenhuma.
+   *
+   * Pagina para tras so' ate' achar uma mensagem do lead: quase sempre esta' na
+   * primeira pagina (as 20 ultimas).
+   */
+  async ultimaMensagemDoLead(acc: number, conversaId: number, tetoPaginas = 5): Promise<number | null> {
+    type Msg = { id: number; message_type: number; created_at: number };
+    let antes: number | null = null;
+    for (let i = 0; i < tetoPaginas; i++) {
+      const r: { payload?: Msg[] } = await this.req(
+        'GET',
+        `/api/v1/accounts/${acc}/conversations/${conversaId}/messages` + (antes ? `?before=${antes}` : ''),
+      );
+      const lote = r.payload ?? [];
+      if (!lote.length) break;
+      const doLead = lote.filter((m) => m.message_type === 0).map((m) => m.created_at);
+      if (doLead.length) return Math.max(...doLead) * 1000;
+      antes = Math.min(...lote.map((m) => m.id));
+    }
+    return null;
+  }
+
+  /**
    * Textos que o vendedor mandou na conversa, do mais antigo ao mais novo.
    *
    * A rota devolve as 20 ultimas; `before` pagina para tras. Nota interna
