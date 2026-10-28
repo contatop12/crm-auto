@@ -245,6 +245,24 @@ export class ChatwootClient {
     });
   }
 
+  /**
+   * Poe e tira etiquetas do card, sem mexer nas outras.
+   *
+   * O PUT substitui a lista inteira (conferido no card 1106 da Locadora em
+   * 28/10/2026: `labels: []` apagou a que estava). O merge e' aqui.
+   */
+  async ajustarEtiquetasDoCard(
+    acc: number,
+    taskId: number,
+    mudanca: { mais?: string[]; menos?: string[] },
+  ): Promise<void> {
+    const atual = await this.req<{ labels?: string[] }>('GET', `/api/v1/accounts/${acc}/kanban/tasks/${taskId}`);
+    const antes = atual.labels ?? [];
+    const depois = [...new Set([...antes, ...(mudanca.mais ?? [])])].filter((l) => !(mudanca.menos ?? []).includes(l));
+    if (depois.length === antes.length && depois.every((l) => antes.includes(l))) return;
+    await this.req('PUT', `/api/v1/accounts/${acc}/kanban/tasks/${taskId}`, { task: { labels: depois } });
+  }
+
   /** Troca o titulo do card. So' o titulo vai no PUT: o resto fica como esta'. */
   async renomearCard(acc: number, taskId: number, titulo: string): Promise<void> {
     await this.req('PUT', `/api/v1/accounts/${acc}/kanban/tasks/${taskId}`, {
