@@ -48,8 +48,46 @@ describe('telefoneNoTituloDoCard', () => {
     expect(chamadas).toEqual([]);
   });
 
-  test('mensagem que chegou antes do card nascer: nada a fazer', async () => {
-    await telefoneNoTituloDoCard(cenario(), 1, msg(null));
+  test('primeira mensagem, antes do card no webhook: pergunta ao Chatwoot e ja troca', async () => {
+    // lead #1293 da Locadora: o 1o webhook veio sem card e o titulo ficou com
+    // o nome ate' a mensagem seguinte
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      chamadas.push({ metodo: init.method ?? 'GET', url: String(url), corpo: init.body ? JSON.parse(String(init.body)) : null });
+      if (/\/conversations\/1240$/.test(String(url))) {
+        return Response.json({ id: 1240, kanban_task: { id: 3744, title: 'Conversa #1240 - Vital' } });
+      }
+      return Response.json({ ok: true });
+    });
+    const agora = JSON.parse(msg(null));
+    agora.conversation.created_at = Math.floor(Date.now() / 1000) - 2;
+
+    await telefoneNoTituloDoCard(cenario(), 1, JSON.stringify(agora));
+    expect(chamadas.map((c) => `${c.metodo} ${c.url}`)).toEqual([
+      'GET https://cw.teste/api/v1/accounts/5/conversations/1240',
+      'PUT https://cw.teste/api/v1/accounts/5/kanban/tasks/3744',
+    ]);
+    expect(chamadas[1]!.corpo).toEqual({ task: { title: 'Conversa #1240 - 5511932346062' } });
+  });
+
+  test('conversa recem-criada cujo card ainda nao nasceu: so a pergunta, sem troca', async () => {
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      chamadas.push({ metodo: init.method ?? 'GET', url: String(url), corpo: null });
+      return Response.json({ id: 1240 });
+    });
+    const agora = JSON.parse(msg(null));
+    agora.conversation.created_at = Math.floor(Date.now() / 1000);
+
+    await telefoneNoTituloDoCard(cenario(), 1, JSON.stringify(agora));
+    expect(chamadas.map((c) => c.metodo)).toEqual(['GET']);
+  });
+
+  test('conversa antiga sem card: nao pergunta nada', async () => {
+    // card ausente em conversa velha e' card que nao existe; perguntar a cada
+    // mensagem so' gastaria chamada
+    const velha = JSON.parse(msg(null));
+    velha.conversation.created_at = Math.floor(Date.now() / 1000) - 3600;
+
+    await telefoneNoTituloDoCard(cenario(), 1, JSON.stringify(velha));
     expect(chamadas).toEqual([]);
   });
 
