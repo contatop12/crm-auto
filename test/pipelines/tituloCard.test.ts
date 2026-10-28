@@ -34,17 +34,17 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('telefoneNoTituloDoCard', () => {
-  test('o card troca o nome do perfil pelo telefone', async () => {
+  test('o card vira #conversa - telefone - nome', async () => {
     await telefoneNoTituloDoCard(cenario(), 1, msg({}));
     expect(chamadas).toEqual([{
       metodo: 'PUT',
       url: 'https://cw.teste/api/v1/accounts/5/kanban/tasks/3744',
-      corpo: { task: { title: 'Conversa #1240 - 5511932346062' } },
+      corpo: { task: { title: '#1240 - 5511932346062 - Vital' } },
     }]);
   });
 
-  test('titulo ja com o telefone nao custa chamada', async () => {
-    await telefoneNoTituloDoCard(cenario(), 1, msg({ title: 'Conversa #1240 - 5511932346062' }));
+  test('titulo ja no formato nao custa chamada', async () => {
+    await telefoneNoTituloDoCard(cenario(), 1, msg({ title: '#1240 - 5511932346062 - Vital' }));
     expect(chamadas).toEqual([]);
   });
 
@@ -66,7 +66,7 @@ describe('telefoneNoTituloDoCard', () => {
       'GET https://cw.teste/api/v1/accounts/5/conversations/1240',
       'PUT https://cw.teste/api/v1/accounts/5/kanban/tasks/3744',
     ]);
-    expect(chamadas[1]!.corpo).toEqual({ task: { title: 'Conversa #1240 - 5511932346062' } });
+    expect(chamadas[1]!.corpo).toEqual({ task: { title: '#1240 - 5511932346062 - Vital' } });
   });
 
   test('conversa recem-criada cujo card ainda nao nasceu: so a pergunta, sem troca', async () => {

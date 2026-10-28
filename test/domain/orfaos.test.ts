@@ -16,9 +16,15 @@ describe('conversaCitada', () => {
     expect(conversaCitada('Conversa #3 - P12 / Persianas Paulista (')).toBe(3);
   });
 
+  test('le o display id do titulo que o CRM reescreve', () => {
+    expect(conversaCitada('#1293 - 5511992947445 - Noilson')).toBe(1293);
+  });
+
   test('titulo sem numero nao cita conversa', () => {
     expect(conversaCitada('Ismael machado')).toBeNull();
     expect(conversaCitada('')).toBeNull();
+    // "#" no meio de titulo feito a mao nao e' conversa
+    expect(conversaCitada('Orcamento lote #4')).toBeNull();
   });
 });
 

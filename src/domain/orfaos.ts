@@ -7,7 +7,9 @@
  * normal na tela — so' nao abre conversa.
  *
  * O titulo que o Chatwoot gera guarda o display id ("Conversa #28 - Carol"),
- * e e' ele que separa o card religavel do perdido de vez.
+ * e e' ele que separa o card religavel do perdido de vez. O CRM reescreve o
+ * titulo como "#28 - 5511... - Carol" (ver tituloCard.ts): o "#28" no comeco
+ * vale igual.
  */
 
 export type SituacaoOrfao =
@@ -39,7 +41,7 @@ export interface CardOrfao {
 
 /** Display id citado no titulo do card, ou null. */
 export function conversaCitada(titulo: string | null | undefined): number | null {
-  const m = /Conversa\s*#(\d+)/i.exec(String(titulo ?? ''));
+  const m = /(?:^\s*|Conversa\s*)#(\d+)/i.exec(String(titulo ?? ''));
   return m ? Number(m[1]) : null;
 }
 

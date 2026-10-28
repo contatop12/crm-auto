@@ -1,9 +1,9 @@
 import type { Env } from '../env';
 import { ChatwootClient } from '../clients/chatwoot';
-import { tituloComTelefone } from '../domain/tituloCard';
+import { tituloDoCard } from '../domain/tituloCard';
 
 /**
- * Poe o telefone do lead no titulo do card, no lugar do nome do perfil.
+ * Reescreve o titulo do card como "#1240 - 5511932346062 - Vital".
  *
  * Roda em toda mensagem da conversa, do lead ou do vendedor, porque e' o
  * webhook da mensagem que traz o telefone: o card so' tem o nome do contato.
@@ -39,7 +39,7 @@ export async function telefoneNoTituloDoCard(env: Env, tenantId: number, payload
     taskId = num(task?.id);
     if (!taskId) return;
 
-    const titulo = tituloComTelefone(str(task?.title), telefone);
+    const titulo = tituloDoCard(str(task?.title), telefone, str(obj(obj(conv?.meta)?.sender)?.name));
     if (!titulo) return;
 
     acc ??= await contaDoChatwoot(env, tenantId);
