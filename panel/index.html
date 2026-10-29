@@ -526,6 +526,8 @@
       .switch input:checked + .trilho::after { transform: translateX(17px); }
       .switch input:focus-visible + .trilho { outline: 2px solid var(--tinta); outline-offset: 2px; }
       .switch .rotulo { font-size: 13px; }
+      /* o vermelho e' do envio ao Google, que nao volta atras; este so' segura o card */
+      .switch.calmo input:checked + .trilho { background: var(--fluxo); border-color: var(--fluxo); }
 
       a.botao-link {
         display: inline-block; text-decoration: none; font: inherit;
@@ -988,6 +990,14 @@
                 </div>
                 <span class="carregando" id="automatica-estado"></span>
               </header>
+              <div class="campo">
+                <label class="switch calmo" data-dica="Ligado, a mensagem enviada até 15 s depois do lead (ou abrindo a conversa) não move o card">
+                  <input type="checkbox" id="sw-automatica" />
+                  <span class="trilho"></span>
+                  <span class="rotulo" id="sw-automatica-rotulo">…</span>
+                </label>
+                <p class="dica" id="automatica-tempo"></p>
+              </div>
               <div class="linha-acoes form-linha">
                 <input id="a-frase" placeholder="Seja muito bem-vindo(a) à Locadora Exatidão" style="max-width:420px" title="Cole um trecho que só a automação escreve. A mensagem que contém o trecho, em qualquer ponto, é da automação." />
                 <button id="btn-automatica" class="principal">Adicionar</button>
@@ -1387,7 +1397,9 @@
         // e só rodam quando alguém aperta o botão.
         const CARGAS = {
           geral: () => carregarFluxo(id),
-          funil: () => { carregarEtapas(id); carregarGatilhos(id); carregarAutomaticas(id); },
+          funil: () => {
+            carregarEtapas(id); carregarGatilhos(id); carregarAutomaticaPeloTempo(id); carregarAutomaticas(id);
+          },
           'canais/chatwoot': () => {
             resumoChatwoot(lerCfg());
             carregarWebhooks(id, slug);
@@ -2823,7 +2835,7 @@
                 '<td><button class="a-del" data-a="' + a.id + '">remover</button></td></tr>';
             }).join('') + '</tbody></table>' + pag.controles
           : '<div class="vazio"><p>Nenhuma mensagem automática cadastrada.</p>' +
-            '<p class="mono">Sem cadastro, a primeira mensagem enviada ao lead já conta como resposta do atendente.</p></div>';
+            '<p class="mono">Sem cadastro e com o botão acima desligado, a primeira mensagem enviada ao lead já conta como resposta do atendente.</p></div>';
 
         ligarPaginacao(alvo, function (o) { carregarAutomaticas(id, o); });
         alvo.querySelectorAll('.a-del').forEach(function (b) {
@@ -2851,6 +2863,56 @@
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         }
+      }
+
+      /**
+       * O botão que dispensa o cadastro: ligado, o tempo decide. A boas-vindas
+       * sai de 0 a 3 s depois do lead; atendente nenhuma responde tão rápido.
+       *
+       * Ligado e sempre zero é cliente sem automação — e aí o botão só atrasa a
+       * primeira mensagem da vendedora que abre a conversa.
+       */
+      async function carregarAutomaticaPeloTempo(id) {
+        const sw = document.getElementById('sw-automatica');
+        const rot = document.getElementById('sw-automatica-rotulo');
+        const uso = document.getElementById('automatica-tempo');
+
+        const pintar = function (r) {
+          sw.checked = r.ligado;
+          rot.textContent = r.ligado ? 'Cliente tem mensagem automática' : 'Sem mensagem automática pelo tempo';
+          uso.textContent = r.ligado
+            ? 'a mensagem enviada até 15 s depois do lead, ou abrindo a conversa, não move o card · segurou ' +
+              r.seguradas_7d + ' nos últimos 7 dias · última ' + haQuanto(r.ultima_em)
+            : 'desligado, só os trechos abaixo seguram o card. Ligue para o cliente com boas-vindas, ' +
+              '"fora do horário" ou fluxo de formulário.';
+        };
+
+        let r;
+        try {
+          r = await api('/tenants/' + id + '/automatica-pelo-tempo');
+        } catch (e) {
+          rot.textContent = 'não foi possível ler: ' + e.message;
+          sw.disabled = true;
+          return;
+        }
+        sw.disabled = false;
+        pintar(r);
+
+        // `onchange`, não addEventListener: a aba recarrega e o ouvinte não pode dobrar
+        sw.onchange = async function () {
+          const ligar = sw.checked;
+          sw.disabled = true;
+          rot.textContent = 'salvando…';
+          try {
+            await enviar('/tenants/' + id, 'PATCH', { tem_mensagem_automatica: ligar ? 1 : 0 });
+            r = await api('/tenants/' + id + '/automatica-pelo-tempo');
+            pintar(r);
+          } catch (e) {
+            pintar(r);
+            rot.textContent = 'falhou: ' + e.message;
+          }
+          sw.disabled = false;
+        };
       }
 
       async function carregarEtapas(id) {

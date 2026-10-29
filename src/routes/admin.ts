@@ -33,6 +33,7 @@ import { classificarCards } from '../domain/orfaos';
 import {
   casarRespostaAutomatica,
   validarRespostaAutomatica,
+  GATILHO_TEMPO,
   MOTIVO_AUTOMATICA,
 } from '../domain/respostasAutomaticas';
 import { vigiarWhatsapp } from '../pipelines/vigiaWhatsapp';
@@ -92,6 +93,7 @@ const CAMPOS_CONFIG = [
   'gtm_prefixo',
   'validate_only',
   'janela_match_dias',
+  'tem_mensagem_automatica',
 ] as const;
 
 admin.get('/tenants/:id/config', async (c) => {
@@ -1208,6 +1210,32 @@ admin.delete('/tenants/:id/respostas-automaticas/:rid', async (c) => {
     .bind(Number(c.req.param('rid')), Number(c.req.param('id')))
     .run();
   return r.meta.changes ? c.json({ ok: true }) : c.json({ error: 'trecho nao encontrado' }, 404);
+});
+
+/**
+ * O botao "segurar pelo tempo": ligado, a mensagem enviada ate' 15 s depois do
+ * lead e' da automacao, sem cadastrar trecho. Ver `segundosDaAutomatica`.
+ *
+ * Liga e desliga pelo PATCH do cliente; aqui vem o estado e quantas vezes a
+ * regra segurou o card — ligado e sempre zero e' cliente sem automacao.
+ */
+admin.get('/tenants/:id/automatica-pelo-tempo', async (c) => {
+  const id = Number(c.req.param('id'));
+  const cfg = await c.env.DB.prepare('SELECT tem_mensagem_automatica FROM tenant_config WHERE tenant_id = ?')
+    .bind(id)
+    .first<{ tem_mensagem_automatica: number }>();
+  const uso = await c.env.DB.prepare(
+    `SELECT SUM(CASE WHEN created_at >= datetime('now','-7 day') THEN 1 ELSE 0 END) AS seguradas_7d,
+            MAX(created_at) AS ultima_em
+     FROM card_moves WHERE tenant_id = ? AND motivo = ? AND gatilho = ?`,
+  )
+    .bind(id, MOTIVO_AUTOMATICA, GATILHO_TEMPO)
+    .first<{ seguradas_7d: number | null; ultima_em: string | null }>();
+  return c.json({
+    ligado: cfg?.tem_mensagem_automatica === 1,
+    seguradas_7d: uso?.seguradas_7d ?? 0,
+    ultima_em: uso?.ultima_em ?? null,
+  });
 });
 
 /**

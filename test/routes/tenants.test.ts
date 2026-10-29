@@ -86,3 +86,40 @@ describe('cadastro de cliente pelo painel', () => {
     expect(cfg).toEqual({ validate_only: 0, gtm_prefixo: 'MARTIN', pulseboard_url: null });
   });
 });
+
+describe('botao de mensagem automatica do cliente', () => {
+  const criar = async (env: Env) =>
+    ((await (await enviar(env, 'POST', '/api/tenants', NOVO)).json()) as { id: number }).id;
+  const estado = async (env: Env, id: number) =>
+    (await (await worker.fetch(new Request(`https://crm.teste/api/tenants/${id}/automatica-pelo-tempo`), env, ctx)).json()) as
+      { ligado: boolean; seguradas_7d: number; ultima_em: string | null };
+
+  test('nasce desligado e liga pelo botao', async () => {
+    const { env, consultar } = ambiente();
+    const id = await criar(env);
+    expect((await estado(env, id)).ligado).toBe(false);
+
+    expect((await enviar(env, 'PATCH', `/api/tenants/${id}`, { tem_mensagem_automatica: 1 })).status).toBe(200);
+
+    expect((await estado(env, id)).ligado).toBe(true);
+    const [cfg] = consultar(`SELECT tem_mensagem_automatica FROM tenant_config WHERE tenant_id = ${id}`) as
+      Array<{ tem_mensagem_automatica: number }>;
+    expect(cfg!.tem_mensagem_automatica).toBe(1);
+  });
+
+  test('conta so as mensagens seguradas pelo tempo, nos ultimos 7 dias', async () => {
+    // o trecho cadastrado tem a contagem dele na tabela de baixo
+    const { env, exec } = ambiente();
+    const id = await criar(env);
+    for (const [gatilho, quando] of [
+      ['pelo tempo', '-1 day'], ['pelo tempo', '-2 day'], ['pelo tempo', '-9 day'],
+      ['Seja muito bem-vindo(a) à Locadora Exatidão', '-1 day'],
+    ]) {
+      exec(`INSERT INTO card_moves (tenant_id, gatilho, moveu, motivo, created_at)
+            VALUES (${id}, '${gatilho}', 0, 'mensagem automatica', datetime('now', '${quando}'))`);
+    }
+    const r = await estado(env, id);
+    expect(r.seguradas_7d).toBe(2);
+    expect(r.ultima_em).toBeTruthy();
+  });
+});
