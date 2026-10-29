@@ -39,7 +39,7 @@ describe('atribuirEmRodizio', () => {
     const { env } = cenario();
     for (const n of [1, 2, 3]) await atribuirEmRodizio(env, 4, msg({ conversa: 1400 + n }));
     expect(atribuicoes().map(([, c]) => (c as { assignee_id: number }).assignee_id)).toEqual([15, 13, 15]);
-    expect(atribuicoes()[0][0]).toBe('/conversations/1401/assignments');
+    expect(atribuicoes()[0]![0]).toBe('/conversations/1401/assignments');
   });
 
   test('8844 e 2244 sempre o mesmo agente, cada caixa com o seu contador', async () => {

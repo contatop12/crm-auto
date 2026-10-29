@@ -10,6 +10,8 @@ import { enviarEventoMeta } from '../pipelines/metaCapi';
 import { espelharEtapaNaGeral } from '../pipelines/etapaPlanilha';
 import { telefoneNoTituloDoCard } from '../pipelines/tituloCard';
 import { voltarDoPendente } from '../pipelines/pendente';
+import { atribuirEmRodizio } from '../pipelines/rodizio';
+import { alertarContatoDuplicado } from '../pipelines/contatoDuplicado';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -49,6 +51,13 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
         await telefoneNoTituloDoCard(env, msg.tenantId, payload);
         // lead que respondeu sai de "Pendente"
         await voltarDoPendente(env, msg.tenantId, payload);
+      }
+      // Lead novo sem responsavel: rodizio entre os atendentes da caixa, e so'
+      // depois o alerta de contato em dois numeros (traz o responsavel gravado).
+      // Ambos engolem o proprio erro: a atribuicao abaixo nao pode cair por eles.
+      if (tentativa === 1 && msg.eventType === 'message_incoming') {
+        await atribuirEmRodizio(env, msg.tenantId, payload);
+        await alertarContatoDuplicado(env, msg.tenantId, payload);
       }
       switch (msg.eventType) {
         case 'conversation_created':

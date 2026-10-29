@@ -33,5 +33,5 @@ export function lerRodizio(json: string | null | undefined): ConfigRodizio | nul
  * da caixa vai para o primeiro da lista.
  */
 export function agenteDaVez(agentes: number[], vez: number): number {
-  return agentes[(((vez - 1) % agentes.length) + agentes.length) % agentes.length];
+  return agentes[(((vez - 1) % agentes.length) + agentes.length) % agentes.length]!;
 }

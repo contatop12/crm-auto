@@ -38,7 +38,7 @@ export async function atribuirEmRodizio(env: Env, tenantId: number, payload: str
     if (obj(obj(atual?.meta)?.assignee)) return;
 
     // Uma lista de um so' agente nao precisa de contador
-    let agente = agentes[0];
+    let agente = agentes[0]!;
     if (agentes.length > 1) {
       // UPDATE atomico: duas mensagens simultaneas recebem vezes diferentes
       const r = await env.DB.prepare(
