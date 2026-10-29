@@ -1,0 +1,15 @@
+-- O cliente tem mensagem automatica: a que sai colada no lead nao move o card.
+--
+-- "Qualificando" avanca na primeira resposta do comercial, e a boas-vindas do
+-- WhatsApp Business, o "fora do horario" e o fluxo do formulario tambem sao
+-- respostas. Em 30 dias (28/10/2026) elas tiraram de "Novo Lead" cards da
+-- Locadora, da Martinelli e da Taina antes de alguem olhar o lead.
+--
+-- A lista de `respostas_automaticas` resolve frase a frase, e cada automacao
+-- nova pedia cadastro. Ligado, vale a regra de tempo: mensagem enviada ate'
+-- 15 s depois do lead (ou abrindo a conversa) e' da maquina. Ver
+-- `segundosDaAutomatica`.
+--
+-- Nasce desligado: quem nao tem automacao (a Persianas) perderia a primeira
+-- mensagem da vendedora que abre a conversa.
+ALTER TABLE tenant_config ADD COLUMN tem_mensagem_automatica INTEGER NOT NULL DEFAULT 0;

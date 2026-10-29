@@ -4,7 +4,12 @@ import { matchStage } from '../domain/triggers';
 import { canMove } from '../domain/movement';
 import { simularRespostas } from '../domain/historico';
 import { extractValue } from '../domain/value';
-import { casarRespostaAutomatica, MOTIVO_AUTOMATICA } from '../domain/respostasAutomaticas';
+import {
+  casarRespostaAutomatica,
+  segundosDaAutomatica,
+  GATILHO_TEMPO,
+  MOTIVO_AUTOMATICA,
+} from '../domain/respostasAutomaticas';
 import type { Stage, Trigger, ValuePattern } from '../domain/types';
 
 /**
@@ -29,6 +34,7 @@ interface Resultado {
 interface Config {
   cw_account_id: number | null;
   cw_board_funil_id: number | null;
+  tem_mensagem_automatica: number;
 }
 
 export async function moverPelaResposta(
@@ -84,7 +90,7 @@ export async function moverPelaResposta(
   }
 
   const cfg = await env.DB.prepare(
-    'SELECT cw_account_id, cw_board_funil_id FROM tenant_config WHERE tenant_id = ?',
+    'SELECT cw_account_id, cw_board_funil_id, tem_mensagem_automatica FROM tenant_config WHERE tenant_id = ?',
   )
     .bind(tenantId)
     .first<Config>();
@@ -144,10 +150,38 @@ export async function moverPelaResposta(
   });
   const nomeAlvo = casou.stageNome;
 
+  const cw = ChatwootClient.fromEnv(env);
+
+  /**
+   * Cliente com mensagem automática: a resposta comum que sai colada no lead é
+   * da máquina, e o trecho cadastrado acima não cobre a automação que ninguém
+   * cadastrou. Só pergunta ao Chatwoot quando o card iria andar por ela — a
+   * frase-gatilho é escolha da equipe e move sempre. Ver `segundosDaAutomatica`.
+   */
+  if (decisao.move && !casou.byKeyword && cfg.tem_mensagem_automatica) {
+    let segundos: number | null;
+    try {
+      segundos = await segundosAposOLead(cw, cfg.cw_account_id, conversaId, p);
+    } catch (e) {
+      // mover no escuro repetiria o erro que a regra existe para evitar: a fila retenta
+      return { status: 'erro', motivo: `conferir mensagem automatica: ${(e as Error).message.slice(0, 160)}` };
+    }
+    if (segundos !== null) {
+      await registrar(env, tenantId, {
+        taskId, conversaId, de: etapaAtual, para: nomeAlvo,
+        moveu: false, gatilho: GATILHO_TEMPO, trecho: texto.slice(0, 160), motivo: MOTIVO_AUTOMATICA,
+      });
+      return {
+        status: 'ignorado',
+        motivo: `conversa ${conversaId}: mensagem automatica, ${segundos} s depois do lead ` +
+          'ou da abertura da conversa — o card espera o atendente',
+      };
+    }
+  }
+
   // O valor da proposta é capturado mesmo quando o card não se move: ele vem
   // na mensagem e some se não for lido agora.
   const valor = extractValue(texto, padroes);
-  const cw = ChatwootClient.fromEnv(env);
   if (valor > 0) {
     try {
       await cw.mesclarAtributosDoCard(cfg.cw_account_id, taskId, { valor_proposta: String(valor) });
@@ -291,6 +325,30 @@ async function cardAgora(
     console.log(JSON.stringify({ acao: 'card_agora_falhou', conversa: conversaId, erro: (e as Error).message }));
     return null;
   }
+}
+
+/**
+ * Quantos segundos a mensagem saiu depois do lead, se caiu na janela da
+ * automação; null quando é de gente.
+ *
+ * O horário vem da lista do Chatwoot, no mesmo relógio das outras mensagens; o
+ * `created_at` do webhook só entra se a própria mensagem não estiver nela.
+ * Payload sem id não tem onde ancorar e segue como sempre: resposta de gente.
+ */
+async function segundosAposOLead(
+  cw: ChatwootClient,
+  acc: number,
+  conversaId: number,
+  p: Record<string, unknown>,
+): Promise<number | null> {
+  const msgId = num(p.id);
+  if (!msgId) return null;
+  const conversa = await cw.mensagensAte(acc, conversaId, msgId);
+  const enviadaEm =
+    conversa.find((m) => m.id === msgId)?.created_at ??
+    Math.floor(Date.parse(String(p.created_at)) / 1000);
+  if (!Number.isFinite(enviadaEm)) return null;
+  return segundosDaAutomatica({ id: msgId, created_at: enviadaEm }, conversa);
 }
 
 /**

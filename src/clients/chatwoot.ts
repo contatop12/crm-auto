@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { exigir } from '../domain/config';
+import type { MensagemCw } from '../domain/respostasAutomaticas';
 
 /**
  * Cliente do Chatwoot (fork fazer.ai).
@@ -446,6 +447,21 @@ export class ChatwootClient {
       antes = Math.min(...lote.map((m) => m.id));
     }
     return null;
+  }
+
+  /**
+   * As 20 mensagens da conversa até `msgId`, inclusive.
+   *
+   * `before` devolve as de id menor; o +1 inclui a própria mensagem, que traz o
+   * `created_at` no mesmo relógio das outras. Ancorar no id, e não pegar as 20
+   * últimas, mantém a resposta certa quando o evento é reprocessado depois.
+   */
+  async mensagensAte(acc: number, conversaId: number, msgId: number): Promise<MensagemCw[]> {
+    const r: { payload?: MensagemCw[] } = await this.req(
+      'GET',
+      `/api/v1/accounts/${acc}/conversations/${conversaId}/messages?before=${msgId + 1}`,
+    );
+    return r.payload ?? [];
   }
 
   /**

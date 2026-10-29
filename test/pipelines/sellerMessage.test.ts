@@ -252,3 +252,96 @@ describe('resposta automatica nao conta como resposta do atendente', () => {
     expect(moveu()).toBeDefined();
   });
 });
+
+describe('cliente com mensagem automatica: a que sai colada no lead nao move', () => {
+  // Locadora, Martinelli e Taina, out/2026: a boas-vindas do WhatsApp Business
+  // e o fluxo do formulario tiravam o card de "Novo Lead" em 0-3 s, antes de
+  // qualquer pessoa olhar o lead. Ligado, o tempo decide — sem cadastrar frase.
+  const LEAD_EM = 1_790_000_000;
+
+  const cenarioAuto = (ligado: boolean, mensagens: unknown[] | 'falha') => {
+    const c = cenario();
+    c.exec(`UPDATE tenant_config SET tem_mensagem_automatica = ${ligado ? 1 : 0} WHERE tenant_id = 1`);
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const metodo = init.method ?? 'GET';
+      chamadas.push({ metodo, url: String(url), corpo: init.body ? JSON.parse(String(init.body)) : null });
+      if (/\/conversations\/76\/messages/.test(String(url))) {
+        if (mensagens === 'falha') return new Response('fora do ar', { status: 502 });
+        return Response.json({ payload: mensagens });
+      }
+      if (metodo === 'GET') return Response.json({ custom_attributes: {} });
+      return Response.json({ ok: true });
+    });
+    return c;
+  };
+
+  // a mensagem enviada `s` segundos depois da do lead
+  const enviadaApos = (s: number, content = 'Olá! Seja muito bem-vindo(a) à Locadora Exatidão 🤝') => ({
+    payload: msg(
+      { id: 502, content, created_at: new Date((LEAD_EM + s) * 1000).toISOString() },
+      { board_step: { name: 'Novo Lead' } },
+    ),
+    mensagens: [
+      { id: 501, message_type: 0, created_at: LEAD_EM },
+      { id: 502, message_type: 1, created_at: LEAD_EM + s },
+    ],
+  });
+
+  test('a boas-vindas 1 s depois do lead nao move o card', async () => {
+    const { payload, mensagens } = enviadaApos(1);
+    const { env, consultar } = cenarioAuto(true, mensagens);
+
+    const r = await moverPelaResposta(env, 1, payload);
+
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toMatch(/mensagem automatica, 1 s depois do lead/);
+    expect(moveu()).toBeUndefined();
+    // no historico como automatica: o painel conta, e a checagem dos gatilhos deixa de fora
+    const [m] = consultar<{ moveu: number; motivo: string; gatilho: string }>(
+      'SELECT moveu, motivo, gatilho FROM card_moves',
+    );
+    expect(m).toMatchObject({ moveu: 0, motivo: 'mensagem automatica', gatilho: 'pelo tempo' });
+  });
+
+  test('a resposta da atendente 40 s depois move', async () => {
+    const { payload, mensagens } = enviadaApos(40, 'Bom dia, Talita! Qual o tamanho da obra?');
+    const { env } = cenarioAuto(true, mensagens);
+
+    const r = await moverPelaResposta(env, 1, payload);
+
+    expect(r.status).toBe('ok');
+    expect(moveu()!.corpo).toEqual({ board_step_id: 28 });
+  });
+
+  test('frase-gatilho move mesmo dentro da janela', async () => {
+    // a frase e' escolha deliberada da equipe; o tempo so' vale para a resposta comum
+    const { payload, mensagens } = enviadaApos(2, 'Sua consulta ficou confirmada para terça às 14h.');
+    const { env } = cenarioAuto(true, mensagens);
+
+    const r = await moverPelaResposta(env, 1, payload);
+
+    expect(r.status).toBe('ok');
+    expect(moveu()!.corpo).toEqual({ board_step_id: 29 });
+  });
+
+  test('desligado, segue como sempre e nem pergunta ao Chatwoot', async () => {
+    const { payload, mensagens } = enviadaApos(1);
+    const { env } = cenarioAuto(false, mensagens);
+
+    const r = await moverPelaResposta(env, 1, payload);
+
+    expect(r.status).toBe('ok');
+    expect(chamadas.some((c) => /\/messages/.test(c.url))).toBe(false);
+  });
+
+  test('Chatwoot fora do ar vira erro para a fila retentar, sem mover', async () => {
+    // mover no escuro seria repetir o erro que a regra existe para evitar
+    const { payload } = enviadaApos(1);
+    const { env } = cenarioAuto(true, 'falha');
+
+    const r = await moverPelaResposta(env, 1, payload);
+
+    expect(r.status).toBe('erro');
+    expect(moveu()).toBeUndefined();
+  });
+});
