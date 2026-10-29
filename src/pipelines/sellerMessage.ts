@@ -4,7 +4,7 @@ import { matchStage } from '../domain/triggers';
 import { canMove } from '../domain/movement';
 import { simularRespostas } from '../domain/historico';
 import { extractValue } from '../domain/value';
-import { ehRespostaAutomatica } from '../domain/respostasAutomaticas';
+import { casarRespostaAutomatica, MOTIVO_AUTOMATICA } from '../domain/respostasAutomaticas';
 import type { Stage, Trigger, ValuePattern } from '../domain/types';
 
 /**
@@ -105,8 +105,14 @@ export async function moverPelaResposta(
    * atendente: chegam em segundos e levavam o card para "Qualificando" antes de
    * alguém olhar o lead. O card fica em "Novo Lead" até uma resposta de gente.
    */
-  const automaticas = await respostasAutomaticas(env, tenantId);
-  if (ehRespostaAutomatica(texto, automaticas)) {
+  const automatica = casarRespostaAutomatica(texto, await respostasAutomaticas(env, tenantId));
+  if (automatica) {
+    // fica no historico: e' dele que o painel conta quantas vezes cada trecho
+    // segurou o card
+    await registrar(env, tenantId, {
+      taskId, conversaId, de: str(obj(task?.board_step)?.name), para: null,
+      moveu: false, gatilho: automatica, trecho: texto.slice(0, 160), motivo: MOTIVO_AUTOMATICA,
+    });
     return {
       status: 'ignorado',
       motivo: `conversa ${conversaId}: resposta automatica, o card espera o atendente`,
@@ -235,7 +241,7 @@ async function padroesDeValor(env: Env, tenantId: number): Promise<ValuePattern[
 async function registrar(
   env: Env,
   tenantId: number,
-  m: { taskId: number; conversaId: number; de: string | null; para: string; moveu: boolean; gatilho: string; trecho: string; motivo: string },
+  m: { taskId: number; conversaId: number; de: string | null; para: string | null; moveu: boolean; gatilho: string; trecho: string; motivo: string },
 ): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO card_moves (tenant_id, task_id, conversation_id, gatilho, trecho, etapa_de, etapa_para, moveu, motivo)

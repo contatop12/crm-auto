@@ -215,6 +215,22 @@ describe('resposta automatica nao conta como resposta do atendente', () => {
     expect(moveu()).toBeUndefined();
   });
 
+  test('o historico guarda qual trecho segurou o card', async () => {
+    // e' por esta linha que o painel mostra que o trecho ainda casa
+    const { env, consultar } = cenarioLocadora();
+    await moverPelaResposta(env, 1, msg({
+      content: 'Olá! Seja muito bem-vindo(a) à Locadora Exatidão 🤝',
+    }, { board_step: { name: 'Novo Lead' } }));
+
+    expect(consultar('SELECT gatilho, etapa_de, etapa_para, moveu, motivo FROM card_moves')).toEqual([{
+      gatilho: 'Seja muito bem-vindo(a) à Locadora Exatidão',
+      etapa_de: 'Novo Lead',
+      etapa_para: null,
+      moveu: 0,
+      motivo: 'mensagem automatica',
+    }]);
+  });
+
   test('a mensagem do fluxo do formulario tambem nao move', async () => {
     const { env } = cenarioLocadora();
     const r = await moverPelaResposta(env, 1, msg({
