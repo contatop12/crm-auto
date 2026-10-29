@@ -249,7 +249,7 @@
 
       /* ---------- controles ---------- */
 
-      button, select, input {
+      button, select, input, textarea {
         font: inherit; color: var(--tinta);
         border: 1px solid var(--linha-forte); border-radius: var(--r);
         background: var(--carta); padding: 8px 8px;
@@ -261,8 +261,10 @@
       button.principal:hover:not(:disabled) { background: #000; }
       button.perigo { color: var(--falha); border-color: var(--falha); background: var(--carta); }
 
-      input, select { box-shadow: none; }
-      input::placeholder { color: var(--tinta-3); }
+      input, select, textarea { box-shadow: none; }
+      input::placeholder, textarea::placeholder { color: var(--tinta-3); }
+      /* a mensagem automatica inteira cabe: e' colada de uma vez, com quebras de linha */
+      textarea.trecho-auto { width: 100%; min-height: 104px; resize: vertical; line-height: 1.5; }
       :focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
 
       .linha-acoes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -1000,8 +1002,12 @@
                 </label>
                 <p class="dica" id="automatica-tempo"></p>
               </div>
+              <div class="campo">
+                <label for="a-frase">Trecho da mensagem automática · tipo contém</label>
+                <textarea id="a-frase" class="trecho-auto" rows="4" placeholder="Aqui é a Vania da Locadora Exatidão. Vi que você se cadastrou em nosso site em busca de"></textarea>
+                <p class="dica">Tipo <strong>contém</strong>: a mensagem que tiver este trecho, em qualquer ponto, é da automação. Cole o pedaço que não muda e deixe de fora o nome do lead. Negrito, emoji, acento e quebra de linha não atrapalham.</p>
+              </div>
               <div class="linha-acoes form-linha">
-                <input id="a-frase" placeholder="Seja muito bem-vindo(a) à Locadora Exatidão" style="max-width:420px" title="Cole um trecho que só a automação escreve. A mensagem que contém o trecho, em qualquer ponto, é da automação." />
                 <button id="btn-automatica" class="principal">Adicionar</button>
               </div>
               <div id="automaticas"></div>
@@ -2829,9 +2835,9 @@
 
         const pag = fatiar(lista, 'automaticas', offset);
         alvo.innerHTML = lista.length
-          ? '<table><thead><tr><th>Trecho</th><th>Segurou o card (7 dias)</th><th>Última vez</th><th></th></tr></thead><tbody>' +
+          ? '<table><thead><tr><th>Trecho</th><th>Tipo</th><th>Segurou o card (7 dias)</th><th>Última vez</th><th></th></tr></thead><tbody>' +
             pag.itens.map(function (a) {
-              return '<tr><td>' + esc(a.frase) + '</td>' +
+              return '<tr><td>' + esc(a.frase) + '</td><td>Contém</td>' +
                 '<td class="mono">' + a.seguradas_7d + '</td>' +
                 '<td' + (a.ultima_em ? ' title="' + esc(hora(a.ultima_em)) + '">' + haQuanto(a.ultima_em) : ' class="motivo">nunca') + '</td>' +
                 '<td><button class="a-del" data-a="' + a.id + '">remover</button></td></tr>';

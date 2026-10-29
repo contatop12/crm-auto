@@ -35,13 +35,24 @@ export function casarRespostaAutomatica(
   texto: string | null | undefined,
   frases: Array<{ frase: string }>,
 ): string | null {
-  const t = limpa(texto);
+  const t = semFormatacao(texto);
   if (!t) return null;
   const achou = frases.find((f) => {
-    const alvo = limpa(f.frase);
+    const alvo = semFormatacao(f.frase);
     return !!alvo && t.includes(alvo);
   });
   return achou ? achou.frase : null;
+}
+
+/**
+ * `limpa` sem os marcadores do WhatsApp (*negrito*, _itálico_, ~riscado~).
+ *
+ * A mensagem chega crua, com os asteriscos; o trecho é copiado do Chatwoot ou
+ * do WhatsApp, que mostram o negrito e copiam sem eles. Num trecho longo quase
+ * sempre há um pedaço em negrito, e ele nunca casaria.
+ */
+function semFormatacao(s: string | null | undefined): string {
+  return limpa(String(s ?? '').replace(/[*_~`]/g, ''));
 }
 
 /** O erro a mostrar no cadastro, ou `null` quando o trecho serve. */
