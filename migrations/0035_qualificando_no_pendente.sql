@@ -15,9 +15,17 @@ WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'locadora');
 -- Destes 49, seis nunca passaram pelo aviso do CRM (cinco sao de antes de
 -- 07/09/2026, o primeiro aviso da Locadora): sem o registro, o grupo receberia
 -- como lead novo quem a vendedora atende ha' mais de um mes.
+-- Um INSERT por card: o D1 recusa UNION com 6 termos ("too many terms in
+-- compound SELECT").
 INSERT OR IGNORE INTO group_notifications (tenant_id, chave, task_id, status, erro)
-SELECT t.id, 'task:' || a.task, a.task, 'ignorado', 'card antigo de Qualificando, levado para Pendente: ja atendido'
-  FROM tenants t
-  JOIN (SELECT 1142 AS task UNION ALL SELECT 1378 UNION ALL SELECT 1415
-        UNION ALL SELECT 1447 UNION ALL SELECT 1465 UNION ALL SELECT 2237) a
- WHERE t.slug = 'locadora';
+SELECT id, 'task:1142', 1142, 'ignorado', 'card antigo de Qualificando, levado para Pendente: ja atendido' FROM tenants WHERE slug = 'locadora';
+INSERT OR IGNORE INTO group_notifications (tenant_id, chave, task_id, status, erro)
+SELECT id, 'task:1378', 1378, 'ignorado', 'card antigo de Qualificando, levado para Pendente: ja atendido' FROM tenants WHERE slug = 'locadora';
+INSERT OR IGNORE INTO group_notifications (tenant_id, chave, task_id, status, erro)
+SELECT id, 'task:1415', 1415, 'ignorado', 'card antigo de Qualificando, levado para Pendente: ja atendido' FROM tenants WHERE slug = 'locadora';
+INSERT OR IGNORE INTO group_notifications (tenant_id, chave, task_id, status, erro)
+SELECT id, 'task:1447', 1447, 'ignorado', 'card antigo de Qualificando, levado para Pendente: ja atendido' FROM tenants WHERE slug = 'locadora';
+INSERT OR IGNORE INTO group_notifications (tenant_id, chave, task_id, status, erro)
+SELECT id, 'task:1465', 1465, 'ignorado', 'card antigo de Qualificando, levado para Pendente: ja atendido' FROM tenants WHERE slug = 'locadora';
+INSERT OR IGNORE INTO group_notifications (tenant_id, chave, task_id, status, erro)
+SELECT id, 'task:2237', 2237, 'ignorado', 'card antigo de Qualificando, levado para Pendente: ja atendido' FROM tenants WHERE slug = 'locadora';
