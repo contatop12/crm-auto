@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { exigir } from '../domain/config';
+import type { ConversaDoContato } from '../domain/contatoDuplicado';
 import type { MensagemCw } from '../domain/respostasAutomaticas';
 
 /**
@@ -364,6 +365,22 @@ export class ChatwootClient {
     );
     const c = (r.payload ?? r) as Record<string, unknown>;
     return c && typeof c === 'object' && c.id ? c : null;
+  }
+
+  /** Atribui a conversa (display id) a um agente. O card do kanban sincroniza sozinho. */
+  async atribuirConversa(acc: number, conversaId: number, agenteId: number): Promise<void> {
+    await this.req('POST', `/api/v1/accounts/${acc}/conversations/${conversaId}/assignments`, {
+      assignee_id: agenteId,
+    });
+  }
+
+  /** Conversas do contato em todas as caixas (display ids em `id`). */
+  async conversasDoContato(acc: number, contatoId: number): Promise<ConversaDoContato[]> {
+    const r = await this.req<{ payload?: ConversaDoContato[] }>(
+      'GET',
+      `/api/v1/accounts/${acc}/contacts/${contatoId}/conversations`,
+    );
+    return r.payload ?? [];
   }
 
   /** Um card pelo id. E' o que o reenvio precisa: o corpo que o webhook mandaria. */
