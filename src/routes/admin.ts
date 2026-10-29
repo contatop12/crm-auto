@@ -30,6 +30,11 @@ import {
 } from '../domain/padroes';
 import { avaliarEtapa } from '../domain/fluxo';
 import { classificarCards } from '../domain/orfaos';
+import {
+  casarRespostaAutomatica,
+  validarRespostaAutomatica,
+  MOTIVO_AUTOMATICA,
+} from '../domain/respostasAutomaticas';
 import { vigiarWhatsapp } from '../pipelines/vigiaWhatsapp';
 import { metaAds } from './metaAds';
 
@@ -952,15 +957,17 @@ admin.get('/tenants/:id/fluxo', async (c) => {
     .bind(id)
     .first<{ t24: number; t7: number; ultimo: string | null }>();
 
+  // A boas-vindas segurada nao e' o atendente movendo o funil: contada, a
+  // etapa pareceria viva so' porque a automacao do cliente fala.
   const moves = await c.env.DB.prepare(
     `SELECT
        SUM(CASE WHEN created_at >= datetime('now','-1 day') THEN 1 ELSE 0 END) AS t24,
        SUM(CASE WHEN created_at >= datetime('now','-7 day') THEN 1 ELSE 0 END) AS t7,
        MAX(CASE WHEN moveu = 1 THEN created_at END) AS ultimo,
        SUM(CASE WHEN moveu = 0 THEN 1 ELSE 0 END) AS nao_moveu
-     FROM card_moves WHERE tenant_id = ?`,
+     FROM card_moves WHERE tenant_id = ? AND COALESCE(motivo, '') <> ?`,
   )
-    .bind(id)
+    .bind(id, MOTIVO_AUTOMATICA)
     .first<{ t24: number; t7: number; ultimo: string | null; nao_moveu: number }>();
 
   /**
@@ -1140,6 +1147,67 @@ admin.delete('/tenants/:id/gatilhos/:gid', async (c) => {
     .bind(Number(c.req.param('gid')), Number(c.req.param('id')))
     .run();
   return r.meta.changes ? c.json({ ok: true }) : c.json({ error: 'gatilho nao encontrado' }, 404);
+});
+
+// ---------------------------------------------------------------------------
+// Mensagens automaticas por cliente
+// ---------------------------------------------------------------------------
+
+/**
+ * Trechos da automacao do cliente: boas-vindas, continuidade do formulario,
+ * fora do horario. Mensagem que contem um deles nao conta como resposta do
+ * atendente e o card fica em "Novo Lead". Ver `casarRespostaAutomatica`.
+ *
+ * Cada trecho vem com quantas vezes segurou o card: trecho que nunca segura e'
+ * automacao que mudou de texto, e o card volta a andar sozinho.
+ */
+admin.get('/tenants/:id/respostas-automaticas', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT r.id, r.frase, r.created_at,
+            (SELECT COUNT(*) FROM card_moves m
+              WHERE m.tenant_id = r.tenant_id AND m.motivo = ? AND m.gatilho = r.frase
+                AND m.created_at >= datetime('now','-7 day')) AS seguradas_7d,
+            (SELECT MAX(m.created_at) FROM card_moves m
+              WHERE m.tenant_id = r.tenant_id AND m.motivo = ? AND m.gatilho = r.frase) AS ultima_em
+     FROM respostas_automaticas r
+     WHERE r.tenant_id = ?
+     ORDER BY r.id`,
+  )
+    .bind(MOTIVO_AUTOMATICA, MOTIVO_AUTOMATICA, Number(c.req.param('id')))
+    .all();
+  return c.json(results);
+});
+
+admin.post('/tenants/:id/respostas-automaticas', async (c) => {
+  const id = Number(c.req.param('id'));
+  const b = await c.req.json<{ frase?: string }>();
+
+  const frase = String(b.frase ?? '').trim();
+  const erro = validarRespostaAutomatica(frase);
+  if (erro) return c.json({ error: erro }, 400);
+
+  // Trecho que ja' contem um cadastrado nao segura nada a mais: so' poluiria a
+  // lista e dividiria a contagem entre os dois.
+  const { results: atuais } = await c.env.DB.prepare(
+    'SELECT frase FROM respostas_automaticas WHERE tenant_id = ?',
+  )
+    .bind(id)
+    .all<{ frase: string }>();
+  const coberto = casarRespostaAutomatica(frase, atuais);
+  if (coberto) return c.json({ error: `já coberto pelo trecho "${coberto}"` }, 409);
+
+  await c.env.DB.prepare('INSERT INTO respostas_automaticas (tenant_id, frase) VALUES (?, ?)')
+    .bind(id, frase)
+    .run();
+
+  return c.json({ ok: true }, 201);
+});
+
+admin.delete('/tenants/:id/respostas-automaticas/:rid', async (c) => {
+  const r = await c.env.DB.prepare('DELETE FROM respostas_automaticas WHERE id = ? AND tenant_id = ?')
+    .bind(Number(c.req.param('rid')), Number(c.req.param('id')))
+    .run();
+  return r.meta.changes ? c.json({ ok: true }) : c.json({ error: 'trecho nao encontrado' }, 404);
 });
 
 /**

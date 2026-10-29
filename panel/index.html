@@ -979,6 +979,21 @@
               </div>
               <div id="gatilhos"></div>
             </section>
+
+            <section>
+              <header class="secao-topo">
+                <div>
+                  <h2>Mensagens automáticas</h2>
+                  <p class="dica">Boas-vindas e outras mensagens que a automação do cliente manda sozinha. Elas não movem o card: o lead fica em Novo Lead até o atendente responder.</p>
+                </div>
+                <span class="carregando" id="automatica-estado"></span>
+              </header>
+              <div class="linha-acoes form-linha">
+                <input id="a-frase" placeholder="Seja muito bem-vindo(a) à Locadora Exatidão" style="max-width:420px" title="Cole um trecho que só a automação escreve. A mensagem que contém o trecho, em qualquer ponto, é da automação." />
+                <button id="btn-automatica" class="principal">Adicionar</button>
+              </div>
+              <div id="automaticas"></div>
+            </section>
           </div>
 
           <div class="painel" data-painel="canais" hidden>
@@ -1359,6 +1374,7 @@
         document.getElementById('btn-metas').addEventListener('click', () => preverMetas(id));
         document.getElementById('btn-meta-nova').addEventListener('click', () => adicionarMeta(id));
         document.getElementById('btn-gatilho').addEventListener('click', () => adicionarGatilho(id));
+        document.getElementById('btn-automatica').addEventListener('click', () => adicionarAutomatica(id));
         document.getElementById('btn-orfaos').addEventListener('click', () => procurarOrfaos(id));
         document.getElementById('btn-l-add').addEventListener('click', () => criarEtiqueta(id));
         document.getElementById('btn-reproc').addEventListener('click', () => reprocessar(id, false));
@@ -1371,7 +1387,7 @@
         // e só rodam quando alguém aperta o botão.
         const CARGAS = {
           geral: () => carregarFluxo(id),
-          funil: () => { carregarEtapas(id); carregarGatilhos(id); },
+          funil: () => { carregarEtapas(id); carregarGatilhos(id); carregarAutomaticas(id); },
           'canais/chatwoot': () => {
             resumoChatwoot(lerCfg());
             carregarWebhooks(id, slug);
@@ -2786,6 +2802,52 @@
           frase.value = '';
           emoji.value = '';
           await carregarGatilhos(id);
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
+      }
+
+      // O trecho que nunca segura nada e' automacao que mudou de texto: o card
+      // volta a sair de "Novo Lead" sozinho. A contagem e' o que mostra isso.
+      async function carregarAutomaticas(id, offset) {
+        const alvo = document.getElementById('automaticas');
+        const lista = await api('/tenants/' + id + '/respostas-automaticas').catch(function () { return []; });
+
+        const pag = fatiar(lista, 'automaticas', offset);
+        alvo.innerHTML = lista.length
+          ? '<table><thead><tr><th>Trecho</th><th>Segurou o card (7 dias)</th><th>Última vez</th><th></th></tr></thead><tbody>' +
+            pag.itens.map(function (a) {
+              return '<tr><td>' + esc(a.frase) + '</td>' +
+                '<td class="mono">' + a.seguradas_7d + '</td>' +
+                '<td' + (a.ultima_em ? ' title="' + esc(hora(a.ultima_em)) + '">' + haQuanto(a.ultima_em) : ' class="motivo">nunca') + '</td>' +
+                '<td><button class="a-del" data-a="' + a.id + '">remover</button></td></tr>';
+            }).join('') + '</tbody></table>' + pag.controles
+          : '<div class="vazio"><p>Nenhuma mensagem automática cadastrada.</p>' +
+            '<p class="mono">Sem cadastro, a primeira mensagem enviada ao lead já conta como resposta do atendente.</p></div>';
+
+        ligarPaginacao(alvo, function (o) { carregarAutomaticas(id, o); });
+        alvo.querySelectorAll('.a-del').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            try {
+              await enviar('/tenants/' + id + '/respostas-automaticas/' + b.dataset.a, 'DELETE');
+              await carregarAutomaticas(id, pag.inicio);
+            } catch (e) {
+              document.getElementById('automatica-estado').textContent = 'falhou: ' + e.message;
+            }
+          });
+        });
+
+        document.getElementById('automatica-estado').textContent =
+          lista.length ? lista.length + (lista.length === 1 ? ' trecho' : ' trechos') : '';
+      }
+
+      async function adicionarAutomatica(id) {
+        const frase = document.getElementById('a-frase');
+        const estado = document.getElementById('automatica-estado');
+        try {
+          await enviar('/tenants/' + id + '/respostas-automaticas', 'POST', { frase: frase.value });
+          frase.value = '';
+          await carregarAutomaticas(id);
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         }
