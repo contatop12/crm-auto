@@ -528,6 +528,8 @@
       .switch .rotulo { font-size: 13px; }
       /* o vermelho e' do envio ao Google, que nao volta atras; este so' segura o card */
       .switch.calmo input:checked + .trilho { background: var(--fluxo); border-color: var(--fluxo); }
+      /* dentro de .campo, o `label { display: block }` vence e a trilha some */
+      .campo .switch { display: inline-flex; margin-bottom: 4px; }
 
       a.botao-link {
         display: inline-block; text-decoration: none; font: inherit;
