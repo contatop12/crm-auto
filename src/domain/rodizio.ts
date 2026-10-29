@@ -1,8 +1,9 @@
 /**
  * Rodizio de atendentes por caixa de entrada (tenant_config.cw_rodizio).
  *
- * JSON {"<inbox>":[<agente>,...]}. Locadora: 8910 alterna Tania/Isabella
- * ([15,13]); 8844 e' sempre a Bianca ([12]); 2244 sempre a Vania ([14]).
+ * JSON {"<inbox>":[<agente>,...]}. Locadora: 8844 e' sempre a Bianca ([12]);
+ * 2244 sempre a Vania ([14]); o 8910 fica fora, atribuido a mao. Com mais de
+ * um agente na lista, alterna entre eles.
  */
 
 export type ConfigRodizio = Record<number, number[]>;

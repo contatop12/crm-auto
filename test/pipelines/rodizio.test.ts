@@ -35,7 +35,7 @@ afterEach(() => vi.unstubAllGlobals());
 const atribuicoes = () => chamadas.filter((c) => c.metodo === 'POST').map((c) => [c.url.replace('https://cw.teste/api/v1/accounts/5', ''), c.corpo]);
 
 describe('atribuirEmRodizio', () => {
-  test('8910 alterna Tania e Isabella a cada conversa', async () => {
+  test('caixa com dois agentes alterna a cada conversa', async () => {
     const { env } = cenario();
     for (const n of [1, 2, 3]) await atribuirEmRodizio(env, 4, msg({ conversa: 1400 + n }));
     expect(atribuicoes().map(([, c]) => (c as { assignee_id: number }).assignee_id)).toEqual([15, 13, 15]);
@@ -75,6 +75,13 @@ describe('atribuirEmRodizio', () => {
     await atribuirEmRodizio(cenario(null).env, 4, msg());
     await atribuirEmRodizio(cenario().env, 4, msg({ inbox: 99 }));
     expect(atribuicoes()).toEqual([]);
+  });
+
+  test('Locadora: 8910 fora da lista fica sem responsavel, para o time atribuir a mao', async () => {
+    const { env, consultar } = cenario('{"16":[12],"17":[14]}');
+    await atribuirEmRodizio(env, 4, msg({ inbox: 15 }));
+    expect(chamadas).toEqual([]);
+    expect(consultar('SELECT * FROM rodizio_estado')).toEqual([]);
   });
 
   test('falha da API nunca sobe como erro', async () => {

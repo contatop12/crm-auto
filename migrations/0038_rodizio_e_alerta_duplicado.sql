@@ -5,7 +5,10 @@
 -- responsavel ate' alguem pegar. Agora o CRM atribui quando a mensagem do lead
 -- chega, em rodizio dentro da lista da inbox.
 --
--- `cw_rodizio`: JSON {"<inbox>":[<agente>,...]}; NULL = desligado.
+-- O 8910 fica de fora: la' o time atribui a mao (pedido do cliente, 29/10).
+--
+-- `cw_rodizio`: JSON {"<inbox>":[<agente>,...]}; NULL = desligado; inbox fora
+-- da lista = sem atribuicao automatica.
 ALTER TABLE tenant_config ADD COLUMN cw_rodizio TEXT;
 
 -- Contato que fala com dois numeros do mesmo cliente: o alerta vai para este
@@ -34,5 +37,5 @@ CREATE TABLE alertas_duplicado (
   UNIQUE (tenant_id, contato_id, inbox_a, inbox_b)
 );
 
-UPDATE tenant_config SET cw_rodizio = '{"15":[15,13],"16":[12],"17":[14]}'
+UPDATE tenant_config SET cw_rodizio = '{"16":[12],"17":[14]}'
 WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'locadora');
