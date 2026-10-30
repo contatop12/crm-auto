@@ -14,6 +14,9 @@ ALTER TABLE tenant_config ADD COLUMN cw_rodizio TEXT;
 -- Contato que fala com dois numeros do mesmo cliente: o alerta vai para este
 -- grupo de WhatsApp (jid ...@g.us, via Evolution). NULL = so' registra e loga.
 ALTER TABLE tenant_config ADD COLUMN alerta_duplicado_grupo TEXT;
+-- Instancia da Evolution que manda o alerta: tem de estar no grupo. NULL = a
+-- de alerta do sistema (EVOLUTION_ALERT_INSTANCE).
+ALTER TABLE tenant_config ADD COLUMN alerta_duplicado_instancia TEXT;
 
 -- Vez de cada inbox. `proximo` so' cresce; o agente e' (proximo-1) % tamanho.
 CREATE TABLE rodizio_estado (
@@ -37,5 +40,8 @@ CREATE TABLE alertas_duplicado (
   UNIQUE (tenant_id, contato_id, inbox_a, inbox_b)
 );
 
-UPDATE tenant_config SET cw_rodizio = '{"16":[12],"17":[14]}'
+-- Alerta no grupo "P12 / Locadora Exatidao - Central de Leads", pela instancia
+-- Ryan (a mesma do Pulseboard, que esta' no grupo).
+UPDATE tenant_config SET cw_rodizio = '{"16":[12],"17":[14]}',
+  alerta_duplicado_grupo = '120363431145908331@g.us', alerta_duplicado_instancia = 'Ryan'
 WHERE tenant_id = (SELECT id FROM tenants WHERE slug = 'locadora');

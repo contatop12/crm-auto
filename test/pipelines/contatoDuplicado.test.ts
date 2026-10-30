@@ -3,11 +3,11 @@ import { fakeD1 } from '../helpers/fakeD1';
 import { alertarContatoDuplicado } from '../../src/pipelines/contatoDuplicado';
 import type { Env } from '../../src/env';
 
-function cenario(grupo: string | null = '120363@g.us') {
+function cenario(grupo: string | null = '120363@g.us', instancia: string | null = null) {
   const { d1, exec, consultar } = fakeD1();
   exec(`INSERT INTO tenants (id, slug, nome, ativo) VALUES (4, 'locadora', 'Locadora Exatidao', 1)`);
-  exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, ingest_key, alerta_duplicado_grupo)
-        VALUES (4, 5, 9, 'k', ${grupo ? `'${grupo}'` : 'NULL'})`);
+  exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, ingest_key, alerta_duplicado_grupo, alerta_duplicado_instancia)
+        VALUES (4, 5, 9, 'k', ${grupo ? `'${grupo}'` : 'NULL'}, ${instancia ? `'${instancia}'` : 'NULL'})`);
   const env = {
     DB: d1, CHATWOOT_BASE_URL: 'https://cw.teste', CHATWOOT_API_TOKEN: 'tok',
     EVOLUTION_SERVER_URL: 'https://evo.teste', EVOLUTION_API_KEY: 'k', EVOLUTION_ALERT_INSTANCE: 'alerta',
@@ -65,6 +65,12 @@ describe('alertarContatoDuplicado', () => {
     expect(envios[0]!.corpo.text).toContain('https://wa.me/5511932346062');
     expect(consultar('SELECT contato_id, inbox_a, inbox_b, alertado_em IS NOT NULL AS ok FROM alertas_duplicado'))
       .toEqual([{ contato_id: 1363, inbox_a: 15, inbox_b: 17, ok: 1 }]);
+  });
+
+  test('instancia do cliente configurada: envia por ela, nao pela de alerta do sistema', async () => {
+    const { env } = cenario('120363@g.us', 'Ryan');
+    await alertarContatoDuplicado(env, 4, msg());
+    expect(envios.map((e) => e.url)).toEqual(['https://evo.teste/message/sendText/Ryan']);
   });
 
   test('so existe conversa na mesma caixa: nada', async () => {

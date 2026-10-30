@@ -34,11 +34,12 @@ export async function alertarContatoDuplicado(env: Env, tenantId: number, payloa
     if (!conversa || !inbox || !contato || !telefone || !recemCriada(conv?.created_at)) return;
 
     const cfg = await env.DB.prepare(
-      `SELECT c.cw_account_id AS acc, c.alerta_duplicado_grupo AS grupo, t.nome
+      `SELECT c.cw_account_id AS acc, c.alerta_duplicado_grupo AS grupo,
+              c.alerta_duplicado_instancia AS instancia, t.nome
        FROM tenant_config c JOIN tenants t ON t.id = c.tenant_id WHERE c.tenant_id = ?`,
     )
       .bind(tenantId)
-      .first<{ acc: number | null; grupo: string | null; nome: string }>();
+      .first<{ acc: number | null; grupo: string | null; instancia: string | null; nome: string }>();
     if (!cfg?.acc) return;
 
     const cw = ChatwootClient.fromEnv(env);
@@ -89,7 +90,8 @@ export async function alertarContatoDuplicado(env: Env, tenantId: number, payloa
       },
     });
 
-    await EvolutionClient.fromEnv(env).enviarTexto(env.EVOLUTION_ALERT_INSTANCE, cfg.grupo, texto);
+    // A instancia tem de estar no grupo: a do cliente, ou a de alerta do sistema.
+    await EvolutionClient.fromEnv(env).enviarTexto(cfg.instancia || env.EVOLUTION_ALERT_INSTANCE, cfg.grupo, texto);
     await env.DB.prepare("UPDATE alertas_duplicado SET alertado_em = datetime('now') WHERE id = ?").bind(reservado).run();
     reservado = null;
     console.log(JSON.stringify({ acao: 'duplicado_alertou', contato, caixas: [a, b], conversas: [conversa, outra.id] }));
