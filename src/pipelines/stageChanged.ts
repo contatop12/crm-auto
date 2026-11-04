@@ -367,6 +367,18 @@ function classificar(ev: { adIdentifiers?: unknown; userData?: unknown }): strin
   return 'user_data_only';
 }
 
+/**
+ * O `+` em `+tenant_id` e' de proposito: tira a coluna do indice. Sem ele o SQLite
+ * ia pelo indice do tenant e lia todos os eventos do cliente (~35 mil linhas, 4,6 s
+ * em 04/11/2026) a cada conversao, logo antes de gravar a planilha, e o banco
+ * recusava o que vinha depois com "D1 DB is overloaded". Pelo indice de status sao
+ * so' os poucos erros (~20 linhas, 2 ms).
+ */
+export const SQL_ERROS_DA_CONVERSAO =
+  `UPDATE events SET resolvido_em = datetime('now'), resolvido_por = 'sistema: a conversao subiu'
+   WHERE +tenant_id = ? AND status = 'erro' AND resolvido_em IS NULL
+     AND event_type = 'kanban_conversao' AND (motivo LIKE ? OR motivo LIKE ?)`;
+
 async function fechar(
   env: Env,
   tenantId: number,
@@ -390,11 +402,7 @@ async function fechar(
   // ("PROTO: ...") em vez da chave ("PROTO-compra: ..."), por isso as duas formas.
   if (status === 'enviado') {
     const protocolo = chave.replace(/-[a-z_0-9]+$/, '');
-    await env.DB.prepare(
-      `UPDATE events SET resolvido_em = datetime('now'), resolvido_por = 'sistema: a conversao subiu'
-       WHERE tenant_id = ? AND status = 'erro' AND resolvido_em IS NULL
-         AND event_type = 'kanban_conversao' AND (motivo LIKE ? OR motivo LIKE ?)`,
-    )
+    await env.DB.prepare(SQL_ERROS_DA_CONVERSAO)
       .bind(tenantId, chave + ':%', protocolo + ': %')
       .run()
       .catch(() => undefined);

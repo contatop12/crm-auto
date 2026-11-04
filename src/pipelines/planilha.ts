@@ -51,7 +51,47 @@ interface ConfigPlanilha {
   cliente: string;
 }
 
+/**
+ * Espera entre as tentativas. Passa dos 10 s da janela do "D1 DB is overloaded" e
+ * fica em 3 tentativas porque cada uma gasta chamadas externas da execucao.
+ */
+const ESPERAS_DA_PLANILHA_MS = [3000, 8000];
+
+/** Banco sobrecarregado, cota do Google, servidor fora: passa sozinho. Cadastro errado, nao. */
+function falhaPassageira(e: unknown): boolean {
+  return /overloaded|D1_ERROR|Planilha (429|5\d\d)|timed? ?out|fetch failed|network/i.test((e as Error).message ?? '');
+}
+
+/**
+ * Grava de novo quando a falha e' passageira, em vez de deixar para a reentrega da fila.
+ *
+ * Quem chama ja' enviou a conversao, entao a fila nao resolve: a reentrega responde
+ * "ja enviada" e nunca volta aqui. Foi assim que Locadora e Martinelli perderam 4
+ * linhas em 03-04/11/2026 (`D1 DB is overloaded`). Sem linha o script da planilha nao
+ * tem o que numerar, e o aviso do grupo sai sem sequencia. Repetir e' seguro: cliques
+ * e conversoes casam por protocolo, e a planilha de leads, por telefone.
+ */
 export async function espelharNaPlanilha(
+  env: Env,
+  tenantId: number,
+  ctx: Omit<ContextoPlanilha, 'cliente'>,
+  esperas: number[] = ESPERAS_DA_PLANILHA_MS,
+): Promise<void> {
+  for (let tentativa = 0; ; tentativa++) {
+    try {
+      return await gravarNaPlanilha(env, tenantId, ctx);
+    } catch (e) {
+      const espera = esperas[tentativa];
+      if (espera === undefined || !falhaPassageira(e)) throw e;
+      console.log(JSON.stringify({
+        acao: 'planilha_retentativa', protocolo: ctx.protocolo, tentativa: tentativa + 1, erro: (e as Error).message.slice(0, 200),
+      }));
+      await new Promise((r) => setTimeout(r, espera));
+    }
+  }
+}
+
+async function gravarNaPlanilha(
   env: Env,
   tenantId: number,
   ctx: Omit<ContextoPlanilha, 'cliente'>,

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fakeD1 } from '../helpers/fakeD1';
-import { enviarConversao } from '../../src/pipelines/stageChanged';
+import { enviarConversao, SQL_ERROS_DA_CONVERSAO } from '../../src/pipelines/stageChanged';
 import type { Env } from '../../src/env';
 
 const FUNIL = 7;
@@ -345,6 +345,18 @@ describe('enviarConversao', () => {
     const { env } = cenario();
     const r = await enviarConversao(env, 1, 'nao sou json');
     expect(r.status).toBe('ignorado');
+  });
+});
+
+describe('limpeza dos erros da conversao', () => {
+  // 04/11/2026: pelo indice do tenant o UPDATE lia ~35 mil linhas e levava 4,6 s a cada
+  // conversao, logo antes de gravar a planilha, e o banco recusava o que vinha depois
+  // ("D1 DB is overloaded"). Pelo indice de status sao ~20 linhas e 2 ms.
+  test('vai pelo indice de status, que so tem os poucos erros', () => {
+    const { consultar } = fakeD1();
+    const plano = consultar<{ detail: string }>(`EXPLAIN QUERY PLAN ${SQL_ERROS_DA_CONVERSAO}`).map((p) => p.detail).join(' ');
+    expect(plano).toContain('idx_events_status');
+    expect(plano).not.toContain('idx_events_tenant_time');
   });
 });
 

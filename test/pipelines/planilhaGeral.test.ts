@@ -97,6 +97,75 @@ describe('Tainã: Geral so com lead do Meta', () => {
   });
 });
 
+describe('a linha do lead nao pode se perder numa falha passageira', () => {
+  const SOBRECARGA = 'D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window';
+  const naoEspera = [0, 0];
+
+  /** O banco recusa as primeiras `vezes` consultas, como em producao. */
+  const sobrecarregado = (env: Env, vezes: number) => {
+    const real = env.DB.prepare.bind(env.DB);
+    let falta = vezes;
+    (env.DB as unknown as { prepare: unknown }).prepare = (sql: string) => {
+      if (falta-- > 0) throw new Error(SOBRECARGA);
+      return real(sql);
+    };
+  };
+
+  // Locadora e Martinelli, 03-04/11/2026: a conversao subiu, a gravacao caiu com
+  // "D1 DB is overloaded" e a reentrega so' dizia "ja enviada". Sem linha, o script
+  // nao tem o que numerar e o aviso sai sem sequencia depois dos 3 min.
+  test('banco sobrecarregado: tenta de novo e a linha entra', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET sheets_geral_canais = NULL WHERE tenant_id = 5`);
+    sobrecarregado(env, 1);
+    await espelharNaPlanilha(env, 5, { tipo: 'conversao', protocolo: 'TAINA-GOOGLE', ensaio: false, conversao: conversa }, naoEspera);
+    expect(abas.Geral!.length).toBe(2);
+  });
+
+  test('a repeticao nao duplica a linha que ja entrou', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET sheets_geral_canais = NULL WHERE tenant_id = 5`);
+    // a Geral entra, a Google Mensagem falha uma vez: a repeticao passa de novo pelas duas
+    let falhou = false;
+    const fetchReal = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      if (!falhou && (init.method ?? 'GET') === 'POST' && decodeURIComponent(String(url)).includes("'Google Mensagem'")) {
+        falhou = true;
+        return Response.json({ error: { message: 'Quota exceeded' } }, { status: 429 });
+      }
+      return fetchReal(url, init);
+    });
+    await espelharNaPlanilha(env, 5, { tipo: 'conversao', protocolo: 'TAINA-GOOGLE', ensaio: false, conversao: conversa }, naoEspera);
+    expect(falhou).toBe(true);
+    expect(abas.Geral!.length).toBe(2);
+    expect(abas['Google Mensagem']!.length).toBe(2);
+  });
+
+  test('desiste depois das tentativas e o erro sobe para quem chamou', async () => {
+    const { env } = cenario();
+    sobrecarregado(env, 99);
+    await expect(
+      espelharNaPlanilha(env, 5, { tipo: 'conversao', protocolo: 'TAINA-GOOGLE', ensaio: false, conversao: conversa }, naoEspera),
+    ).rejects.toThrow('overloaded');
+  });
+
+  test('erro de cadastro nao melhora tentando: falha na primeira', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET sheets_geral_canais = NULL WHERE tenant_id = 5`);
+    abas.Geral = [];
+    let leituras = 0;
+    const fetchReal = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      if (decodeURIComponent(String(url)).includes("'Geral'")) leituras++;
+      return fetchReal(url, init);
+    });
+    await expect(
+      espelharNaPlanilha(env, 5, { tipo: 'conversao', protocolo: 'TAINA-GOOGLE', ensaio: false, conversao: conversa }, naoEspera),
+    ).rejects.toThrow('sem cabecalho');
+    expect(leituras).toBe(1);
+  });
+});
+
 describe('linha que ja esta na Geral', () => {
   const CAB_UTM = ['DATA', 'HORA', 'Canal', 'CAMPANHA', 'TERMO', 'NOME', 'TELEFONE', 'STATUS'];
 
