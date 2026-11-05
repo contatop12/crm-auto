@@ -1,0 +1,90 @@
+import { describe, test, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+/** Roda o script num contexto sem tela: so' as funcoes puras interessam aqui. */
+function carregar() {
+  const window: Record<string, any> = {};
+  let observados = 0;
+  vm.runInNewContext(readFileSync('panel/chatwoot-categorias.js', 'utf8'), {
+    window,
+    document: { currentScript: null, body: {}, addEventListener() {} },
+    location: { pathname: '/app/accounts/5/dashboard' },
+    console,
+    URL,
+    setTimeout: () => 0,
+    MutationObserver: class {
+      observe() {
+        observados++;
+      }
+    },
+  });
+  return { api: window.__p12Categorias, observados: () => observados };
+}
+
+const porTitulo = {
+  'google-ads': { id: 1, title: 'google-ads', color: '#00f' },
+  'preco-da-locacao': { id: 113, title: 'preco-da-locacao', color: '#f00' },
+  'valor-do-frete': { id: 114, title: 'valor-do-frete', color: '#f00' },
+  betoneira: { id: 200, title: 'betoneira', color: '#fa0' },
+};
+const categorias = [
+  { id: 1, nome: 'Motivo de perda', etiquetas: [113, 114] },
+  { id: 2, nome: 'Equipamento', etiquetas: [200] },
+  { id: 3, nome: 'Vazia', etiquetas: [] },
+];
+
+describe('script do painel', () => {
+  test('liga o observador sem quebrar, mesmo fora de um <script src>', () => {
+    const { api, observados } = carregar();
+    expect(typeof api.agrupar).toBe('function');
+    expect(observados()).toBe(1);
+  });
+
+  test('agrupa na ordem das categorias, e so as que tem etiqueta no card', () => {
+    const { api } = carregar();
+    const grupos = api.agrupar(['betoneira', 'google-ads', 'valor-do-frete', 'preco-da-locacao'], categorias, porTitulo);
+    expect(JSON.parse(JSON.stringify(grupos))).toEqual([
+      {
+        nome: 'Motivo de perda',
+        etiquetas: [
+          { titulo: 'valor-do-frete', cor: '#f00' },
+          { titulo: 'preco-da-locacao', cor: '#f00' },
+        ],
+      },
+      { nome: 'Equipamento', etiquetas: [{ titulo: 'betoneira', cor: '#fa0' }] },
+    ]);
+  });
+
+  test('card sem etiqueta de categoria, ou com etiqueta desconhecida: nada', () => {
+    const { api } = carregar();
+    expect(api.agrupar(['google-ads'], categorias, porTitulo).length).toBe(0);
+    expect(api.agrupar(['nao-existe'], categorias, porTitulo).length).toBe(0);
+    expect(api.agrupar([], categorias, porTitulo).length).toBe(0);
+  });
+
+  test('sessao: pega so os cabecalhos que importam do cookie', () => {
+    const { api } = carregar();
+    const cookie = encodeURIComponent(
+      JSON.stringify({ 'access-token': 't', client: 'c', uid: 'u', expiry: '1', 'token-type': 'Bearer', server: 'cloudflare' }),
+    );
+    expect(JSON.parse(JSON.stringify(api.sessaoDoCookie(`x=1; cw_d_session_info=${cookie}; y=2`)))).toEqual({
+      'access-token': 't',
+      client: 'c',
+      uid: 'u',
+      expiry: '1',
+      'token-type': 'Bearer',
+    });
+    expect(api.sessaoDoCookie('x=1')).toBeNull();
+  });
+
+  test('so age no quadro e na tela de Etiquetas', () => {
+    const { api } = carregar();
+    const rota = (c: string) => JSON.parse(JSON.stringify(api.rotaAtual(c)));
+    expect(rota('/app/accounts/5/kanban/9')).toEqual({ tipo: 'kanban', conta: 5, quadro: 9 });
+    expect(rota('/app/accounts/5/kanban/9/task/1159')).toEqual({ tipo: 'kanban', conta: 5, quadro: 9 });
+    expect(rota('/app/accounts/5/settings/labels/list')).toEqual({ tipo: 'etiquetas', conta: 5 });
+    expect(api.rotaAtual('/app/accounts/5/kanban/overview')).toBeNull();
+    expect(api.rotaAtual('/app/accounts/5/dashboard')).toBeNull();
+  });
+});
