@@ -5,7 +5,8 @@
  * codigo do Chatwoot: so' acrescenta elementos a tela, e e' servido pelo CRM em
  * /ingest/categorias/script.js, entao corrigir aqui e' um deploy do CRM.
  *
- * Tambem mostra os funis favoritos no menu, com o Kanban fechado.
+ * Tambem mostra os funis favoritos no menu, com o Kanban fechado, e o numero real de
+ * cards no cabecalho de cada etapa.
  *
  * Regra de ouro: qualquer falha deixa a tela como ela e' sem o script. Nada de
  * erro na tela, nada de excecao solta. Texto vindo da API entra por textContent.
@@ -666,6 +667,105 @@
     if (atual.style.display !== exibicao) atual.style.display = exibicao;
   }
 
+  // ---- numero real de cada etapa ----------------------------------------------
+
+  // O numero do cabecalho vem de um contador do Chatwoot que sai de sincronia com a lista
+  // (etapa vazia marcando 4, ou ate' -2). A lista e' a verdade: aqui o cabecalho mostra o
+  // total dela. Sem resposta da API, fica o numero do Chatwoot.
+  var contagem = { quadro: null, reais: {}, carregando: false, carregadoEm: 0, assinatura: null, timer: null };
+
+  function totalDaEtapa(resposta) {
+    var n = resposta && resposta.meta && resposta.meta.total_count;
+    return typeof n === 'number' && n >= 0 ? n : null;
+  }
+
+  function carregarContagens(quadro) {
+    if (contagem.carregando) return;
+    contagem.carregando = true;
+    contagem.carregadoEm = Date.now();
+    chatwoot('/kanban/boards/' + quadro + '/steps')
+      .then(function (r) {
+        var etapas = r.steps || [];
+        return Promise.all(
+          etapas.map(function (e) {
+            return chatwoot('/kanban/tasks?board_step_id=' + e.id + '&page=1&per_page=1').then(function (lista) {
+              return { nome: e.name, total: totalDaEtapa(lista) };
+            });
+          }),
+        );
+      })
+      .then(function (totais) {
+        if (contagem.quadro !== quadro) return;
+        var reais = {};
+        totais.forEach(function (x) {
+          if (x.total !== null) reais[(x.nome || '').trim()] = x.total;
+        });
+        contagem.reais = reais;
+      })
+      .catch(function (e) {
+        console.debug('[p12-categorias]', e && e.message);
+      })
+      .then(function () {
+        contagem.carregando = false;
+        agendar();
+      });
+  }
+
+  /** Muda quando um card entra ou sai de uma coluna: hora de recontar. */
+  function assinaturaDasColunas() {
+    var partes = [];
+    document.querySelectorAll('.kanban-column-body > div').forEach(function (d) {
+      var comp = d.__draggable_component__;
+      partes.push(comp && Array.isArray(comp.realList) ? comp.realList.length : '-');
+    });
+    return partes.join(',');
+  }
+
+  function acharNumero(cabecalho) {
+    var spans = cabecalho.querySelectorAll('span');
+    for (var i = 0; i < spans.length; i++) {
+      if (!spans[i].children.length && /^-?\d+$/.test((spans[i].textContent || '').trim())) return spans[i];
+    }
+    return null;
+  }
+
+  function aplicarContagens(rota) {
+    var assinatura = assinaturaDasColunas();
+    if (contagem.quadro !== rota.quadro) {
+      contagem.quadro = rota.quadro;
+      contagem.reais = {};
+      contagem.assinatura = assinatura;
+      carregarContagens(rota.quadro);
+    } else if (assinatura !== contagem.assinatura) {
+      contagem.assinatura = assinatura;
+      clearTimeout(contagem.timer);
+      contagem.timer = setTimeout(
+        seguro(function () {
+          carregarContagens(rota.quadro);
+        }),
+        1500,
+      );
+    } else if (Date.now() - contagem.carregadoEm > RECARREGAR_MS) {
+      carregarContagens(rota.quadro);
+    }
+
+    document.querySelectorAll('header h3').forEach(function (h3) {
+      var real = contagem.reais[(h3.textContent || '').trim()];
+      var cabecalho = h3.closest('header');
+      if (real === undefined || !cabecalho) return;
+      var numero = acharNumero(cabecalho);
+      if (!numero || numero.textContent.trim() === String(real)) return;
+      // So' o valor do texto: o no continua sendo o do painel, que segue podendo atualiza-lo.
+      for (var i = 0; i < numero.childNodes.length; i++) {
+        var no = numero.childNodes[i];
+        if (no.nodeType === 3 && /\d/.test(no.nodeValue)) {
+          no.nodeValue = String(real);
+          return;
+        }
+      }
+    });
+  }
+
   // ---- aviso de quebra -------------------------------------------------------
 
   function sinalizar(problema) {
@@ -766,6 +866,8 @@
 
     var rota = rotaAtual(location.pathname);
     if (!rota) return;
+    // Nao depende do CRM nem de haver categorias.
+    if (rota.tipo === 'kanban') seguro(aplicarContagens)(rota);
     if (Date.now() - estado.carregadoEm > RECARREGAR_MS) carregar();
     if (!estado.carregado) return;
     if (rota.tipo === 'kanban') aplicarKanban();
@@ -785,7 +887,7 @@
   function iniciar() {
     new MutationObserver(function () {
       if (contaDaUrl(location.pathname)) agendar();
-    }).observe(document.body, { childList: true, subtree: true });
+    }).observe(document.body, { childList: true, characterData: true, subtree: true });
     agendar();
   }
 
@@ -795,6 +897,7 @@
     rotaAtual: rotaAtual,
     contaDaUrl: contaDaUrl,
     funisFavoritos: funisFavoritos,
+    totalDaEtapa: totalDaEtapa,
   };
 
   seguro(function () {

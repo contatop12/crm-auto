@@ -88,6 +88,15 @@ describe('script do painel', () => {
     expect(api.rotaAtual('/app/accounts/5/dashboard')).toBeNull();
   });
 
+  test('total da etapa: so aceita numero valido, senao fica o do Chatwoot', () => {
+    const { api } = carregar();
+    expect(api.totalDaEtapa({ meta: { total_count: 0 } })).toBe(0);
+    expect(api.totalDaEtapa({ meta: { total_count: 370 } })).toBe(370);
+    expect(api.totalDaEtapa({ meta: {} })).toBeNull();
+    expect(api.totalDaEtapa({ meta: { total_count: -2 } })).toBeNull();
+    expect(api.totalDaEtapa(null)).toBeNull();
+  });
+
   test('conta vem de qualquer tela do painel', () => {
     const { api } = carregar();
     expect(api.contaDaUrl('/app/accounts/8/dashboard')).toBe(8);
