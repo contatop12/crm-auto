@@ -205,10 +205,19 @@ export async function enviarConversao(
 
   if (!posto.meta.changes) {
     const atual = await env.DB.prepare(
-      'SELECT status, validate_only FROM conversions WHERE tenant_id = ? AND dedupe_key = ?',
+      `SELECT status, validate_only, (julianday('now') - julianday(created_at)) * 86400 AS idade_s
+       FROM conversions WHERE tenant_id = ? AND dedupe_key = ?`,
     )
       .bind(tenantId, chave)
-      .first<{ status: string; validate_only: number }>();
+      .first<{ status: string; validate_only: number; idade_s: number }>();
+
+    // Outra execucao esta' subindo esta conversao agora: duas mensagens seguidas do lead
+    // disparam a de entrada juntas. Tratar como retentativa subia de novo e gravava a
+    // planilha de novo, e o lead ganhava duas linhas, dois numeros e dois avisos no grupo
+    // (Martinelli, 03/11/2026). Volta para a fila: se a outra morreu, esta sobe depois.
+    if (atual?.status === 'pendente' && atual.idade_s < ENVIO_EM_ANDAMENTO_S) {
+      return { status: 'erro', motivo: `${chave}: outra execucao esta enviando esta conversao` };
+    }
 
     // Só reenvia o que não chegou ao Google. 'erro' e 'pendente' são retentativa
     // legítima; 'ignorado' foi decidido por falta de dado e não melhora tentando
@@ -366,6 +375,9 @@ function classificar(ev: { adIdentifiers?: unknown; userData?: unknown }): strin
   if (ev.adIdentifiers) return 'click_id';
   return 'user_data_only';
 }
+
+/** A linha 'pendente' mais nova que isto e' de um envio em andamento, nao de um que morreu. */
+const ENVIO_EM_ANDAMENTO_S = 60;
 
 /**
  * O `+` em `+tenant_id` e' de proposito: tira a coluna do indice. Sem ele o SQLite

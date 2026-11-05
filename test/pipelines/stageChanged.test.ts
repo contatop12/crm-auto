@@ -348,6 +348,36 @@ describe('enviarConversao', () => {
   });
 });
 
+describe('duas execucoes da mesma conversao ao mesmo tempo', () => {
+  // Martinelli, 03/11/2026 (Nanni, 03NOV e 04NOV): duas mensagens seguidas do lead dispararam
+  // a conversao de entrada juntas. A segunda via a linha 'pendente', tratava como retentativa,
+  // subia de novo e gravava a planilha de novo: duas linhas, dois numeros, dois avisos no grupo.
+  test('so uma sobe; a outra pede para tentar depois, sem subir nem gravar', async () => {
+    const { env } = cenario();
+    const [a, b] = await Promise.all([enviarConversao(env, 1, card()), enviarConversao(env, 1, card())]);
+    expect(chamadas.length).toBe(1);
+    expect([a.status, b.status].sort()).toEqual(['erro', 'ok']);
+    expect([a, b].find((r) => r.status === 'erro')?.retentar).not.toBe(false);
+  });
+
+  test('a repeticao depois que a primeira terminou encontra a conversao ja enviada', async () => {
+    const { env } = cenario();
+    await enviarConversao(env, 1, card());
+    expect((await enviarConversao(env, 1, card())).status).toBe('ignorado');
+    expect(chamadas.length).toBe(1);
+  });
+
+  test('pendente antiga e execucao que morreu: a retentativa sobe', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO conversions (tenant_id, dedupe_key, protocol, conversion_event, status, created_at)
+          VALUES (1, 'VITA-123-qualificado_1', 'VITA-123', 'qualificado_1', 'pendente', datetime('now', '-5 minutes'))`);
+    const r = await enviarConversao(env, 1, card());
+    expect(r.status).toBe('ok');
+    expect(chamadas.length).toBe(1);
+    expect(linha(consultar).status).toBe('enviado');
+  });
+});
+
 describe('limpeza dos erros da conversao', () => {
   // 04/11/2026: pelo indice do tenant o UPDATE lia ~35 mil linhas e levava 4,6 s a cada
   // conversao, logo antes de gravar a planilha, e o banco recusava o que vinha depois
