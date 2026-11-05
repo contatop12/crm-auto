@@ -87,4 +87,29 @@ describe('script do painel', () => {
     expect(api.rotaAtual('/app/accounts/5/kanban/overview')).toBeNull();
     expect(api.rotaAtual('/app/accounts/5/dashboard')).toBeNull();
   });
+
+  test('conta vem de qualquer tela do painel', () => {
+    const { api } = carregar();
+    expect(api.contaDaUrl('/app/accounts/8/dashboard')).toBe(8);
+    expect(api.contaDaUrl('/app/accounts/8')).toBe(8);
+    expect(api.contaDaUrl('/app/login')).toBeNull();
+  });
+
+  test('favoritos: na ordem do Chatwoot, ignorando funil que nao existe mais', () => {
+    const { api } = carregar();
+    const resposta = {
+      boards: [
+        { id: 15, name: 'Leads Google Ads' },
+        { id: 16, name: 'Orgânico' },
+      ],
+      preferences: { favorite_board_ids: [16, 99, 15] },
+    };
+    expect(JSON.parse(JSON.stringify(api.funisFavoritos(resposta)))).toEqual([
+      { id: 16, nome: 'Orgânico' },
+      { id: 15, nome: 'Leads Google Ads' },
+    ]);
+    expect(api.funisFavoritos({ boards: resposta.boards, preferences: { favorite_board_ids: [] } }).length).toBe(0);
+    expect(api.funisFavoritos({}).length).toBe(0);
+    expect(api.funisFavoritos(null).length).toBe(0);
+  });
 });

@@ -5,6 +5,8 @@
  * codigo do Chatwoot: so' acrescenta elementos a tela, e e' servido pelo CRM em
  * /ingest/categorias/script.js, entao corrigir aqui e' um deploy do CRM.
  *
+ * Tambem mostra os funis favoritos no menu, com o Kanban fechado.
+ *
  * Regra de ouro: qualquer falha deixa a tela como ela e' sem o script. Nada de
  * erro na tela, nada de excecao solta. Texto vindo da API entra por textContent.
  *
@@ -23,6 +25,7 @@
 
   var RECARREGAR_MS = 60000;
   var CONFERIR_MS = 20000;
+  var RECARREGAR_MENU_MS = 300000;
   var CABECALHOS_DA_SESSAO = ['access-token', 'client', 'uid', 'expiry', 'token-type'];
 
   var estado = {
@@ -557,6 +560,112 @@
     aplicarNasLinhas();
   }
 
+  // ---- funis favoritos no menu ------------------------------------------------
+
+  // O favorito e' do proprio Chatwoot, por usuario. O menu so' mostra os favoritos com o
+  // Kanban aberto; aqui eles ficam visiveis tambem com o Kanban fechado.
+  var menu = { favoritos: [], carregando: false, carregadoEm: 0, emKanban: null };
+
+  /** Funis favoritos do atendente, na ordem em que o Chatwoot os guarda. */
+  function funisFavoritos(resposta) {
+    var ids = (resposta && resposta.preferences && resposta.preferences.favorite_board_ids) || [];
+    var quadros = (resposta && resposta.boards) || [];
+    return ids
+      .map(function (id) {
+        return quadros.filter(function (q) {
+          return q.id === id;
+        })[0];
+      })
+      .filter(Boolean)
+      .map(function (q) {
+        return { id: q.id, nome: q.name };
+      });
+  }
+
+  function carregarMenu() {
+    if (menu.carregando) return;
+    menu.carregando = true;
+    menu.carregadoEm = Date.now();
+    var conta = estado.conta;
+    chatwoot('/kanban/boards')
+      .then(function (r) {
+        if (conta === estado.conta) menu.favoritos = funisFavoritos(r);
+      })
+      .catch(function (e) {
+        console.debug('[p12-categorias]', e && e.message);
+      })
+      .then(function () {
+        menu.carregando = false;
+        agendar();
+      });
+  }
+
+  /** Pelo roteador do painel, sem recarregar a pagina; sem ele, navegacao normal. */
+  function navegar(url) {
+    try {
+      document.querySelector('#app').__vue_app__.config.globalProperties.$router.push(url);
+    } catch (e) {
+      location.assign(url);
+    }
+  }
+
+  function montarFavoritos(assinatura) {
+    var lista = el('ul', 'grid m-0 list-none min-w-0');
+    lista.setAttribute('data-p12-fav', '');
+    lista.setAttribute('data-assinatura', assinatura);
+    menu.favoritos.forEach(function (f) {
+      var url = '/app/accounts/' + estado.conta + '/kanban/' + f.id;
+      var item = el('li', 'py-0.5 ps-2 ms-3 relative text-n-slate-11 min-w-0');
+      var link = el('a', 'flex items-center gap-2 px-1.5 py-1 rounded-lg h-8 min-w-0 hover:bg-n-alpha-2');
+      link.href = url;
+      link.title = f.nome;
+      var estrela = el('span', '', '★');
+      estrela.style.color = '#f5b400';
+      estrela.style.flex = 'none';
+      link.appendChild(estrela);
+      link.appendChild(el('span', 'truncate text-body-main', f.nome));
+      link.addEventListener('click', function (ev) {
+        if (ev.button || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        navegar(url);
+      });
+      item.appendChild(link);
+      lista.appendChild(item);
+    });
+    return lista;
+  }
+
+  function aplicarMenu() {
+    // Favoritar so' acontece no Kanban: basta reler ao entrar ou sair dele, nao a cada conversa.
+    var emKanban = /\/kanban(?:\/|$)/.test(location.pathname);
+    if (emKanban !== menu.emKanban || Date.now() - menu.carregadoEm > RECARREGAR_MENU_MS) {
+      menu.emKanban = emKanban;
+      carregarMenu();
+    }
+
+    var kanban = document.querySelector('a[href$="/kanban/overview"]');
+    var item = kanban && kanban.closest('li');
+    if (!item) return;
+    var atual = item.querySelector(':scope > ul[data-p12-fav]');
+    if (!menu.favoritos.length) {
+      if (atual) atual.remove();
+      return;
+    }
+    var assinatura = JSON.stringify([estado.conta, menu.favoritos]);
+    if (!atual || atual.getAttribute('data-assinatura') !== assinatura) {
+      var nova = montarFavoritos(assinatura);
+      if (atual) atual.replaceWith(nova);
+      else item.insertBefore(nova, kanban.nextSibling);
+      atual = nova;
+    }
+    // Com o Kanban aberto o proprio menu ja' lista os funis: nao repetir. A lista dele fica no
+    // DOM mesmo fechada, por isso olha a altura, nao a existencia.
+    var nativo = item.querySelector(':scope > ul:not([data-p12-fav])');
+    var exibicao = nativo && nativo.getBoundingClientRect().height > 0 ? 'none' : '';
+    if (atual.style.display !== exibicao) atual.style.display = exibicao;
+  }
+
   // ---- aviso de quebra -------------------------------------------------------
 
   function sinalizar(problema) {
@@ -617,6 +726,11 @@
 
   // ---- ciclo -----------------------------------------------------------------
 
+  function contaDaUrl(caminho) {
+    var m = /^\/app\/accounts\/(\d+)(?:\/|$)/.exec(caminho);
+    return m ? Number(m[1]) : null;
+  }
+
   function rotaAtual(caminho) {
     var m = /^\/app\/accounts\/(\d+)\/kanban\/(\d+)(?:\/|$)/.exec(caminho);
     if (m) return { tipo: 'kanban', conta: Number(m[1]), quadro: Number(m[2]) };
@@ -636,16 +750,22 @@
   }
 
   var tick = seguro(function () {
-    var rota = rotaAtual(location.pathname);
-    if (!rota) return;
-    if (estado.conta !== rota.conta) {
-      estado.conta = rota.conta;
+    var conta = contaDaUrl(location.pathname);
+    if (!conta) return;
+    if (estado.conta !== conta) {
+      estado.conta = conta;
       estado.carregado = false;
       estado.categorias = [];
       estado.etiquetas = [];
       estado.porTitulo = {};
       estado.carregadoEm = 0;
+      menu.favoritos = [];
+      menu.carregadoEm = 0;
     }
+    seguro(aplicarMenu)();
+
+    var rota = rotaAtual(location.pathname);
+    if (!rota) return;
     if (Date.now() - estado.carregadoEm > RECARREGAR_MS) carregar();
     if (!estado.carregado) return;
     if (rota.tipo === 'kanban') aplicarKanban();
@@ -664,12 +784,18 @@
 
   function iniciar() {
     new MutationObserver(function () {
-      if (rotaAtual(location.pathname)) agendar();
+      if (contaDaUrl(location.pathname)) agendar();
     }).observe(document.body, { childList: true, subtree: true });
     agendar();
   }
 
-  window.__p12Categorias = { agrupar: agrupar, sessaoDoCookie: sessaoDoCookie, rotaAtual: rotaAtual };
+  window.__p12Categorias = {
+    agrupar: agrupar,
+    sessaoDoCookie: sessaoDoCookie,
+    rotaAtual: rotaAtual,
+    contaDaUrl: contaDaUrl,
+    funisFavoritos: funisFavoritos,
+  };
 
   seguro(function () {
     if (document.body) iniciar();
