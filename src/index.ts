@@ -4,11 +4,13 @@ import { ingest } from './routes/ingest';
 import { oauth } from './routes/oauth';
 import { api } from './routes/api';
 import { admin } from './routes/admin';
+import { categorias } from './routes/categorias';
 import { consumir } from './queue/consumer';
 import { expurgarPayloadsAntigos } from './db/observability';
 import { vigiarWhatsapp } from './pipelines/vigiaWhatsapp';
 import { preencherOrigemNasGerais } from './pipelines/origemPlanilha';
 import { moverParaPendente } from './pipelines/pendente';
+import { vigiarVersaoChatwoot } from './pipelines/avisosChatwoot';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -29,6 +31,8 @@ app.get('/health', async (c) => {
 
 // o callback do Google entra sob /ingest porque esse prefixo ja e' publico:
 // o navegador volta do Google sem sessao do Access
+// antes de `ingest`, que trata o primeiro trecho do caminho como slug de cliente
+app.route('/ingest/categorias', categorias);
 app.route('/ingest', oauth);
 app.route('/ingest', ingest);
 app.route('/api', api);
