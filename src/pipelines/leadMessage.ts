@@ -16,6 +16,7 @@ import { nomeUtil, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLea
 import type { LabelVocabulary, LeadCandidate } from '../domain/types';
 import { destinoDoLead, type SinaisDoLead } from '../domain/plataformaLead';
 import { clidRecente, type AtribuicaoMeta } from '../db/metaAtribuicoes';
+import { atrasoDaMensagem } from '../domain/mensagemAtrasada';
 
 /**
  * Mensagem do lead: e' aqui que a atribuicao acontece.
@@ -78,6 +79,8 @@ interface LinhaLead {
   quiz_valor: number | null;
   /** Pagina do clique. Ausente no lead que nasceu so' da frase. */
   page_url?: string | null;
+  /** Hora do clique (D1, UTC). So' a busca por protocolo traz. */
+  created_at?: string | null;
 }
 
 export async function atribuirLead(
@@ -239,6 +242,24 @@ export async function atribuirLead(
     telefone,
     chave,
   });
+
+  // Protocolo dito na mensagem e clique antigo: a entrega atrasou, nao e' lead
+  // novo para o grupo. Fica registrado antes de o card nascer, e o aviso do
+  // card (avisarLeadNoGrupo) para na trava de duplicata. Planilha e conversao
+  // seguem: o lead e' real, so' chegou tarde.
+  if (protocoloDito && leadDoClique) {
+    const atraso = atrasoDaMensagem(leadDoClique.created_at, Date.now());
+    if (atraso.atrasada) {
+      const motivo = `mensagem chegou ${atraso.horas} h depois do clique: entrega atrasada, nao e' lead novo para o grupo`;
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO group_notifications (tenant_id, chave, protocolo, status, erro)
+         VALUES (?, ?, ?, 'ignorado', ?)`,
+      )
+        .bind(tenantId, lead.protocol, lead.protocol, motivo)
+        .run();
+      console.log(JSON.stringify({ acao: 'mensagem_atrasada', protocolo: lead.protocol, conversa: conversaId, horas: atraso.horas }));
+    }
+  }
 
   // A conversa ganha o protocolo AGORA, antes de mexer no Chatwoot. Gravar
   // atributo dispara a regra que cria o card no funil de Ads, e o webhook do
@@ -454,7 +475,7 @@ async function etiquetarSemLead(
 }
 
 function porProtocolo(env: Env, tenantId: number, protocolo: string) {
-  return env.DB.prepare(`SELECT ${COLUNAS} FROM leads WHERE tenant_id = ? AND protocol = ?`)
+  return env.DB.prepare(`SELECT ${COLUNAS}, created_at FROM leads WHERE tenant_id = ? AND protocol = ?`)
     .bind(tenantId, protocolo)
     .first<LinhaLead>();
 }

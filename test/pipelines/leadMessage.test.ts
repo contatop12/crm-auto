@@ -409,4 +409,43 @@ describe('atribuirLead', () => {
     expect(linha!.protocol).toBe('VITA-MRIAP9IN8WNQ');
     expect(linha!.task_id).toBe(1421);
   });
+
+  describe('mensagem que chega muito depois do clique', () => {
+    const avisos = (consultar: ReturnType<typeof cenario>['consultar']) =>
+      consultar<{ chave: string; status: string; erro: string }>(
+        'SELECT chave, status, erro FROM group_notifications WHERE tenant_id = 1',
+      );
+
+    test('protocolo no texto com clique de 2 dias: o grupo nao e avisado, o lead segue', async () => {
+      // Martinelli 06/11/2026: conversas de 04/11 entregues com ~44 h de atraso
+      const { env, consultar } = cenario();
+      const r = await atribuirLead(env, 1, webhook());
+
+      expect(r.status).toBe('ok');
+      const [aviso] = avisos(consultar);
+      expect(aviso!.chave).toBe('VITA-MRIAP9IN8WNQ');
+      expect(aviso!.status).toBe('ignorado');
+      expect(aviso!.erro).toMatch(/48 h depois do clique/);
+    });
+
+    test('protocolo no texto com clique recente: nada muda', async () => {
+      const { env, consultar, exec } = cenario();
+      exec(`UPDATE leads SET created_at = datetime('now', '-5 minutes') WHERE protocol = 'VITA-MRIAP9IN8WNQ'`);
+      await atribuirLead(env, 1, webhook());
+      expect(avisos(consultar)).toEqual([]);
+    });
+
+    test('casado pelo telefone: clique antigo nao prova atraso', async () => {
+      const { env, consultar } = cenario();
+      await atribuirLead(env, 1, webhook({ content: 'bom dia, quero informacoes' }));
+      expect(avisos(consultar)).toEqual([]);
+    });
+
+    test('aviso ja enviado nao e reescrito', async () => {
+      const { env, consultar, exec } = cenario();
+      exec(`INSERT INTO group_notifications (tenant_id, chave, protocolo, status) VALUES (1, 'VITA-MRIAP9IN8WNQ', 'VITA-MRIAP9IN8WNQ', 'enviado')`);
+      await atribuirLead(env, 1, webhook());
+      expect(avisos(consultar)[0]!.status).toBe('enviado');
+    });
+  });
 });

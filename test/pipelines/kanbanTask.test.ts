@@ -506,3 +506,20 @@ describe('nome no aviso', () => {
     expect(enviados).toHaveLength(0);
   });
 });
+
+describe('mensagem que chegou muito depois do clique (Martinelli, 06/11/2026)', () => {
+  test('o card nao avisa o grupo e mostra o motivo gravado na atribuicao', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO group_notifications (tenant_id, chave, protocolo, status, erro)
+          VALUES (1, 'PERS-1720000000000-ABC', 'PERS-1720000000000-ABC', 'ignorado',
+                  'mensagem chegou 44 h depois do clique: entrega atrasada, nao e'' lead novo para o grupo')`);
+
+    const r = await avisarLeadNoGrupo(env, 1, task());
+
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('44 h depois do clique');
+    expect(enviados).toHaveLength(0);
+    const [linha] = consultar<{ status: string }>('SELECT status FROM group_notifications');
+    expect(linha!.status).toBe('ignorado');
+  });
+});

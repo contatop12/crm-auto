@@ -183,11 +183,16 @@ export async function avisarLeadNoGrupo(
     // fila e deve seguir: parar aqui deixaria o grupo sem aviso para sempre.
     // 'pendente' significa que outra invocacao esta cuidando agora.
     const antes = await env.DB.prepare(
-      'SELECT status FROM group_notifications WHERE tenant_id = ? AND chave = ?',
+      'SELECT status, erro FROM group_notifications WHERE tenant_id = ? AND chave = ?',
     )
       .bind(tenantId, chaveDedupe)
-      .first<{ status: string }>();
+      .first<{ status: string; erro: string | null }>();
 
+    // 'ignorado' gravado antes do card (mensagem atrasada, em leadMessage) traz
+    // o proprio motivo: "grupo ja avisado" mentiria na tela.
+    if (antes?.status === 'ignorado' && antes.erro) {
+      return { status: 'ignorado', motivo: antes.erro };
+    }
     if (antes?.status !== 'erro') {
       return { status: 'ignorado', motivo: `grupo ja avisado sobre ${chaveDedupe}` };
     }
