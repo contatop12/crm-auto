@@ -5,8 +5,9 @@
  * codigo do Chatwoot: so' acrescenta elementos a tela, e e' servido pelo CRM em
  * /ingest/categorias/script.js, entao corrigir aqui e' um deploy do CRM.
  *
- * Tambem mostra os funis favoritos no menu, com o Kanban fechado, e o numero real de
- * cards no cabecalho de cada etapa.
+ * Tambem mostra os funis favoritos no menu, com o Kanban fechado, o numero real de
+ * cards no cabecalho de cada etapa, e deixa o menu so' com Kanban, Conversas, Chat
+ * Interno, Contatos e Relatorios.
  *
  * Regra de ouro: qualquer falha deixa a tela como ela e' sem o script. Nada de
  * erro na tela, nada de excecao solta. Texto vindo da API entra por textContent.
@@ -667,6 +668,65 @@
     if (atual.style.display !== exibicao) atual.style.display = exibicao;
   }
 
+  // ---- menu enxuto -------------------------------------------------------------
+
+  // Em todas as contas e para todos, ate' administrador, o menu mostra so' estes, nesta
+  // ordem. O resto some, mas o da tela aberta continua (no fim), para quem abriu
+  // Configuracoes pelo endereco conseguir navegar la' dentro. So' marca os itens: a ordem e'
+  // CSS `order` na lista, que ja' e' flex; nada sai do lugar no DOM do Vue.
+  var MENU = ['kanban', 'dashboard', 'internal-chat', 'contacts', 'reports'];
+  var ESTILO_MENU =
+    'li[data-p12-menu="x"]{display:none!important}' +
+    [1, 2, 3, 4, 5, 6]
+      .map(function (n) {
+        return 'li[data-p12-menu="' + n + '"]{order:' + n + '}';
+      })
+      .join('');
+
+  function secaoDoPainel(caminho) {
+    var m = /^\/app\/accounts\/\d+\/([^/?#]+)/.exec(caminho || '');
+    return m ? m[1] : null;
+  }
+
+  /** Posicao do item no menu (1 a 6), ou null para esconder. */
+  function posicaoNoMenu(href, caminho) {
+    var secao = secaoDoPainel(href);
+    if (!secao) return null;
+    var i = MENU.indexOf(secao);
+    if (i >= 0) return i + 1;
+    return secao === secaoDoPainel(caminho) ? MENU.length + 1 : null;
+  }
+
+  function aplicarMenuEnxuto() {
+    if (!document.getElementById('p12-menu-estilo')) {
+      var s = document.createElement('style');
+      s.id = 'p12-menu-estilo';
+      s.textContent = ESTILO_MENU;
+      document.head.appendChild(s);
+    }
+    var conversas = document.querySelector('nav li > a[href*="/dashboard"]');
+    var lista = conversas && conversas.closest('li').parentElement;
+    if (!lista) return;
+    var itens = Array.prototype.filter.call(lista.children, function (li) {
+      return li.tagName === 'LI';
+    });
+    var marcas = itens.map(function (li) {
+      var link = li.firstElementChild;
+      var href = link && link.tagName === 'A' ? link.getAttribute('href') : null;
+      return posicaoNoMenu(href, location.pathname);
+    });
+    // Menu mudou de formato e quase nada bate: deixa como o Chatwoot montou.
+    var conhecidos = marcas.filter(function (p) {
+      return p && p <= MENU.length;
+    }).length;
+    itens.forEach(function (li, i) {
+      var marca = conhecidos >= 3 ? String(marcas[i] || 'x') : null;
+      if (li.getAttribute('data-p12-menu') === marca) return;
+      if (marca) li.setAttribute('data-p12-menu', marca);
+      else li.removeAttribute('data-p12-menu');
+    });
+  }
+
   // ---- numero real de cada etapa ----------------------------------------------
 
   // O numero do cabecalho vem de um contador do Chatwoot que sai de sincronia com a lista
@@ -863,6 +923,7 @@
       menu.carregadoEm = 0;
     }
     seguro(aplicarMenu)();
+    seguro(aplicarMenuEnxuto)();
 
     var rota = rotaAtual(location.pathname);
     if (!rota) return;
@@ -898,6 +959,7 @@
     contaDaUrl: contaDaUrl,
     funisFavoritos: funisFavoritos,
     totalDaEtapa: totalDaEtapa,
+    posicaoNoMenu: posicaoNoMenu,
   };
 
   seguro(function () {

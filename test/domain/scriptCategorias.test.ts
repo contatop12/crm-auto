@@ -121,4 +121,26 @@ describe('script do painel', () => {
     expect(api.funisFavoritos({}).length).toBe(0);
     expect(api.funisFavoritos(null).length).toBe(0);
   });
+
+  test('menu: Kanban, Conversas, Chat Interno, Contatos e Relatorios, nessa ordem', () => {
+    const { api } = carregar();
+    const aqui = '/app/accounts/7/dashboard';
+    expect(api.posicaoNoMenu('/app/accounts/7/kanban/overview', aqui)).toBe(1);
+    expect(api.posicaoNoMenu('/app/accounts/7/dashboard', aqui)).toBe(2);
+    expect(api.posicaoNoMenu('/app/accounts/7/internal-chat', aqui)).toBe(3);
+    expect(api.posicaoNoMenu('/app/accounts/7/contacts?page=1', aqui)).toBe(4);
+    expect(api.posicaoNoMenu('/app/accounts/7/reports/overview', aqui)).toBe(5);
+  });
+
+  test('menu: o resto some, menos o da tela aberta', () => {
+    const { api } = carregar();
+    const aqui = '/app/accounts/7/conversations/120';
+    expect(api.posicaoNoMenu('/app/accounts/7/inbox-view', aqui)).toBeNull();
+    expect(api.posicaoNoMenu('/app/accounts/7/campaigns/live_chat', aqui)).toBeNull();
+    expect(api.posicaoNoMenu('/app/accounts/7/portals/portals_articles_index', aqui)).toBeNull();
+    expect(api.posicaoNoMenu('/app/accounts/7/settings/general', aqui)).toBeNull();
+    expect(api.posicaoNoMenu(null, aqui)).toBeNull();
+    // Configuracoes aberta pelo endereco: o menu dela continua, no fim.
+    expect(api.posicaoNoMenu('/app/accounts/7/settings/general', '/app/accounts/7/settings/labels/list')).toBe(6);
+  });
 });
