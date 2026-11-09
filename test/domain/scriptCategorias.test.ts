@@ -165,4 +165,16 @@ describe('script do painel', () => {
     // Configuracoes aberta pelo endereco: o menu dela continua, no fim.
     expect(api.posicaoNoMenu('/app/accounts/7/settings/general', '/app/accounts/7/settings/labels/list')).toBe(6);
   });
+
+  test('menu do perfil: "Configuracao" lista so os itens que o menu lateral esconde', () => {
+    const { api } = carregar();
+    expect(api.ocultoNoMenu('/app/accounts/7/inbox-view')).toBe(true);
+    expect(api.ocultoNoMenu('/app/accounts/7/campaigns/live_chat')).toBe(true);
+    expect(api.ocultoNoMenu('/app/accounts/7/portals/portals_articles_index')).toBe(true);
+    expect(api.ocultoNoMenu('/app/accounts/7/settings/general')).toBe(true);
+    expect(api.ocultoNoMenu('/app/accounts/7/kanban/overview')).toBe(false);
+    expect(api.ocultoNoMenu('/app/accounts/7/contacts?page=1')).toBe(false);
+    expect(api.ocultoNoMenu('https://www.chatwoot.com/docs')).toBe(false);
+    expect(api.ocultoNoMenu(null)).toBe(false);
+  });
 });

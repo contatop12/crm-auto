@@ -7,7 +7,7 @@
  *
  * Tambem mostra os funis favoritos no menu, com o Kanban fechado, o numero real de
  * cards no cabecalho de cada etapa, e deixa o menu so' com Kanban, Conversas, Chat
- * Interno, Contatos e Relatorios.
+ * Interno, Contatos e Relatorios; o resto vai para "Configuracao", no menu do perfil.
  *
  * Regra de ouro: qualquer falha deixa a tela como ela e' sem o script. Nada de
  * erro na tela, nada de excecao solta. Texto vindo da API entra por textContent.
@@ -727,6 +727,119 @@
     });
   }
 
+  // ---- "Configuracao" no menu do perfil -------------------------------------------
+
+  // O que o menu enxuto esconde fica no menu do perfil (rodape da barra lateral): o item
+  // "Configuracao" abre a lista dos itens ocultos. A lista sai do proprio menu lateral, entao
+  // cada usuario so' ve' o que o Chatwoot ja' deixava ele ver.
+  var CLASSE_ITEM_PERFIL =
+    'flex text-left rtl:text-right items-center p-2 reset-base text-sm text-n-slate-12 w-full border-0 cursor-pointer hover:bg-n-alpha-2 rounded-lg w-full gap-3';
+
+  /** Item do menu lateral que o menu enxuto esconde. */
+  function ocultoNoMenu(href) {
+    var secao = secaoDoPainel(href);
+    return !!secao && MENU.indexOf(secao) < 0;
+  }
+
+  function itensOcultos() {
+    var conversas = document.querySelector('nav li > a[href*="/dashboard"]');
+    var lista = conversas && conversas.closest('li').parentElement;
+    if (!lista) return [];
+    var itens = [];
+    Array.prototype.forEach.call(lista.children, function (li) {
+      var a = li.firstElementChild;
+      if (!a || a.tagName !== 'A') return;
+      var href = a.getAttribute('href');
+      var nome = (a.textContent || '').trim();
+      if (!ocultoNoMenu(href) || !nome) return;
+      var icone = '';
+      a.querySelectorAll('[class*="i-lucide-"]').forEach(function (s) {
+        String(s.className)
+          .split(/\s+/)
+          .forEach(function (c) {
+            if (!icone && c.indexOf('i-lucide-') === 0 && c.indexOf('chevron') < 0) icone = c;
+          });
+      });
+      itens.push({ href: href, nome: nome, icone: icone });
+    });
+    return itens;
+  }
+
+  function fecharMenuDoPerfil() {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  }
+
+  function montarConfiguracao(itens, assinatura) {
+    var bloco = el('div');
+    bloco.setAttribute('data-p12-cfg', '');
+    bloco.setAttribute('data-assinatura', assinatura);
+    var item = el('li', 'n-dropdown-item');
+    var botao = el('button', CLASSE_ITEM_PERFIL);
+    botao.type = 'button';
+    botao.setAttribute('aria-expanded', 'false');
+    botao.appendChild(el('span', 'i-lucide-settings size-4 text-n-slate-11'));
+    botao.appendChild(document.createTextNode('Configuração'));
+    var seta = el('span', 'i-lucide-chevron-down size-4 text-n-slate-11');
+    seta.style.marginInlineStart = 'auto';
+    seta.style.transition = 'transform .15s';
+    botao.appendChild(seta);
+
+    var sub = el('ul', 'grid gap-1 m-0 list-none');
+    sub.style.display = 'none';
+    sub.style.paddingInlineStart = '12px';
+    itens.forEach(function (it) {
+      var li = el('li', 'n-dropdown-item');
+      var link = el('a', CLASSE_ITEM_PERFIL);
+      link.href = it.href;
+      if (it.icone) link.appendChild(el('span', it.icone + ' size-4 text-n-slate-11'));
+      link.appendChild(document.createTextNode(it.nome));
+      link.addEventListener('click', function (ev) {
+        if (ev.button || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        navegar(it.href);
+        fecharMenuDoPerfil();
+      });
+      li.appendChild(link);
+      sub.appendChild(li);
+    });
+
+    botao.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var abrir = sub.style.display === 'none';
+      sub.style.display = abrir ? '' : 'none';
+      seta.style.transform = abrir ? 'rotate(180deg)' : '';
+      botao.setAttribute('aria-expanded', String(abrir));
+    });
+    item.appendChild(botao);
+    item.appendChild(sub);
+    bloco.appendChild(item);
+    return bloco;
+  }
+
+  function aplicarConfiguracaoNoPerfil() {
+    // O menu do perfil e' o dropdown que tem "Configuracoes do Perfil".
+    var perfil = document.querySelector('ul.n-dropdown-body .i-lucide-user-pen');
+    var lista = perfil && perfil.closest('ul.n-dropdown-body');
+    if (!lista) return;
+    var itens = itensOcultos();
+    var assinatura = JSON.stringify(itens);
+    var atual = lista.querySelector(':scope > [data-p12-cfg]');
+    if (atual && atual.getAttribute('data-assinatura') === assinatura) return;
+    if (!itens.length) {
+      if (atual) atual.remove();
+      return;
+    }
+    var bloco = montarConfiguracao(itens, assinatura);
+    if (atual) {
+      atual.replaceWith(bloco);
+      return;
+    }
+    var depois = perfil.closest('ul.n-dropdown-body > *');
+    lista.insertBefore(bloco, depois ? depois.nextSibling : null);
+  }
+
   // ---- numero real de cada etapa ----------------------------------------------
 
   // O numero do cabecalho vem de um contador do Chatwoot que sai de sincronia com a lista
@@ -1039,6 +1152,7 @@
     }
     seguro(aplicarMenu)();
     seguro(aplicarMenuEnxuto)();
+    seguro(aplicarConfiguracaoNoPerfil)();
 
     if (ehVisaoGeral(location.pathname)) {
       seguro(aplicarVisao)();
@@ -1081,6 +1195,7 @@
     ehVisaoGeral: ehVisaoGeral,
     resumirTotais: resumirTotais,
     posicaoNoMenu: posicaoNoMenu,
+    ocultoNoMenu: ocultoNoMenu,
   };
 
   seguro(function () {
