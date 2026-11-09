@@ -233,6 +233,22 @@ describe('o que vai na mensagem do grupo', () => {
     expect(enviados[0]).not.toHaveProperty('Etapa');
     expect(enviados[0]).not.toHaveProperty('Conversa');
   });
+
+  test('Data/Hora do grupo e a hora do clique, a mesma da linha da Geral', async () => {
+    // Martinelli 06/11/2026: Marcia clicou 04/11 20:56 (BRT) e o grupo mostrou
+    // 06/11 16:40, a hora em que o aviso chegou a Pulseboard.
+    const { env, exec } = cenario();
+    exec(`INSERT INTO leads (tenant_id, protocol, nome, gclid, page_url, created_at)
+          VALUES (1, 'PERS-1720000000000-ABC', 'Carol Nunes', 'Cj0KC', 'https://x.com.br/', '2026-11-04 23:56:32')`);
+    await avisarLeadNoGrupo(env, 1, task());
+    expect(enviados[0]!.data_evento).toBe('2026-11-04T23:56:32Z');
+  });
+
+  test('sem clique registrado nao inventa hora', async () => {
+    const { env } = cenario();
+    await avisarLeadNoGrupo(env, 1, task());
+    expect(enviados[0]).not.toHaveProperty('data_evento');
+  });
 });
 
 describe('a mesma task nao avisa duas vezes', () => {
@@ -507,8 +523,24 @@ describe('nome no aviso', () => {
   });
 });
 
-describe('mensagem que chegou muito depois do clique (Martinelli, 06/11/2026)', () => {
-  test('o card nao avisa o grupo e mostra o motivo gravado na atribuicao', async () => {
+describe('mensagem que chegou muito depois do clique (Martinelli, 06 a 09/11/2026)', () => {
+  test('avisa o grupo com a hora do clique, nao com a de chegada', async () => {
+    // 07 e 08/11: 11 leads reais com a entrega atrasada ficaram sem aviso porque
+    // eram descartados. O lead e' real; o que estava errado era so' a hora.
+    const { env, exec } = cenario();
+    exec(`INSERT INTO leads (tenant_id, protocol, nome, gclid, page_url, created_at)
+          VALUES (1, 'PERS-1720000000000-ABC', 'Carol Nunes', 'Cj0KC', 'https://x.com.br/',
+                  datetime('now', '-44 hours'))`);
+
+    const r = await avisarLeadNoGrupo(env, 1, task());
+
+    expect(r.status).toBe('ok');
+    expect(enviados).toHaveLength(1);
+    const atraso = Date.now() - Date.parse(String(enviados[0]!.data_evento));
+    expect(Math.round(atraso / 3600_000)).toBe(44);
+  });
+
+  test('linha antiga gravada como ignorada continua barrando o card (sem aviso duplicado)', async () => {
     const { env, exec, consultar } = cenario();
     exec(`INSERT INTO group_notifications (tenant_id, chave, protocolo, status, erro)
           VALUES (1, 'PERS-1720000000000-ABC', 'PERS-1720000000000-ABC', 'ignorado',

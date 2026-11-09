@@ -243,20 +243,14 @@ export async function atribuirLead(
     chave,
   });
 
-  // Protocolo dito na mensagem e clique antigo: a entrega atrasou, nao e' lead
-  // novo para o grupo. Fica registrado antes de o card nascer, e o aviso do
-  // card (avisarLeadNoGrupo) para na trava de duplicata. Planilha e conversao
-  // seguem: o lead e' real, so' chegou tarde.
+  // Protocolo dito na mensagem e clique antigo: a entrega atrasou (Evolution ->
+  // Chatwoot). So' registra no log para diagnostico. O lead e' real e o grupo
+  // e' avisado com a hora do clique (data_evento, em avisarLeadNoGrupo), entao
+  // nao passa por lead novo. Ate' 09/11/2026 isto marcava o aviso como
+  // 'ignorado' e a Martinelli perdeu 11 avisos de leads reais em 07 e 08/11.
   if (protocoloDito && leadDoClique) {
     const atraso = atrasoDaMensagem(leadDoClique.created_at, Date.now());
     if (atraso.atrasada) {
-      const motivo = `mensagem chegou ${atraso.horas} h depois do clique: entrega atrasada, nao e' lead novo para o grupo`;
-      await env.DB.prepare(
-        `INSERT OR IGNORE INTO group_notifications (tenant_id, chave, protocolo, status, erro)
-         VALUES (?, ?, ?, 'ignorado', ?)`,
-      )
-        .bind(tenantId, lead.protocol, lead.protocol, motivo)
-        .run();
       console.log(JSON.stringify({ acao: 'mensagem_atrasada', protocolo: lead.protocol, conversa: conversaId, horas: atraso.horas }));
     }
   }

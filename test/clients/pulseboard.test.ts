@@ -81,6 +81,43 @@ describe('conferirEnvio', () => {
   });
 });
 
+describe('hora do lead no aviso', () => {
+  async function corpoEnviado(extra: Record<string, unknown>) {
+    const corpos: Array<Record<string, unknown>> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      corpos.push(JSON.parse(String(init.body)));
+      return new Response('{"ok":true,"sent":1}', { status: 200 });
+    }) as typeof fetch;
+    try {
+      await new PulseboardClient('https://pb.teste/x').avisarLeadNovo({
+        canal: 'c', nome: 'n', telefone: '5511999999999', url: '', ...extra,
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+    return corpos[0]!;
+  }
+
+  test('manda a hora do clique como data_evento, em UTC explicito', async () => {
+    // Martinelli 06/11/2026: lead de 04/11 22:13 saiu no grupo como 06/11 16:40,
+    // a hora em que a Pulseboard recebeu. A Pulseboard le `data_evento`.
+    const corpo = await corpoEnviado({ quando: '2026-11-05 01:13:19' });
+    expect(corpo.data_evento).toBe('2026-11-05T01:13:19Z');
+  });
+
+  test('ISO ja com fuso passa como veio', async () => {
+    const corpo = await corpoEnviado({ quando: '2026-11-05T01:13:19.000Z' });
+    expect(corpo.data_evento).toBe('2026-11-05T01:13:19.000Z');
+  });
+
+  test('sem hora, nao manda o campo: a Pulseboard usa a de chegada', async () => {
+    expect(await corpoEnviado({})).not.toHaveProperty('data_evento');
+    expect(await corpoEnviado({ quando: null })).not.toHaveProperty('data_evento');
+    expect(await corpoEnviado({ quando: 'lixo' })).not.toHaveProperty('data_evento');
+  });
+});
+
 describe('endpoint', () => {
   test('o padrao e o /meta-new-lead em uso', async () => {
     // era /site-new-lead no codigo; os dois respondem igual, mas o em uso e este

@@ -1,12 +1,14 @@
 /**
- * Mensagem que chega ao CRM muito depois do clique nao e' lead novo para o grupo.
+ * Mensagem que chega ao CRM muito depois do clique: a entrega atrasou.
  *
  * O protocolo vai no texto que o botao do site preenche, entao quem manda a
  * mensagem com o protocolo manda na hora do clique. Se ela so' chega ao CRM
  * horas depois, quem atrasou foi a entrega (Evolution -> Chatwoot), nao o lead.
- * Na Martinelli (03 a 06/11/2026) a instancia ficou ate' 47 h atras: as conversas
- * de 04/11 entraram no Chatwoot em 06/11 e o grupo recebeu 9 avisos de leads que
- * a equipe ja' tinha atendido pelo celular dois dias antes.
+ * Na Martinelli (03 a 08/11/2026) a instancia ficou ate' 47 h atras.
+ *
+ * Hoje so' alimenta o log (`mensagem_atrasada`). O aviso do grupo sai mesmo
+ * assim, com a hora do clique: descartar fez a Martinelli perder 11 leads
+ * reais no grupo em 07 e 08/11/2026.
  *
  * So' vale para o protocolo DITO na mensagem. O casamento pelo telefone acha
  * clique antigo para conversa nova de verdade, e ai' a idade do clique nao diz

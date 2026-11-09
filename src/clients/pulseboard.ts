@@ -20,6 +20,25 @@ export interface NovoLead {
   /** So digitos, com DDI e sem '+', que e' o formato que o Pulseboard espera. */
   telefone: string;
   url: string;
+  /**
+   * Quando o lead aconteceu (o clique, `leads.created_at`, UTC do D1). Vira o
+   * "Data/Hora" do grupo, a mesma hora da linha da Geral. Sem ele a Pulseboard
+   * mostra a hora em que recebeu o aviso: na Martinelli (06/11/2026) leads de
+   * 04/11 sairam como 06/11 porque a entrega atrasou dois dias.
+   */
+  quando?: string | null;
+}
+
+/**
+ * `data_evento` para a Pulseboard: ISO com fuso explicito. A data do D1
+ * (`2026-11-05 01:13:19`) e' UTC sem marca; sem o `Z` a Pulseboard leria como
+ * horario de Brasilia e o grupo veria 3 h a menos. Valor ilegivel nao vai.
+ */
+export function dataEvento(quando: string | null | undefined): string | null {
+  const s = String(quando ?? '').trim();
+  if (!s) return null;
+  const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(s) ? `${s.replace(' ', 'T')}Z` : s;
+  return Number.isFinite(Date.parse(iso)) && /^\d{4}-\d{2}-\d{2}T/.test(iso) ? iso : null;
 }
 
 /**
@@ -56,6 +75,7 @@ export class PulseboardClient {
   constructor(private readonly endpoint: string = ENDPOINT) {}
 
   async avisarLeadNovo(l: NovoLead): Promise<ResultadoAviso> {
+    const evento = dataEvento(l.quando);
     const r = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -68,6 +88,8 @@ export class PulseboardClient {
         URL: l.url,
         ...(l.etapa ? { Etapa: l.etapa } : {}),
         ...(l.conversa ? { Conversa: l.conversa } : {}),
+        // a Pulseboard tira `data_evento` das respostas e usa no "Data/Hora"
+        ...(evento ? { data_evento: evento } : {}),
       }),
     });
 

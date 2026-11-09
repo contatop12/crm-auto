@@ -59,6 +59,8 @@ interface LinhaLead {
   gbraid: string | null;
   wbraid: string | null;
   fbc: string | null;
+  /** Hora do clique (UTC): a mesma DATA/HORA da linha da Geral. */
+  created_at: string | null;
 }
 
 export async function avisarLeadNoGrupo(
@@ -203,7 +205,7 @@ export async function avisarLeadNoGrupo(
   const lead = protocolo
     ? await env.DB.prepare(
         `SELECT nome, phone_e164, page_url, origem, evento, quiz_version,
-                utm_source, utm_medium, utm_campaign, gclid, gbraid, wbraid, fbc
+                utm_source, utm_medium, utm_campaign, gclid, gbraid, wbraid, fbc, created_at
          FROM leads WHERE tenant_id = ? AND protocol = ?`,
       )
         .bind(tenantId, protocolo)
@@ -287,6 +289,9 @@ export async function avisarLeadNoGrupo(
       nome,
       telefone,
       url,
+      // "Data/Hora" do grupo = hora do clique, igual a linha da Geral. Entrega
+      // atrasada (Evolution, Martinelli 04 a 08/11/2026) nao muda o dia do lead.
+      quando: lead?.created_at ?? null,
       etapa: t.etapa || null,
       conversa: t.conversaDisplay && cfg.cw_account_id
         ? `${env.CHATWOOT_BASE_URL}/app/accounts/${cfg.cw_account_id}/conversations/${t.conversaDisplay}`

@@ -445,16 +445,15 @@ describe('atribuirLead', () => {
         'SELECT chave, status, erro FROM group_notifications WHERE tenant_id = 1',
       );
 
-    test('protocolo no texto com clique de 2 dias: o grupo nao e avisado, o lead segue', async () => {
-      // Martinelli 06/11/2026: conversas de 04/11 entregues com ~44 h de atraso
+    test('protocolo no texto com clique de 2 dias: nao trava o aviso do grupo', async () => {
+      // Martinelli 07 e 08/11/2026: 11 leads reais com a entrega atrasada nunca
+      // chegaram ao grupo porque esta trava os marcava como 'ignorado'. O aviso
+      // do card sai com a hora do clique (data_evento), entao nao passa por novo.
       const { env, consultar } = cenario();
       const r = await atribuirLead(env, 1, webhook());
 
       expect(r.status).toBe('ok');
-      const [aviso] = avisos(consultar);
-      expect(aviso!.chave).toBe('VITA-MRIAP9IN8WNQ');
-      expect(aviso!.status).toBe('ignorado');
-      expect(aviso!.erro).toMatch(/48 h depois do clique/);
+      expect(avisos(consultar)).toEqual([]);
     });
 
     test('protocolo no texto com clique recente: nada muda', async () => {
