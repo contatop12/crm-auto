@@ -97,6 +97,28 @@ describe('script do painel', () => {
     expect(api.totalDaEtapa(null)).toBeNull();
   });
 
+  test('visao geral: reconhece a tela e resume os totais do funil', () => {
+    const { api } = carregar();
+    expect(api.ehVisaoGeral('/app/accounts/8/kanban/overview')).toBe(true);
+    expect(api.ehVisaoGeral('/app/accounts/8/kanban/overview/')).toBe(true);
+    expect(api.ehVisaoGeral('/app/accounts/8/kanban/12')).toBe(false);
+    const r = api.resumirTotais([
+      { nome: ' Novo Lead ', total: 3 },
+      { nome: 'Qualificando', total: 40 },
+      { nome: 'Fechado', total: 0 },
+    ]);
+    expect(r.porNome).toEqual({ 'Novo Lead': 3, Qualificando: 40, Fechado: 0 });
+    expect(r.soma).toBe(43);
+    // Etapa sem resposta: o total do funil nao e' confiavel, fica o do Chatwoot.
+    const parcial = api.resumirTotais([
+      { nome: 'A', total: 5 },
+      { nome: 'B', total: null },
+    ]);
+    expect(parcial.porNome).toEqual({ A: 5 });
+    expect(parcial.soma).toBeNull();
+    expect(api.resumirTotais([]).soma).toBeNull();
+  });
+
   test('conta vem de qualquer tela do painel', () => {
     const { api } = carregar();
     expect(api.contaDaUrl('/app/accounts/8/dashboard')).toBe(8);

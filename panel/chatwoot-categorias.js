@@ -739,11 +739,24 @@
     return typeof n === 'number' && n >= 0 ? n : null;
   }
 
-  function carregarContagens(quadro) {
-    if (contagem.carregando) return;
-    contagem.carregando = true;
-    contagem.carregadoEm = Date.now();
-    chatwoot('/kanban/boards/' + quadro + '/steps')
+  /** Total real de cada etapa do funil, pelo nome. soma so' existe se todas as etapas responderam. */
+  function resumirTotais(totais) {
+    var porNome = {};
+    var soma = 0;
+    var completo = totais.length > 0;
+    totais.forEach(function (x) {
+      if (x && x.total !== null && x.total !== undefined) {
+        porNome[(x.nome || '').trim()] = x.total;
+        soma += x.total;
+      } else {
+        completo = false;
+      }
+    });
+    return { porNome: porNome, soma: completo ? soma : null };
+  }
+
+  function buscarTotais(quadro) {
+    return chatwoot('/kanban/boards/' + quadro + '/steps')
       .then(function (r) {
         var etapas = r.steps || [];
         return Promise.all(
@@ -754,13 +767,17 @@
           }),
         );
       })
-      .then(function (totais) {
+      .then(resumirTotais);
+  }
+
+  function carregarContagens(quadro) {
+    if (contagem.carregando) return;
+    contagem.carregando = true;
+    contagem.carregadoEm = Date.now();
+    buscarTotais(quadro)
+      .then(function (resumo) {
         if (contagem.quadro !== quadro) return;
-        var reais = {};
-        totais.forEach(function (x) {
-          if (x.total !== null) reais[(x.nome || '').trim()] = x.total;
-        });
-        contagem.reais = reais;
+        contagem.reais = resumo.porNome;
       })
       .catch(function (e) {
         console.debug('[p12-categorias]', e && e.message);
@@ -815,14 +832,112 @@
       if (real === undefined || !cabecalho) return;
       var numero = acharNumero(cabecalho);
       if (!numero || numero.textContent.trim() === String(real)) return;
-      // So' o valor do texto: o no continua sendo o do painel, que segue podendo atualiza-lo.
-      for (var i = 0; i < numero.childNodes.length; i++) {
-        var no = numero.childNodes[i];
-        if (no.nodeType === 3 && /\d/.test(no.nodeValue)) {
-          no.nodeValue = String(real);
-          return;
-        }
+      trocarNumero(numero, real);
+    });
+  }
+
+  /** So' o valor do texto: o no continua sendo o do painel, que segue podendo atualiza-lo. */
+  function trocarNumero(numero, real) {
+    if (numero.textContent.trim() === String(real)) return;
+    for (var i = 0; i < numero.childNodes.length; i++) {
+      var no = numero.childNodes[i];
+      if (no.nodeType === 3 && /\d/.test(no.nodeValue)) {
+        no.nodeValue = String(real);
+        return;
       }
+    }
+  }
+
+  // ---- numero real na visao geral dos funis -------------------------------------
+  // Cada cartao e' um <a href=".../kanban/<id>"> com <h2> (titulo) e, ao lado, o total do funil;
+  // cada etapa e' um chip <div><div/><span>nome</span><span>numero</span></div>.
+
+  var visao = { conta: null, quadros: {}, carregando: false, carregadoEm: 0, ids: '' };
+
+  function ehVisaoGeral(caminho) {
+    return /^\/app\/accounts\/\d+\/kanban\/overview\/?$/.test(caminho);
+  }
+
+  function cartoesDaVisao() {
+    var lista = [];
+    document.querySelectorAll('main a[href*="/kanban/"]').forEach(function (a) {
+      var m = /\/kanban\/(\d+)(?:[/?#]|$)/.exec(a.getAttribute('href') || '');
+      var h2 = a.querySelector('h2');
+      if (m && h2) lista.push({ id: Number(m[1]), a: a, h2: h2 });
+    });
+    return lista;
+  }
+
+  function folhaNumerica(el) {
+    return el && el.tagName === 'SPAN' && !el.children.length && /^-?\d+$/.test((el.textContent || '').trim());
+  }
+
+  function carregarVisao(ids) {
+    if (visao.carregando) return;
+    visao.carregando = true;
+    visao.carregadoEm = Date.now();
+    visao.ids = ids.join(',');
+    var conta = estado.conta;
+    Promise.all(
+      ids.map(function (id) {
+        return buscarTotais(id)
+          .then(function (resumo) {
+            return { id: id, resumo: resumo };
+          })
+          .catch(function () {
+            return null;
+          });
+      }),
+    )
+      .then(function (todos) {
+        if (conta !== estado.conta) return;
+        todos.forEach(function (x) {
+          if (x) visao.quadros[x.id] = x.resumo;
+        });
+      })
+      .catch(function (e) {
+        console.debug('[p12-categorias]', e && e.message);
+      })
+      .then(function () {
+        visao.carregando = false;
+        agendar();
+      });
+  }
+
+  function aplicarVisao() {
+    if (visao.conta !== estado.conta) {
+      visao.conta = estado.conta;
+      visao.quadros = {};
+      visao.carregadoEm = 0;
+      visao.ids = '';
+    }
+    var cartoes = cartoesDaVisao();
+    if (!cartoes.length) return;
+    var ids = [];
+    cartoes.forEach(function (c) {
+      if (ids.indexOf(c.id) < 0) ids.push(c.id);
+    });
+    ids.sort(function (x, y) {
+      return x - y;
+    });
+    if (ids.join(',') !== visao.ids || Date.now() - visao.carregadoEm > RECARREGAR_MS) carregarVisao(ids);
+
+    cartoes.forEach(function (c) {
+      var resumo = visao.quadros[c.id];
+      if (!resumo) return;
+      var total = null;
+      var irmaos = c.h2.parentElement ? c.h2.parentElement.children : [];
+      for (var i = 0; i < irmaos.length && !total; i++) {
+        if (folhaNumerica(irmaos[i])) total = irmaos[i];
+      }
+      c.a.querySelectorAll('span').forEach(function (n) {
+        if (!folhaNumerica(n) || n === total) return;
+        var nome = n.previousElementSibling;
+        if (!nome || nome.tagName !== 'SPAN' || nome.children.length) return;
+        var real = resumo.porNome[(nome.textContent || '').trim()];
+        if (real !== undefined) trocarNumero(n, real);
+      });
+      if (total && resumo.soma !== null) trocarNumero(total, resumo.soma);
     });
   }
 
@@ -925,6 +1040,10 @@
     seguro(aplicarMenu)();
     seguro(aplicarMenuEnxuto)();
 
+    if (ehVisaoGeral(location.pathname)) {
+      seguro(aplicarVisao)();
+      return;
+    }
     var rota = rotaAtual(location.pathname);
     if (!rota) return;
     // Nao depende do CRM nem de haver categorias.
@@ -959,6 +1078,8 @@
     contaDaUrl: contaDaUrl,
     funisFavoritos: funisFavoritos,
     totalDaEtapa: totalDaEtapa,
+    ehVisaoGeral: ehVisaoGeral,
+    resumirTotais: resumirTotais,
     posicaoNoMenu: posicaoNoMenu,
   };
 
