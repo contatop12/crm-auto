@@ -1,6 +1,15 @@
 import { limpa } from './text';
 
 /**
+ * Como a frase e' comparada: sem acento, emoji, caixa e PONTUACAO. O lead apaga
+ * o "!" ou a virgula do texto pronto e segue escrevendo ("Ola vim pelo anuncio
+ * do Google e queria..."); a pontuacao nao prova nada, as palavras sim.
+ */
+function normal(s: string | null | undefined): string {
+  return limpa(s).replace(/[^\p{L}\p{N} ]+/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
  * A frase do anúncio como prova de origem.
  *
  * O botão do anúncio abre o WhatsApp com um texto pronto. Quando o clique não
@@ -16,6 +25,15 @@ import { limpa } from './text';
  * correspondência, não pelo identificador do clique. Mais fraca é melhor que
  * nenhuma.
  */
+
+/**
+ * O texto da extensao de mensagem do Google Ads ("Mensagem inicial"). Todo
+ * cliente nasce com ele; o painel troca ou acrescenta outros.
+ */
+export const FRASE_PADRAO_GOOGLE = 'Olá, vim pelo anúncio do Google!';
+
+/** Abaixo disto a frase casaria com conversa comum ("oi, bom dia"). */
+export const FRASE_MINIMA = 6;
 
 export interface FraseEntrada {
   frase: string;
@@ -45,11 +63,11 @@ export function casarFraseDeEntrada(
   texto: string | null | undefined,
   frases: FraseEntrada[],
 ): OrigemDaFrase | null {
-  const t = limpa(texto);
+  const t = normal(texto);
   if (!t) return null;
 
   for (const f of frases) {
-    const alvo = limpa(f.frase);
+    const alvo = normal(f.frase);
     if (alvo && t.includes(alvo)) {
       return { origem: f.origem, plataforma: f.plataforma };
     }
@@ -72,4 +90,24 @@ export function casarFraseDeEntrada(
 export function protocoloDaFrase(prefixo: string, conversaId: number): string {
   const p = (prefixo ?? '').trim().toUpperCase();
   return p ? `${p}-MSG-${conversaId}` : `MSG-${conversaId}`;
+}
+
+/** O erro a mostrar no cadastro, ou `null` quando a frase serve. */
+export function validarFraseDeEntrada(
+  frase: string | null | undefined,
+  plataforma: string | null | undefined,
+): string | null {
+  const t = normal(frase);
+  if (!t) return 'cole a mensagem pronta do anúncio';
+  if (t.length < FRASE_MINIMA) {
+    return `mensagem curta demais (mínimo ${FRASE_MINIMA} letras): casaria com conversa comum`;
+  }
+  if (plataforma !== 'google' && plataforma !== 'meta') return 'escolha Google Ads ou Meta Ads';
+  return null;
+}
+
+/** A mesma frase ja' cadastrada, ignorando acento, caixa, emoji e espaco. */
+export function fraseRepetida(frase: string, atuais: Array<{ frase: string }>): boolean {
+  const t = normal(frase);
+  return atuais.some((a) => normal(a.frase) === t);
 }

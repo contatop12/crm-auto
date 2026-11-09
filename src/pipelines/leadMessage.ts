@@ -389,7 +389,12 @@ export async function atribuirLead(
       quizValor: lead.quiz_valor,
       pagina: lead.page_url,
       trafego: daAds ? 'pago' : leadDoClique && veioDoSite ? 'organico' : null,
-      canal: anuncio || clid ? 'msg-nat' : veioDoSite ? (origem === 'formulario' ? 'formulario-do-site' : 'msg-site') : null,
+      // Mensagem: `msg-nat` quando veio direto do anuncio (texto pronto da
+      // extensao de mensagem, ou o clique do anuncio da Meta); `msg-site` quando
+      // passou pelo site. O buildLabels decide quem usa o canal (so' o Google).
+      canal: origem === 'formulario'
+        ? (veioDoSite ? 'formulario-do-site' : null)
+        : anuncio || clid || lead.evento === 'frase_entrada' ? 'msg-nat' : 'msg-site',
       viaSite: !daAds && veioDoSite,
     },
     vocab,

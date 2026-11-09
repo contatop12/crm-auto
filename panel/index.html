@@ -1103,6 +1103,32 @@
                     </header>
                     <div id="aviso-resumo"></div>
                   </section>
+
+                  <section>
+                    <header class="secao-topo">
+                      <div>
+                        <h2>Mensagem pronta do anúncio</h2>
+                        <p class="dica">O texto que o anúncio já manda pronto, como a mensagem inicial da extensão de mensagem do Google. Quem chega com ele, mesmo sem protocolo, entra como lead do anúncio em Novo Lead. Do Google ganha a etiqueta <strong>msg-nat</strong>; da Meta, <strong>mensagem</strong>.</p>
+                      </div>
+                      <span class="carregando" id="frase-estado"></span>
+                    </header>
+                    <div class="campo">
+                      <label for="f-frase">Mensagem pronta · tipo contém</label>
+                      <input id="f-frase" type="text" placeholder="Olá, vim pelo anúncio do Google!" />
+                      <p class="dica">Tipo <strong>contém</strong>: vale mesmo se o lead escrever mais coisa junto. Acento, emoji e maiúscula não atrapalham.</p>
+                    </div>
+                    <div class="campo">
+                      <label for="f-plataforma">Anúncio de</label>
+                      <select id="f-plataforma">
+                        <option value="google">Google Ads</option>
+                        <option value="meta">Meta Ads</option>
+                      </select>
+                    </div>
+                    <div class="linha-acoes form-linha">
+                      <button id="btn-frase" class="principal">Adicionar</button>
+                    </div>
+                    <div id="frases"></div>
+                  </section>
                 </div>
 
                 <div class="secao-grupo" data-secao="site" hidden>
@@ -1393,6 +1419,7 @@
         document.getElementById('btn-meta-nova').addEventListener('click', () => adicionarMeta(id));
         document.getElementById('btn-gatilho').addEventListener('click', () => adicionarGatilho(id));
         document.getElementById('btn-automatica').addEventListener('click', () => adicionarAutomatica(id));
+        document.getElementById('btn-frase').addEventListener('click', () => adicionarFrase(id));
         document.getElementById('btn-orfaos').addEventListener('click', () => procurarOrfaos(id));
         document.getElementById('btn-l-add').addEventListener('click', () => criarEtiqueta(id));
         document.getElementById('btn-reproc').addEventListener('click', () => reprocessar(id, false));
@@ -1414,7 +1441,7 @@
             carregarEtiquetas(id);
             provisionar(id, false);
           },
-          'canais/whatsapp': () => { carregarInstancias(id); resumoAvisoGrupo(lerCfg()); },
+          'canais/whatsapp': () => { carregarInstancias(id); resumoAvisoGrupo(lerCfg()); carregarFrases(id); },
           'canais/site': () => carregarGtm(id),
           'canais/entradas': () => carregarWebhooksTab(id, slug),
           'google/envio': () => resumoGoogle(lerCfg()),
@@ -2868,6 +2895,54 @@
           await enviar('/tenants/' + id + '/respostas-automaticas', 'POST', { frase: frase.value });
           frase.value = '';
           await carregarAutomaticas(id);
+        } catch (e) {
+          estado.textContent = 'falhou: ' + e.message;
+        }
+      }
+
+      // A mensagem pronta e' a prova de origem de quem nao passa pelo site: sem
+      // ela, o lead da extensao de mensagem do Google e' descartado.
+      async function carregarFrases(id) {
+        const alvo = document.getElementById('frases');
+        const estado = document.getElementById('frase-estado');
+        const r = await api('/tenants/' + id + '/frases-entrada').catch(function () { return { frases: [], leads_30d: 0 }; });
+        const lista = r.frases || [];
+
+        alvo.innerHTML = lista.length
+          ? '<table><thead><tr><th>Mensagem</th><th>Anúncio</th><th>Etiqueta</th><th>Cadastrada</th><th></th></tr></thead><tbody>' +
+            lista.map(function (f) {
+              const meta = f.plataforma === 'meta';
+              return '<tr><td>' + esc(f.frase) + '</td><td>' + (meta ? 'Meta Ads' : 'Google Ads') + '</td>' +
+                '<td class="mono">' + (meta ? 'mensagem' : 'msg-nat') + '</td>' +
+                '<td title="' + esc(hora(f.created_at)) + '">' + haQuanto(f.created_at) + '</td>' +
+                '<td><button class="f-del" data-f="' + f.id + '">remover</button></td></tr>';
+            }).join('') + '</tbody></table>'
+          : '<div class="vazio"><p>Nenhuma mensagem pronta cadastrada.</p>' +
+            '<p class="mono">Sem ela, quem chega pela extensão de mensagem do anúncio, sem protocolo, não vira lead.</p></div>';
+
+        alvo.querySelectorAll('.f-del').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            try {
+              await enviar('/tenants/' + id + '/frases-entrada/' + b.dataset.f, 'DELETE');
+              await carregarFrases(id);
+            } catch (e) {
+              estado.textContent = 'falhou: ' + e.message;
+            }
+          });
+        });
+
+        const n = r.leads_30d || 0;
+        estado.textContent = n + (n === 1 ? ' lead entrou' : ' leads entraram') + ' por ela em 30 dias';
+      }
+
+      async function adicionarFrase(id) {
+        const frase = document.getElementById('f-frase');
+        const plataforma = document.getElementById('f-plataforma');
+        const estado = document.getElementById('frase-estado');
+        try {
+          await enviar('/tenants/' + id + '/frases-entrada', 'POST', { frase: frase.value, plataforma: plataforma.value });
+          frase.value = '';
+          await carregarFrases(id);
         } catch (e) {
           estado.textContent = 'falhou: ' + e.message;
         }

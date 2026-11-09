@@ -36,6 +36,7 @@ import {
   GATILHO_TEMPO,
   MOTIVO_AUTOMATICA,
 } from '../domain/respostasAutomaticas';
+import { FRASE_PADRAO_GOOGLE, fraseRepetida, validarFraseDeEntrada } from '../domain/frasesEntrada';
 import { vigiarWhatsapp } from '../pipelines/vigiaWhatsapp';
 import { metaAds } from './metaAds';
 
@@ -178,6 +179,14 @@ admin.post('/tenants', async (c) => {
       .bind(t!.id, canal, chave)
       .run();
   }
+
+  // A extensao de mensagem do Google manda este texto: quem chega com ele, sem
+  // protocolo, e' lead do anuncio. Vem cadastrada; o painel troca.
+  await c.env.DB.prepare(
+    `INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma) VALUES (?, ?, 'mensagem', 'google')`,
+  )
+    .bind(t!.id, FRASE_PADRAO_GOOGLE)
+    .run();
 
   console.log(JSON.stringify({ acao: 'criar_cliente', por: c.get('identity').email, slug }));
   return c.json({ ok: true, id: t!.id, slug }, 201);
@@ -1210,6 +1219,62 @@ admin.delete('/tenants/:id/respostas-automaticas/:rid', async (c) => {
     .bind(Number(c.req.param('rid')), Number(c.req.param('id')))
     .run();
   return r.meta.changes ? c.json({ ok: true }) : c.json({ error: 'trecho nao encontrado' }, 404);
+});
+
+/**
+ * Mensagem pronta do anuncio: o texto que a extensao de mensagem do Google (ou a
+ * campanha de mensagem da Meta) ja' manda. Quem chega com ele, sem protocolo,
+ * vira lead do anuncio. Ver `casarFraseDeEntrada`.
+ *
+ * Vem com quantos leads entraram por frase nos ultimos 30 dias: frase que nunca
+ * traz ninguem e' anuncio que mudou o texto.
+ */
+admin.get('/tenants/:id/frases-entrada', async (c) => {
+  const id = Number(c.req.param('id'));
+  const [frases, entrou] = await Promise.all([
+    c.env.DB.prepare(
+      'SELECT id, frase, plataforma, created_at FROM lead_entry_phrases WHERE tenant_id = ? ORDER BY id',
+    )
+      .bind(id)
+      .all(),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM leads
+        WHERE tenant_id = ? AND evento = 'frase_entrada' AND created_at >= datetime('now','-30 day')`,
+    )
+      .bind(id)
+      .first<{ n: number }>(),
+  ]);
+  return c.json({ frases: frases.results, leads_30d: entrou?.n ?? 0 });
+});
+
+admin.post('/tenants/:id/frases-entrada', async (c) => {
+  const id = Number(c.req.param('id'));
+  const b = await c.req.json<{ frase?: string; plataforma?: string }>();
+
+  const frase = String(b.frase ?? '').trim();
+  const plataforma = String(b.plataforma ?? 'google');
+  const erro = validarFraseDeEntrada(frase, plataforma);
+  if (erro) return c.json({ error: erro }, 400);
+
+  const { results: atuais } = await c.env.DB.prepare('SELECT frase FROM lead_entry_phrases WHERE tenant_id = ?')
+    .bind(id)
+    .all<{ frase: string }>();
+  if (fraseRepetida(frase, atuais)) return c.json({ error: 'essa mensagem já está cadastrada' }, 409);
+
+  await c.env.DB.prepare(
+    `INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma) VALUES (?, ?, 'mensagem', ?)`,
+  )
+    .bind(id, frase, plataforma)
+    .run();
+
+  return c.json({ ok: true }, 201);
+});
+
+admin.delete('/tenants/:id/frases-entrada/:fid', async (c) => {
+  const r = await c.env.DB.prepare('DELETE FROM lead_entry_phrases WHERE id = ? AND tenant_id = ?')
+    .bind(Number(c.req.param('fid')), Number(c.req.param('id')))
+    .run();
+  return r.meta.changes ? c.json({ ok: true }) : c.json({ error: 'mensagem nao encontrada' }, 404);
 });
 
 /**

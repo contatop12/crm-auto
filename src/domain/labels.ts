@@ -20,6 +20,8 @@ export type Trafego = 'pago' | 'organico' | 'direto';
 /**
  * Por onde a conversa chegou, no esquema de quem separa canal de origem
  * (a Vita tem `msg-site`, `msg-nat`, `formulario-do-site`, `formulario-nativo`).
+ *
+ * `msg-site` e `msg-nat` so' valem para o Google, onde substituem `mensagem`.
  */
 export type Canal = 'msg-site' | 'msg-nat' | 'formulario-do-site' | 'formulario-nativo';
 
@@ -59,7 +61,14 @@ export function buildLabels(i: LabelInput, vocabulario: LabelVocabulary[]): Labe
   const pedidos: string[][] = [];
   const quer = (...alternativas: string[]) => pedidos.push(alternativas);
 
-  if (i.origem) quer(i.origem);
+  // Mensagem do Google se divide pelo caminho: `msg-site` (clique no site, com
+  // protocolo) ou `msg-nat` (texto pronto da extensao de mensagem do anuncio,
+  // sem passar pelo site). A da Meta e o resto seguem `mensagem`. Cliente sem o
+  // canal no vocabulario fica com `mensagem`, como antes.
+  const msgDoGoogle =
+    i.origem === 'mensagem' && i.plataforma === 'google' && (i.canal === 'msg-site' || i.canal === 'msg-nat');
+  if (msgDoGoogle) quer(i.canal as string, 'mensagem');
+  else if (i.origem) quer(i.origem);
 
   // A etiqueta passa a ser a REDE, nao "o anuncio veio de tal lugar":
   // `google-ads` virou `google`, e `meta-ads` se desdobra em `instagram` ou
@@ -71,7 +80,8 @@ export function buildLabels(i: LabelInput, vocabulario: LabelVocabulary[]): Labe
   if (i.plataforma === 'meta') quer(redeDoMeta(i.utmSource), 'meta-ads');
 
   if (i.viaSite) quer('site');
-  if (i.canal) quer(i.canal);
+  // `msg-site`/`msg-nat` sao so' do Google e ja' entraram no lugar da origem.
+  if (i.canal && i.canal !== 'msg-site' && i.canal !== 'msg-nat') quer(i.canal);
   if (i.trafego) quer(i.trafego);
 
   // A pagina de entrada tambem e' etiqueta, quando o vocabulario a conhece.

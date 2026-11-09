@@ -374,14 +374,43 @@ describe('atribuirLead', () => {
     expect(chamadas.filter((c) => /labels/.test(c.url))).toEqual([]);
   });
 
-  test('protocolo do botao sem clique registrado: site e msg-site', async () => {
+  test('protocolo do botao sem clique registrado: site, sem msg-site (que e so do Google)', async () => {
     const { env, exec } = cenario();
     for (const s of ['site', 'msg-site', 'direto']) {
       exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, '${s}', '${s}')`);
     }
     etiquetasAtuais = [];
     await atribuirLead(env, 1, webhook({ content: 'Olá [Protocolo: VITA-NAOEXISTE]' }, { labels: [] }));
-    expect(corpoDe<{ labels: string[] }>(/\/labels$/).labels).toEqual(['site', 'msg-site']);
+    expect(corpoDe<{ labels: string[] }>(/\/labels$/).labels).toEqual(['site']);
+  });
+
+  test('mensagem pronta da extensao do Google, sem protocolo: lead do Google com msg-nat', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, 'msg-nat', 'msg-nat'), (1, 'msg-site', 'msg-site')`);
+    exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma) VALUES (1, 'Olá, vim pelo anúncio do Google!', 'mensagem', 'google')`);
+    etiquetasAtuais = [];
+    const r = await atribuirLead(env, 1, webhook(
+      { content: 'Ola, vim pelo anuncio do Google! Quanto custa?' },
+      { labels: [], meta: { sender: { name: 'Bia', phone_number: '+5511988887777' } } },
+    ));
+
+    expect(r.status).toBe('ok');
+    const { labels } = corpoDe<{ labels: string[] }>(/\/labels$/);
+    expect(labels).toEqual(expect.arrayContaining(['msg-nat', 'google']));
+    expect(labels).not.toContain('mensagem');
+    expect(labels).not.toContain('msg-site');
+    const [lead] = consultar(`SELECT protocol, evento FROM leads WHERE tenant_id = 1 AND evento = 'frase_entrada'`) as Array<{ protocol: string; evento: string }>;
+    expect(lead!.protocol).toBe('VITA-MSG-76');
+  });
+
+  test('lead do Google pelo site ganha msg-site no lugar de mensagem', async () => {
+    const { env, exec } = cenario();
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot) VALUES (1, 'msg-nat', 'msg-nat'), (1, 'msg-site', 'msg-site')`);
+    etiquetasAtuais = [];
+    await atribuirLead(env, 1, webhook({}, { labels: [] }));
+    const { labels } = corpoDe<{ labels: string[] }>(/\/labels$/);
+    expect(labels).toEqual(expect.arrayContaining(['msg-site', 'google']));
+    expect(labels).not.toContain('mensagem');
   });
 
   test('mensagem da propria empresa nao ganha etiqueta de lead', async () => {

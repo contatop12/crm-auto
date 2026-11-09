@@ -1,5 +1,12 @@
 import { describe, test, expect } from 'vitest';
-import { casarFraseDeEntrada, protocoloDaFrase, type FraseEntrada } from '../../src/domain/frasesEntrada';
+import {
+  FRASE_PADRAO_GOOGLE,
+  casarFraseDeEntrada,
+  fraseRepetida,
+  protocoloDaFrase,
+  validarFraseDeEntrada,
+  type FraseEntrada,
+} from '../../src/domain/frasesEntrada';
 
 const VITA: FraseEntrada[] = [
   {
@@ -71,5 +78,42 @@ describe('protocoloDaFrase', () => {
 
   test('prefixo vazio ainda produz chave utilizavel', () => {
     expect(protocoloDaFrase('', 78)).toBe('MSG-78');
+  });
+});
+
+describe('frase padrao do Google', () => {
+  test('a mensagem inicial da extensao casa, completada ou sem acento', () => {
+    const padrao: FraseEntrada[] = [{ frase: FRASE_PADRAO_GOOGLE, origem: 'mensagem', plataforma: 'google' }];
+    expect(casarFraseDeEntrada('Olá, vim pelo anúncio do Google!', padrao)).toEqual({ origem: 'mensagem', plataforma: 'google' });
+    expect(casarFraseDeEntrada('ola vim pelo anuncio do google, tem disponivel?', padrao)).toBeTruthy();
+    expect(casarFraseDeEntrada('vim pelo google', padrao)).toBeNull();
+  });
+});
+
+describe('validarFraseDeEntrada', () => {
+  test('aceita frase do Google e da Meta', () => {
+    expect(validarFraseDeEntrada(FRASE_PADRAO_GOOGLE, 'google')).toBeNull();
+    expect(validarFraseDeEntrada('MA21RMKT', 'meta')).toBeNull();
+  });
+
+  test('recusa vazia, curta demais e plataforma desconhecida', () => {
+    expect(validarFraseDeEntrada('  ', 'google')).toMatch(/cole/);
+    expect(validarFraseDeEntrada('oi!', 'google')).toMatch(/curta/);
+    expect(validarFraseDeEntrada(FRASE_PADRAO_GOOGLE, 'tiktok')).toMatch(/Google Ads ou Meta Ads/);
+  });
+
+  test('repetida ignora acento, caixa e espaco', () => {
+    const atuais = [{ frase: FRASE_PADRAO_GOOGLE }];
+    expect(fraseRepetida('ola,  vim pelo ANUNCIO do google!', atuais)).toBe(true);
+    expect(fraseRepetida('Olá, vim pelo anúncio do Google! Quero orçamento', atuais)).toBe(false);
+  });
+});
+
+describe('pontuacao nao separa a frase', () => {
+  test('lead que apaga o ponto de exclamacao ou a virgula ainda casa', () => {
+    const padrao: FraseEntrada[] = [{ frase: 'Olá, vim pelo anúncio do Google!', origem: 'mensagem', plataforma: 'google' }];
+    expect(casarFraseDeEntrada('Olá vim pelo anúncio do Google e queria saber o preço', padrao)).toBeTruthy();
+    expect(casarFraseDeEntrada('Olá, vim pelo anúncio do Google. Atendem sábado?', padrao)).toBeTruthy();
+    expect(casarFraseDeEntrada('Olá, vim pelo anúncio', padrao)).toBeNull();
   });
 });

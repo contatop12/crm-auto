@@ -80,9 +80,9 @@ describe('buildLabels', () => {
   });
 });
 
-/** O esquema da Vita: origem / canal / trafego / pagina / campanha, sem `mensagem`. */
+/** O esquema da Vita: origem / canal / trafego / pagina / campanha. `mensagem` desde a 0040. */
 const vita: LabelVocabulary[] = [
-  'google', 'instagram', 'facebook', 'site', 'msg-site', 'msg-nat', 'formulario-do-site',
+  'mensagem', 'google', 'instagram', 'facebook', 'site', 'msg-site', 'msg-nat', 'formulario-do-site',
   'pago', 'organico', 'direto', 'search', 'aparelho-auditivo', 'aparelho-auditivo-preco',
 ].map((s) => ({ slug: s, labelChatwoot: s, labelWhatsapp: null }));
 
@@ -92,9 +92,24 @@ describe('buildLabels no esquema completo (Vita)', () => {
       origem: 'mensagem', plataforma: 'google', campanhaSlug: 'search',
       trafego: 'pago', canal: 'msg-site', pagina: 'https://audicao.vitaaudio.com.br/aparelho-auditivo-preco?gclid=x',
     }, vita);
-    expect(r.slugs).toEqual(['google', 'msg-site', 'pago', 'aparelho-auditivo-preco', 'search']);
-    // `mensagem` nao existe na Vita: fica registrada como ignorada, nao vai
-    expect(r.ignoradas).toContain('mensagem');
+    // `msg-site` entra no lugar de `mensagem`: no Google, uma ou outra
+    expect(r.slugs).toEqual(['msg-site', 'google', 'pago', 'aparelho-auditivo-preco', 'search']);
+  });
+
+  test('lead do Google pela mensagem pronta do anuncio: msg-nat no lugar de mensagem', () => {
+    const r = buildLabels({ origem: 'mensagem', plataforma: 'google', canal: 'msg-nat', trafego: 'pago' }, vita);
+    expect(r.slugs).toEqual(['msg-nat', 'google', 'pago']);
+  });
+
+  test('lead da Meta segue com mensagem, mesmo vindo direto do anuncio', () => {
+    const r = buildLabels({ origem: 'mensagem', plataforma: 'meta', utmSource: 'instagram', canal: 'msg-nat', trafego: 'pago' }, vita);
+    expect(r.slugs).toEqual(['mensagem', 'instagram', 'pago']);
+    expect(r.slugs).not.toContain('msg-nat');
+  });
+
+  test('formulario do Google nao vira msg-site', () => {
+    const r = buildLabels({ origem: 'formulario', plataforma: 'google', canal: 'formulario-do-site' }, vita);
+    expect(r.slugs).toEqual(['google', 'formulario-do-site']);
   });
 
   test('pagina com sufixo do botao cai no primeiro trecho', () => {
@@ -102,9 +117,9 @@ describe('buildLabels no esquema completo (Vita)', () => {
     expect(r.slugs).toEqual(['google', 'aparelho-auditivo']);
   });
 
-  test('clique do site sem anuncio: site, canal e organico', () => {
+  test('clique do site sem anuncio: mensagem, site e organico (msg-site e so do Google)', () => {
     const r = buildLabels({ origem: 'mensagem', plataforma: 'outro', viaSite: true, canal: 'msg-site', trafego: 'organico' }, vita);
-    expect(r.slugs).toEqual(['site', 'msg-site', 'organico']);
+    expect(r.slugs).toEqual(['mensagem', 'site', 'organico']);
   });
 
   test('contato sem lead: so o trafego direto, sem origem inventada', () => {
@@ -130,6 +145,11 @@ describe('buildLabels com o vocabulario antigo', () => {
 
   test('instagram e facebook viram meta-ads', () => {
     expect(buildLabels({ origem: 'mensagem', plataforma: 'meta', utmSource: 'ig' }, antigo).slugs).toEqual(['mensagem', 'meta-ads']);
+  });
+
+  test('cliente sem msg-nat no vocabulario fica com mensagem', () => {
+    expect(buildLabels({ origem: 'mensagem', plataforma: 'google', canal: 'msg-nat' }, antigo).slugs)
+      .toEqual(['mensagem', 'google-ads']);
   });
 
   test('onde os dois existem, vale o nome novo', () => {
