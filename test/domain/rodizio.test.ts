@@ -31,24 +31,68 @@ const seg = (diasAtras: number) => (AGORA - diasAtras * 86400_000) / 1000;
 
 describe('conversaEmOutraCaixa', () => {
   const atual = { conversa: 50, inbox: 17 };
+  // conversa nova veio de anuncio: qualquer outra caixa conta (janela abaixo)
+  const deAnuncio = { board: 9, novaDeAnuncio: true };
   test('ignora a propria conversa e a mesma caixa', () => {
     expect(conversaEmOutraCaixa([
       { id: 50, inbox_id: 17, status: 'open', last_activity_at: seg(0) },
       { id: 40, inbox_id: 17, status: 'open', last_activity_at: seg(1) },
-    ], atual, AGORA)).toBeNull();
+    ], atual, AGORA, deAnuncio)).toBeNull();
   });
   test('aberta em outra caixa conta mesmo velha', () => {
-    expect(conversaEmOutraCaixa([{ id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(90) }], atual, AGORA)?.id).toBe(9);
+    expect(conversaEmOutraCaixa([{ id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(90) }], atual, AGORA, deAnuncio)?.id).toBe(9);
   });
   test('resolvida: so dentro de 30 dias', () => {
-    expect(conversaEmOutraCaixa([{ id: 9, inbox_id: 15, status: 'resolved', last_activity_at: seg(10) }], atual, AGORA)?.id).toBe(9);
-    expect(conversaEmOutraCaixa([{ id: 9, inbox_id: 15, status: 'resolved', last_activity_at: seg(31) }], atual, AGORA)).toBeNull();
+    expect(conversaEmOutraCaixa([{ id: 9, inbox_id: 15, status: 'resolved', last_activity_at: seg(10) }], atual, AGORA, deAnuncio)?.id).toBe(9);
+    expect(conversaEmOutraCaixa([{ id: 9, inbox_id: 15, status: 'resolved', last_activity_at: seg(31) }], atual, AGORA, deAnuncio)).toBeNull();
   });
   test('varias: a mais recente', () => {
     expect(conversaEmOutraCaixa([
       { id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(5) },
       { id: 12, inbox_id: 16, status: 'open', last_activity_at: seg(1) },
-    ], atual, AGORA)?.id).toBe(12);
+    ], atual, AGORA, deAnuncio)?.id).toBe(12);
+  });
+
+  describe('so lead do Google Ads', () => {
+    const ads = { kanban_task: { board_id: 9 } };
+    const organico = { kanban_task: { board_id: 10 } };
+    const soBoard = { board: 9 };
+    test('cliente antigo: as duas conversas no Organico, nada', () => {
+      expect(conversaEmOutraCaixa([
+        { id: 50, inbox_id: 17, status: 'open', last_activity_at: seg(0), ...organico },
+        { id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(3), ...organico },
+      ], atual, AGORA, soBoard)).toBeNull();
+    });
+    test('a outra conversa esta no board de Ads: alerta', () => {
+      expect(conversaEmOutraCaixa([
+        { id: 50, inbox_id: 17, status: 'open', last_activity_at: seg(0), ...organico },
+        { id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(3), ...ads },
+      ], atual, AGORA, soBoard)?.id).toBe(9);
+    });
+    test('a conversa nova ja esta no board de Ads: alerta', () => {
+      expect(conversaEmOutraCaixa([
+        { id: 50, inbox_id: 17, status: 'open', last_activity_at: seg(0), ...ads },
+        { id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(3), ...organico },
+      ], atual, AGORA, soBoard)?.id).toBe(9);
+    });
+    test('conversa nova de anuncio (card ainda no Organico, promocao a caminho): alerta', () => {
+      expect(conversaEmOutraCaixa([
+        { id: 50, inbox_id: 17, status: 'open', last_activity_at: seg(0), ...organico },
+        { id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(3), ...organico },
+      ], atual, AGORA, { board: 9, novaDeAnuncio: true })?.id).toBe(9);
+    });
+    test('nova fora do funil: so conta a outra que esta no board de Ads, mesmo menos recente', () => {
+      expect(conversaEmOutraCaixa([
+        { id: 50, inbox_id: 17, status: 'open', last_activity_at: seg(0), ...organico },
+        { id: 12, inbox_id: 16, status: 'open', last_activity_at: seg(1), ...organico },
+        { id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(5), ...ads },
+      ], atual, AGORA, soBoard)?.id).toBe(9);
+    });
+    test('conversa sem card: nao e lead do Ads', () => {
+      expect(conversaEmOutraCaixa([
+        { id: 9, inbox_id: 15, status: 'open', last_activity_at: seg(3), kanban_task: null },
+      ], atual, AGORA, soBoard)).toBeNull();
+    });
   });
 });
 

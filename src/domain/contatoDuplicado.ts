@@ -11,6 +11,8 @@ export interface ConversaDoContato {
   /** segundos */
   last_activity_at?: number;
   meta?: { assignee?: { id?: number; name?: string } | null };
+  /** card do kanban (a lista de conversas do contato ja' traz) */
+  kanban_task?: { board_id?: number } | null;
 }
 
 export const JANELA_DUPLICADO_DIAS = 30;
@@ -18,15 +20,25 @@ export const JANELA_DUPLICADO_DIAS = 30;
 /**
  * A conversa em OUTRA caixa que importa: aberta, ou com atividade na janela.
  * Se houver varias, a de atividade mais recente.
+ *
+ * So' lead do Google Ads (10/11): cliente antigo que fala com dois numeros e'
+ * rotina, e o grupo era avisado de todos. Conta quando a conversa nova veio de
+ * anuncio (`novaDeAnuncio` — o card ainda esta' no Organico, a promocao vem
+ * depois) ou ja' tem card no board de Ads; senao, so' a outra conversa que tem
+ * card no board de Ads.
  */
 export function conversaEmOutraCaixa(
   conversas: ConversaDoContato[],
   atual: { conversa: number; inbox: number },
   agoraMs: number,
+  funil: { board: number; novaDeAnuncio?: boolean },
 ): ConversaDoContato | null {
   const corte = agoraMs - JANELA_DUPLICADO_DIAS * 86400_000;
+  const noFunil = (c: ConversaDoContato) => c.kanban_task?.board_id === funil.board;
+  const novaNoFunil = funil.novaDeAnuncio === true || conversas.some((c) => c.id === atual.conversa && noFunil(c));
   const candidatas = conversas.filter((c) => {
     if (c.inbox_id === atual.inbox || c.id === atual.conversa) return false;
+    if (!novaNoFunil && !noFunil(c)) return false;
     return c.status === 'open' || (c.last_activity_at ?? 0) * 1000 >= corte;
   });
   candidatas.sort((a, b) => (b.last_activity_at ?? 0) - (a.last_activity_at ?? 0));

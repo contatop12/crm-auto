@@ -12,6 +12,10 @@ import { conversaEmOutraCaixa, parDeCaixas, rotuloDaCaixa, textoDoAlerta } from 
  * ultimos 30 dias) e avisa o grupo `tenant_config.alerta_duplicado_grupo`
  * (jid ...@g.us) pela instancia de alerta da Evolution.
  *
+ * So' lead do Google Ads (`cw_board_funil_id`): a conversa nova veio de
+ * anuncio, ou uma das duas tem card no board de Ads. Por isso roda depois da
+ * atribuicao, que grava em `conversations.origem` se a conversa veio de anuncio.
+ *
  * Uma vez por contato + par de caixas (`alertas_duplicado`). Sem grupo
  * configurado so' loga e NAO grava a linha: gravar queimaria o alerta antes de
  * existir para onde mandar. Roda depois do rodizio, para o texto trazer o
@@ -34,16 +38,28 @@ export async function alertarContatoDuplicado(env: Env, tenantId: number, payloa
     if (!conversa || !inbox || !contato || !telefone || !recemCriada(conv?.created_at)) return;
 
     const cfg = await env.DB.prepare(
-      `SELECT c.cw_account_id AS acc, c.alerta_duplicado_grupo AS grupo,
+      `SELECT c.cw_account_id AS acc, c.cw_board_funil_id AS board, c.alerta_duplicado_grupo AS grupo,
               c.alerta_duplicado_instancia AS instancia, t.nome
        FROM tenant_config c JOIN tenants t ON t.id = c.tenant_id WHERE c.tenant_id = ?`,
     )
       .bind(tenantId)
-      .first<{ acc: number | null; grupo: string | null; instancia: string | null; nome: string }>();
-    if (!cfg?.acc) return;
+      .first<{ acc: number | null; board: number | null; grupo: string | null; instancia: string | null; nome: string }>();
+    // sem board de Ads nao ha' lead do Google Ads para alertar
+    if (!cfg?.acc || !cfg.board) return;
+
+    const deAnuncio = await env.DB.prepare(
+      "SELECT 1 AS sim FROM conversations WHERE tenant_id = ? AND cw_conversation_id = ? AND origem = 'anuncio'",
+    )
+      .bind(tenantId, conversa)
+      .first<{ sim: number }>();
 
     const cw = ChatwootClient.fromEnv(env);
-    const outra = conversaEmOutraCaixa(await cw.conversasDoContato(cfg.acc, contato), { conversa, inbox }, Date.now());
+    const outra = conversaEmOutraCaixa(
+      await cw.conversasDoContato(cfg.acc, contato),
+      { conversa, inbox },
+      Date.now(),
+      { board: cfg.board, novaDeAnuncio: !!deAnuncio },
+    );
     if (!outra) return;
 
     const [a, b] = parDeCaixas(inbox, outra.inbox_id);

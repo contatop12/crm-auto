@@ -12,7 +12,7 @@ function cenario(grupo: string | null = '120363@g.us', instancia: string | null 
     DB: d1, CHATWOOT_BASE_URL: 'https://cw.teste', CHATWOOT_API_TOKEN: 'tok',
     EVOLUTION_SERVER_URL: 'https://evo.teste', EVOLUTION_API_KEY: 'k', EVOLUTION_ALERT_INSTANCE: 'alerta',
   } as unknown as Env;
-  return { env, consultar };
+  return { env, consultar, exec };
 }
 
 const agora = Math.floor(Date.now() / 1000);
@@ -36,7 +36,9 @@ beforeEach(() => {
   evoFalha = false;
   doContato = [
     { id: 1500, inbox_id: 17, status: 'open', last_activity_at: agora, meta: { assignee: { id: 14, name: 'Vânia' } } },
-    { id: 1200, inbox_id: 15, status: 'open', last_activity_at: agora - 9 * 86400, meta: { assignee: { id: 15, name: 'Tânia' } } },
+    // lead do Google Ads: o card da outra conversa esta no board 9
+    { id: 1200, inbox_id: 15, status: 'open', last_activity_at: agora - 9 * 86400, meta: { assignee: { id: 15, name: 'Tânia' } },
+      kanban_task: { board_id: 9 } },
   ];
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const u = String(url);
@@ -83,6 +85,32 @@ describe('alertarContatoDuplicado', () => {
   test('conversa velha em outra caixa (resolvida ha 40 dias): nada', async () => {
     doContato[1] = { id: 1200, inbox_id: 15, status: 'resolved', last_activity_at: agora - 40 * 86400 };
     const { env } = cenario();
+    await alertarContatoDuplicado(env, 4, msg());
+    expect(envios).toEqual([]);
+  });
+
+  test('cliente antigo (as duas conversas no Organico): nada', async () => {
+    doContato[1] = { ...(doContato[1] as object), kanban_task: { board_id: 10 } };
+    const { env, consultar } = cenario();
+    await alertarContatoDuplicado(env, 4, msg());
+    expect(envios).toEqual([]);
+    expect(consultar('SELECT * FROM alertas_duplicado')).toEqual([]);
+  });
+
+  test('conversa nova veio de anuncio (card ainda no Organico): alerta', async () => {
+    doContato[1] = { ...(doContato[1] as object), kanban_task: { board_id: 10 } };
+    const { env, exec } = cenario();
+    exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, origem) VALUES (4, 1500, 'LOC-1', 'anuncio')`);
+    await alertarContatoDuplicado(env, 4, msg());
+    expect(envios).toHaveLength(1);
+  });
+
+  test('conversa nova organica de outro cliente nao conta', async () => {
+    doContato[1] = { ...(doContato[1] as object), kanban_task: { board_id: 10 } };
+    const { env, exec } = cenario();
+    exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, origem) VALUES (4, 1500, 'LOC-1', 'organico')`);
+    exec(`INSERT INTO tenants (id, slug, nome, ativo) VALUES (5, 'outro', 'Outro', 1)`);
+    exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, origem) VALUES (5, 1500, 'OUT-1', 'anuncio')`);
     await alertarContatoDuplicado(env, 4, msg());
     expect(envios).toEqual([]);
   });

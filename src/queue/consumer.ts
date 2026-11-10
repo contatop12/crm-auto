@@ -52,12 +52,10 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
         // lead que respondeu sai de "Pendente"
         await voltarDoPendente(env, msg.tenantId, payload);
       }
-      // Lead novo sem responsavel: rodizio entre os atendentes da caixa, e so'
-      // depois o alerta de contato em dois numeros (traz o responsavel gravado).
-      // Ambos engolem o proprio erro: a atribuicao abaixo nao pode cair por eles.
+      // Lead novo sem responsavel: rodizio entre os atendentes da caixa. Engole
+      // o proprio erro: a atribuicao abaixo nao pode cair por ele.
       if (tentativa === 1 && msg.eventType === 'message_incoming') {
         await atribuirEmRodizio(env, msg.tenantId, payload);
-        await alertarContatoDuplicado(env, msg.tenantId, payload);
       }
       switch (msg.eventType) {
         case 'conversation_created':
@@ -66,11 +64,20 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
             motivo: 'pipeline conversationCreated ainda nao implementado (Fase 3)',
           };
         case 'message_created':
-        case 'message_incoming':
           // Onde a atribuicao acontece: le o protocolo da mensagem, acha o
           // clique e escreve origem, UTMs e etiquetas na conversa e no card.
           // `tentativa`: o lead da Meta sem clique espera a Evolution uma vez
           return atribuirLead(env, msg.tenantId, payload, { tentativa });
+        case 'message_incoming': {
+          const r = await atribuirLead(env, msg.tenantId, payload, { tentativa });
+          // Alerta de contato em dois numeros: so' lead do Google Ads, entao
+          // depois da atribuicao (ela grava se a conversa veio de anuncio) e do
+          // rodizio (o texto traz o responsavel). Adiado = origem ainda em
+          // aberto; a volta da fila alerta. Repetir nao manda em dobro
+          // (`alertas_duplicado`), e o alerta engole o proprio erro.
+          if (!r.adiar) await alertarContatoDuplicado(env, msg.tenantId, payload);
+          return r;
+        }
         case 'message_outgoing':
           // move o card pela frase do vendedor e captura o valor da proposta
           return moverPelaResposta(env, msg.tenantId, payload);
