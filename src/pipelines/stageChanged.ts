@@ -265,6 +265,19 @@ export async function enviarConversao(
 
   const tipo = classificar(evento);
 
+  // Entrada recusada pelo Google: o lead entra na planilha mesmo assim. A
+  // linha da Geral so' era gravada depois do envio aceito, e a recusa deixava o
+  // lead fora dela e sem SEQUENCIA (Locadora, 10/11/2026: conta sem conversoes
+  // otimizadas para leads recusando a conversa que sobe so' com o telefone).
+  // `entrada` grava a planilha de leads e o clique, nao a aba de conversoes:
+  // a conversao nao subiu. A planilha nao duplica — acha o lead pelo telefone.
+  const entrarNaPlanilhaMesmoAssim = async () => {
+    if (etapa.conversion_event !== 'conversa') return;
+    await espelharNaPlanilha(env, tenantId, { tipo: 'entrada', protocolo, ensaio: sombra }).catch((e: Error) => {
+      console.log(JSON.stringify({ acao: 'planilha_falhou', tipo: 'entrada_recusada', protocolo, erro: e.message }));
+    });
+  };
+
   try {
     const r = await GoogleAdsClient.fromEnv(env).ingestEvents(
       montarCorpo(
@@ -278,6 +291,7 @@ export async function enviarConversao(
     // `sent: 0`.
     if (r.erros.length) {
       await fechar(env, tenantId, chave, 'erro', { erro: r.erros.join('; '), tipo });
+      await entrarNaPlanilhaMesmoAssim();
       return { status: 'erro', motivo: `${chave} recusada: ${r.erros.join('; ')}` };
     }
 
@@ -306,6 +320,7 @@ export async function enviarConversao(
   } catch (e) {
     const erro = (e as Error).message.slice(0, 300);
     await fechar(env, tenantId, chave, 'erro', { erro, tipo });
+    await entrarNaPlanilhaMesmoAssim();
     // possivelmente transitorio: a fila retenta e encontra a linha em 'erro'
     return { status: 'erro', motivo: `${chave}: ${erro}` };
   }

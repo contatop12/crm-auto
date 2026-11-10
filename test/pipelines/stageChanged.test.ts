@@ -1,7 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fakeD1 } from '../helpers/fakeD1';
 import { enviarConversao, SQL_ERROS_DA_CONVERSAO } from '../../src/pipelines/stageChanged';
+import { espelharNaPlanilha } from '../../src/pipelines/planilha';
 import type { Env } from '../../src/env';
+
+// A planilha tem os testes dela; aqui so' importa o que foi pedido a ela.
+vi.mock('../../src/pipelines/planilha', () => ({ espelharNaPlanilha: vi.fn(async () => undefined) }));
+const espelhar = vi.mocked(espelharNaPlanilha);
 
 const FUNIL = 7;
 
@@ -61,6 +66,7 @@ let chamadas: Array<{ url: string; corpo: any }>;
 let resposta: () => Response;
 
 beforeEach(() => {
+  espelhar.mockClear();
   chamadas = [];
   resposta = () => Response.json({ requestId: 'req-1' });
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
@@ -225,6 +231,68 @@ describe('enviarConversao', () => {
     expect(chamadas).toHaveLength(2);
     expect(linha(consultar).status).toBe('enviado');
     expect(linha(consultar).erro).toBeNull();
+  });
+
+  describe('Google recusou a conversao', () => {
+    // Locadora, 10/11/2026: a conta sem conversoes otimizadas para leads recusa
+    // a conversa que sobe so' com o telefone. A linha da Geral so' era gravada
+    // depois do envio aceito, e o lead ficava fora da planilha e sem SEQUENCIA.
+    const entrada = () => card({ board_step_id: 27, board_step: { id: 27, name: 'Novo Lead' } });
+    const recusa400 = () => new Response(JSON.stringify({
+      error: {
+        code: 400,
+        message: 'There was a problem with the request.',
+        details: [{
+          '@type': 'type.googleapis.com/google.rpc.BadRequest',
+          fieldViolations: [{
+            field: 'events.events[0].destination_references[0]',
+            description: 'The destination account is not enabled for enhanced conversions for leads.',
+            reason: 'DESTINATION_ACCOUNT_NOT_ENABLED_ENHANCED_CONVERSIONS_FOR_LEADS',
+          }],
+        }],
+      },
+    }), { status: 400 });
+
+    test('entrada recusada (400): o lead entra na planilha mesmo assim', async () => {
+      const { env, consultar } = cenario();
+      resposta = recusa400;
+      const r = await enviarConversao(env, 1, entrada());
+      expect(r.status).toBe('erro');
+      expect(linha(consultar).status).toBe('erro');
+      expect(espelhar).toHaveBeenCalledTimes(1);
+      expect(espelhar.mock.calls[0]![2]).toEqual({ tipo: 'entrada', protocolo: 'VITA-123', ensaio: false });
+    });
+
+    test('o motivo da recusa fica no erro, nao so a frase generica', async () => {
+      const { env, consultar } = cenario();
+      resposta = recusa400;
+      await enviarConversao(env, 1, entrada());
+      expect(linha(consultar).erro).toContain('DESTINATION_ACCOUNT_NOT_ENABLED_ENHANCED_CONVERSIONS_FOR_LEADS');
+    });
+
+    test('entrada recusada dentro do corpo (200): tambem entra na planilha', async () => {
+      const { env } = cenario();
+      resposta = () => Response.json({ requestId: 'r', errorInfo: { errorCounts: [{ reason: 'INVALID_PHONE', recordCount: 1 }] } });
+      const r = await enviarConversao(env, 1, entrada());
+      expect(r.status).toBe('erro');
+      expect(espelhar.mock.calls.map((c) => c[2])).toEqual([{ tipo: 'entrada', protocolo: 'VITA-123', ensaio: false }]);
+    });
+
+    test('etapa seguinte recusada nao mexe na planilha: o lead ja entrou nela', async () => {
+      const { env } = cenario();
+      resposta = recusa400;
+      const r = await enviarConversao(env, 1, card());
+      expect(r.status).toBe('erro');
+      expect(espelhar).not.toHaveBeenCalled();
+    });
+
+    test('planilha fora do ar nao muda o resultado da conversao', async () => {
+      const { env } = cenario();
+      resposta = recusa400;
+      espelhar.mockRejectedValueOnce(new Error('sheets 503'));
+      const r = await enviarConversao(env, 1, entrada());
+      expect(r.status).toBe('erro');
+    });
   });
 
   test('subiu no reenvio: os erros anteriores desta conversao saem do cartao', async () => {

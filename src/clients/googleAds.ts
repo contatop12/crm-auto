@@ -272,8 +272,17 @@ export class GoogleAdsClient {
     if (!r.ok) {
       let msg = txt.slice(0, 400);
       try {
-        const j = JSON.parse(txt) as { error?: { message?: string } };
+        const j = JSON.parse(txt) as {
+          error?: { message?: string; details?: Array<{ fieldViolations?: Array<{ reason?: string; description?: string }> }> };
+        };
         if (j.error?.message) msg = j.error.message;
+        // O motivo de verdade vem em `fieldViolations`; a `message` e' sempre
+        // "There was a problem with the request." (Locadora, 10/11/2026).
+        const motivos = (j.error?.details ?? [])
+          .flatMap((d) => d.fieldViolations ?? [])
+          .map((v) => v.reason || v.description)
+          .filter((m): m is string => !!m);
+        if (motivos.length) msg += ` (${[...new Set(motivos)].join(', ')})`;
       } catch { /* resposta nao-json volta cortada */ }
       throw new Error(`Data Manager ${r.status}: ${msg}`);
     }
