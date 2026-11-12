@@ -19,7 +19,7 @@ async function versaoRodando(env: Env): Promise<string | null> {
  * Reserva a chave antes de enviar: dois disparos juntos nao avisam em dobro. Se o
  * envio falhar, a chave sai e a proxima tentativa avisa.
  */
-async function avisarUmaVez(env: Env, chave: string, texto: string): Promise<boolean> {
+export async function avisarUmaVez(env: Env, chave: string, texto: string): Promise<boolean> {
   const r = await env.DB.prepare('INSERT OR IGNORE INTO avisos_chatwoot (chave) VALUES (?)').bind(chave).run();
   if (!r.meta.changes) return false;
   try {

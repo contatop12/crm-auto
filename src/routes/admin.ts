@@ -39,6 +39,9 @@ import {
 import { FRASE_PADRAO_GOOGLE, fraseRepetida, validarFraseDeEntrada } from '../domain/frasesEntrada';
 import { vigiarWhatsapp } from '../pipelines/vigiaWhatsapp';
 import { metaAds } from './metaAds';
+import {
+  MODOS, gravarModo, rodarSequencia, situacaoDaSequencia, verificarPlanilhas, type Modo,
+} from '../pipelines/sequencia';
 
 /**
  * Cadastro de clientes, sincronizacao das etapas e geracao das metas de
@@ -47,6 +50,30 @@ import { metaAds } from './metaAds';
 export const admin = new Hono<{ Bindings: Env; Variables: { identity: AccessIdentity } }>();
 
 admin.use('*', requireAccess);
+
+// ---------------------------------------------------------------------------
+// Sequencia e ordem da aba de leads (era o Apps Script)
+// ---------------------------------------------------------------------------
+
+admin.get('/sequencia', async (c) => c.json(await situacaoDaSequencia(c.env.DB)));
+
+/** Abre cada planilha da lista e diz se o CRM enxerga a aba e as colunas. */
+admin.get('/sequencia/verificar', async (c) => c.json({ planilhas: await verificarPlanilhas(c.env) }));
+
+/**
+ * desligado | sombra | ligado. `ligado` so' depois de apagar os acionadores do
+ * Apps Script: com os dois numerando, a mesma linha ganha dois numeros.
+ */
+admin.post('/sequencia/modo', async (c) => {
+  const { modo } = await c.req.json<{ modo?: string }>().catch(() => ({ modo: undefined }));
+  if (!MODOS.includes(modo as Modo)) return c.json({ erro: `modo deve ser um de: ${MODOS.join(', ')}` }, 400);
+  await gravarModo(c.env.DB, modo as Modo);
+  console.log(JSON.stringify({ acao: 'sequencia_modo', modo, por: c.get('identity')?.email ?? null }));
+  return c.json({ modo });
+});
+
+/** Uma rodada agora, no modo em que estiver. Responde o que fez em cada planilha. */
+admin.post('/sequencia/rodar', async (c) => c.json(await rodarSequencia(c.env, new Date(), true)));
 
 // ---------------------------------------------------------------------------
 // Listas auxiliares: o cadastro vira escolha em vez de digitacao de ID

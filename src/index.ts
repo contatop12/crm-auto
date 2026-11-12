@@ -11,6 +11,7 @@ import { vigiarWhatsapp } from './pipelines/vigiaWhatsapp';
 import { preencherOrigemNasGerais } from './pipelines/origemPlanilha';
 import { moverParaPendente } from './pipelines/pendente';
 import { vigiarVersaoChatwoot } from './pipelines/avisosChatwoot';
+import { rodarSequencia, expurgarAvisosDaSequencia } from './pipelines/sequencia';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -46,6 +47,8 @@ const RETENCAO_PAYLOAD_DIAS = 30;
 
 /** Mesmo texto do `triggers.crons` do wrangler.jsonc: e' assim que se sabe qual disparou. */
 const CRON_EXPURGO = '17 4 * * *';
+/** A cada minuto: numera e ordena a aba de leads de cada cliente (era o Apps Script). */
+const CRON_SEQUENCIA = '* * * * *';
 
 export default {
   fetch: app.fetch,
@@ -55,6 +58,19 @@ export default {
       ctx.waitUntil(
         expurgarPayloadsAntigos(env.DB, RETENCAO_PAYLOAD_DIAS).then((n) =>
           console.log(JSON.stringify({ acao: 'expurgo_payload', linhas: n, dias: RETENCAO_PAYLOAD_DIAS })),
+        ),
+      );
+      ctx.waitUntil(
+        expurgarAvisosDaSequencia(env.DB, RETENCAO_PAYLOAD_DIAS).catch((e) =>
+          console.log(JSON.stringify({ acao: 'sequencia_expurgo_erro', erro: String((e as Error).message).slice(0, 300) })),
+        ),
+      );
+      return;
+    }
+    if (ev.cron === CRON_SEQUENCIA) {
+      ctx.waitUntil(
+        rodarSequencia(env, new Date(ev.scheduledTime)).catch((e) =>
+          console.log(JSON.stringify({ acao: 'sequencia_erro', erro: String((e as Error).message).slice(0, 300) })),
         ),
       );
       return;

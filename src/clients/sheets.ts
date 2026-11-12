@@ -65,6 +65,29 @@ export class SheetsClient {
     };
   }
 
+  /** Titulo da planilha e as abas com o id numerico, que o `batchUpdate` exige. */
+  async meta(doc: string): Promise<{ titulo: string; abas: Array<{ id: number; titulo: string }> }> {
+    const j = await this.req<{
+      properties?: { title?: string };
+      sheets?: Array<{ properties?: { sheetId?: number; title?: string } }>;
+    }>('GET', `/${doc}?fields=properties.title,sheets.properties(sheetId,title)`);
+    return {
+      titulo: j.properties?.title ?? '',
+      abas: (j.sheets ?? [])
+        .map((s) => ({ id: s.properties?.sheetId ?? -1, titulo: s.properties?.title ?? '' }))
+        .filter((a) => a.id >= 0 && a.titulo),
+    };
+  }
+
+  /**
+   * Operacoes de estrutura (`spreadsheets.batchUpdate`): mover linha, reaplicar
+   * formato. O lote inteiro entra ou nada entra.
+   */
+  async lote(doc: string, requests: unknown[]): Promise<void> {
+    if (!requests.length) return;
+    await this.req('POST', `/${doc}:batchUpdate`, { requests });
+  }
+
   /** A aba inteira, linha a linha. Uma chamada so' em vez de cabecalho + colunas. */
   async tudo(doc: string, aba: string): Promise<string[][]> {
     const j = await this.req<{ values?: string[][] }>('GET', `/${doc}/values/${intervalo(aba, 'A:ZZ')}`);

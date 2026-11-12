@@ -59,8 +59,10 @@
   // a linha e o status. O payload cru e' necessario para diagnostico, mas nao
   // precisa virar deposito permanente de dado pessoal dos leads.
   // A cada 15 min: vigia do WhatsApp -> Chatwoot (src/pipelines/vigiaWhatsapp.ts).
+  // A cada minuto: SEQUENCIA e ordem da aba de leads (src/pipelines/sequencia.ts).
+  // O texto de cada cron precisa bater com as constantes de src/index.ts.
   "triggers": {
-    "crons": ["17 4 * * *", "*/15 * * * *"]
+    "crons": ["17 4 * * *", "*/15 * * * *", "* * * * *"]
   },
 
   "assets": {
