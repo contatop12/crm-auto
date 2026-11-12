@@ -174,6 +174,25 @@ async function reenviarAvisos(db: D1Database): Promise<void> {
   for (const a of results) await enviarAviso(db, a.id, a.payload);
 }
 
+interface Pendente { id: number; planilha_id: number; sequencia: string; payload: string; minutos: number }
+
+/**
+ * As pendencias de todas as planilhas numa consulta so': a rodada e' de minuto em
+ * minuto e o D1 tem teto de consultas por execucao.
+ */
+async function lerPendentes(db: D1Database, modo: Modo): Promise<Map<number, Pendente[]>> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, planilha_id, sequencia, payload, (julianday('now') - julianday(criado_em)) * 1440 AS minutos
+       FROM sequencia_avisos WHERE estado = ? ORDER BY id`,
+    )
+    .bind(modo === 'ligado' ? 'a_gravar' : 'sombra')
+    .all<Pendente>();
+  const porPlanilha = new Map<number, Pendente[]>();
+  for (const r of results) porPlanilha.set(r.planilha_id, [...(porPlanilha.get(r.planilha_id) ?? []), r]);
+  return porPlanilha;
+}
+
 /** Colunas que dizem qual lead e': servem para conferir se a sombra numerou a mesma linha. */
 const IDENTIDADE = new Set(['DATA', 'HORA', 'NOME', 'TELEFONE', 'WHATSAPP', 'EMAIL', 'E-MAIL']);
 
@@ -184,15 +203,7 @@ const IDENTIDADE = new Set(['DATA', 'HORA', 'NOME', 'TELEFONE', 'WHATSAPP', 'EMA
  * gravar, falta o aviso); o que nao esta' e' apagado, e a numeracao desta rodada refaz.
  * sombra: confere se o Apps Script deu aquela sequencia `a mesma linha.
  */
-async function conferirPendentes(db: D1Database, p: Planilha, linhas: string[][], modo: Modo): Promise<void> {
-  const estado = modo === 'ligado' ? 'a_gravar' : 'sombra';
-  const { results } = await db
-    .prepare(
-      `SELECT id, sequencia, payload, (julianday('now') - julianday(criado_em)) * 1440 AS minutos
-       FROM sequencia_avisos WHERE planilha_id = ? AND estado = ?`,
-    )
-    .bind(p.id, estado)
-    .all<{ id: number; sequencia: string; payload: string; minutos: number }>();
+async function conferirPendentes(db: D1Database, p: Planilha, linhas: string[][], modo: Modo, results: Pendente[]): Promise<void> {
   if (!results.length) return;
 
   const cab = linhas[0] ?? [];
@@ -244,8 +255,9 @@ async function registrarAviso(db: D1Database, p: Planilha, sequencia: string, es
 
 async function numerar(
   env: Env, sheets: SheetsClient, p: Planilha, aba: Aba, linhas: string[][], modo: Modo, agora: Date, resumo: ResumoPlanilha,
+  pendentes: Pendente[],
 ): Promise<void> {
-  await conferirPendentes(env.DB, p, linhas, modo);
+  await conferirPendentes(env.DB, p, linhas, modo, pendentes);
 
   const plano = planejarNumeracao({ prefixo: p.prefixo, notificar: !!p.notificar }, linhas, corteDosAvisos(agora));
   if ('motivo' in plano) throw new Error(`aba "${aba.titulo}" ${plano.motivo}`);
@@ -331,13 +343,15 @@ async function ordenar(
   console.log(JSON.stringify({ acao: 'sequencia_ordenou', cliente: p.cliente, movidas: movimentos.length }));
 }
 
-async function rodarPlanilha(env: Env, sheets: SheetsClient, p: Planilha, modo: Modo, agora: Date): Promise<ResumoPlanilha> {
+async function rodarPlanilha(
+  env: Env, sheets: SheetsClient, p: Planilha, modo: Modo, agora: Date, pendentes: Pendente[],
+): Promise<ResumoPlanilha> {
   const resumo: ResumoPlanilha = { cliente: p.cliente, numeradas: 0, consertadas: 0, movidas: 0, avisos: 0, formato: false };
   const aba = await acharAba(env, sheets, p.doc, p.aba);
   const linhas = await sheets.tudo(p.doc, aba.titulo);
   if (linhas.length < 2) return resumo;
 
-  if (p.numerar) await numerar(env, sheets, p, aba, linhas, modo, agora, resumo);
+  if (p.numerar) await numerar(env, sheets, p, aba, linhas, modo, agora, resumo, pendentes);
   // a numeracao so' escreve em celula, nao muda linha de lugar: a mesma leitura serve
   if (p.ordenar && linhas.length > 2) await ordenar(env, sheets, p, aba, linhas, modo, agora, resumo);
   return resumo;
@@ -391,11 +405,12 @@ export async function rodarSequencia(env: Env, agora = new Date(), forcar = fals
       .all<Planilha>();
     const vezDasQueSoOrdenam = forcar || agora.getUTCMinutes() % MINUTOS_SO_ORDENA === 0;
     const sheets = new SheetsClient(env);
+    const pendentes = await lerPendentes(env.DB, modo);
 
     for (const p of results) {
       if (!p.numerar && !vezDasQueSoOrdenam) continue;
       try {
-        planilhas.push(await rodarPlanilha(env, sheets, p, modo, agora));
+        planilhas.push(await rodarPlanilha(env, sheets, p, modo, agora, pendentes.get(p.id) ?? []));
         if (p.erros_seguidos) {
           await env.DB
             .prepare('UPDATE sequencia_planilhas SET erro = NULL, erro_desde = NULL, erros_seguidos = 0 WHERE id = ?')
