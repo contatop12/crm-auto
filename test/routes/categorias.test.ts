@@ -21,7 +21,15 @@ function ambiente() {
     EVOLUTION_API_KEY: 'k',
     EVOLUTION_ALERT_INSTANCE: 'alerta',
     EVOLUTION_ALERT_GROUP_ID: 'grupo@g.us',
-    ASSETS: { fetch: async () => new Response('/* script */') },
+    ASSETS: {
+      fetch: async (r: Request) => {
+        const caminho = new URL(r.url).pathname;
+        if (caminho === '/chatwoot-marca.js') return new Response('/* marca */');
+        if (caminho === '/chatwoot-categorias.js') return new Response('/* script */');
+        if (caminho === '/marca/logo.svg') return new Response('<svg/>');
+        return new Response('', { status: 404 });
+      },
+    },
   } as unknown as Env;
   return { ...f, env };
 }
@@ -207,7 +215,19 @@ describe('script e sinal', () => {
     const r = await pedir(env, 'GET', '/script.js', undefined, {});
     expect(r.status).toBe(200);
     expect(r.headers.get('Content-Type')).toContain('javascript');
-    expect(await r.text()).toContain('script');
+    // a marca vai na frente, separada por ';' para um arquivo nao emendar no outro
+    expect(await r.text()).toBe(['/* marca */', ';', '/* script */'].join('\n'));
+  });
+
+  test('a logo e publica, e so os arquivos da lista saem', async () => {
+    const { env } = ambiente();
+    const pegar = (nome: string) => worker.fetch(new Request(`https://crm.teste/ingest/marca/${nome}`), env, ctx);
+    const logo = await pegar('logo.svg');
+    expect(logo.status).toBe(200);
+    expect(logo.headers.get('Content-Type')).toContain('image/svg+xml');
+    expect(await logo.text()).toBe('<svg/>');
+    expect((await pegar('index.html')).status).toBe(404);
+    expect((await pegar('logo_dark.svg')).status).toBe(404); // esta' na lista, mas o asset nao existe aqui
   });
 
   test('sinal avisa o grupo uma vez por versao e problema', async () => {

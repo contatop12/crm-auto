@@ -22,10 +22,15 @@ type Agente = { id: number; admin: boolean };
 const origemDoChatwoot = (env: Env) => new URL(env.CHATWOOT_BASE_URL).origin;
 
 // O script nao precisa de CORS: <script src> nao passa por ele.
+// Dois arquivos num so': o DASHBOARD_SCRIPTS do Chatwoot aponta para este endereco, e
+// script novo entra aqui sem ninguem precisar mexer no Chatwoot. A marca vai na
+// frente porque e' ela que pinta a tela; se faltar, as categorias seguem sozinhas.
 categorias.get('/script.js', async (c) => {
-  const r = await c.env.ASSETS.fetch(new Request(new URL('/chatwoot-categorias.js', c.req.url)));
+  const arquivo = (nome: string) => c.env.ASSETS.fetch(new Request(new URL(nome, c.req.url)));
+  const [marca, r] = await Promise.all([arquivo('/chatwoot-marca.js'), arquivo('/chatwoot-categorias.js')]);
   if (!r.ok) return c.text('', 404);
-  return new Response(r.body, {
+  const corpo = `${marca.ok ? await marca.text() : ''}\n;\n${await r.text()}`;
+  return new Response(corpo, {
     headers: {
       'Content-Type': 'application/javascript; charset=utf-8',
       // Corrigir o script vale em minutos, sem mexer no Chatwoot.
