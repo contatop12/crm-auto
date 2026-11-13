@@ -26,6 +26,7 @@ function ambiente() {
         const caminho = new URL(r.url).pathname;
         if (caminho === '/chatwoot-marca.js') return new Response('/* marca */');
         if (caminho === '/chatwoot-categorias.js') return new Response('/* script */');
+        if (caminho === '/chatwoot-funil.js') return new Response('/* funil */');
         if (caminho === '/marca/logo.svg') return new Response('<svg/>');
         return new Response('', { status: 404 });
       },
@@ -215,8 +216,9 @@ describe('script e sinal', () => {
     const r = await pedir(env, 'GET', '/script.js', undefined, {});
     expect(r.status).toBe(200);
     expect(r.headers.get('Content-Type')).toContain('javascript');
-    // a marca vai na frente, separada por ';' para um arquivo nao emendar no outro
-    expect(await r.text()).toBe(['/* marca */', ';', '/* script */'].join('\n'));
+    // a marca vai na frente, separada por ';' para um arquivo nao emendar no outro;
+    // o arquivo que falta (aqui, o da ordem do kanban) fica de fora sem derrubar os demais
+    expect(await r.text()).toBe(['/* marca */', ';', '/* script */', ';', '/* funil */'].join('\n'));
   });
 
   test('a logo e publica, e so os arquivos da lista saem', async () => {

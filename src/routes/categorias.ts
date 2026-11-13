@@ -27,9 +27,14 @@ const origemDoChatwoot = (env: Env) => new URL(env.CHATWOOT_BASE_URL).origin;
 // frente porque e' ela que pinta a tela; se faltar, as categorias seguem sozinhas.
 categorias.get('/script.js', async (c) => {
   const arquivo = (nome: string) => c.env.ASSETS.fetch(new Request(new URL(nome, c.req.url)));
-  const [marca, r] = await Promise.all([arquivo('/chatwoot-marca.js'), arquivo('/chatwoot-categorias.js')]);
-  if (!r.ok) return c.text('', 404);
-  const corpo = `${marca.ok ? await marca.text() : ''}\n;\n${await r.text()}`;
+  const [marca, r, ...extras] = await Promise.all(
+    ['/chatwoot-marca.js', '/chatwoot-categorias.js', '/chatwoot-ordem.js', '/chatwoot-funil.js'].map(arquivo),
+  );
+  if (!r || !r.ok) return c.text('', 404);
+  // Cada arquivo e' um bloco fechado: o que faltar fica de fora sem derrubar os outros.
+  const partes = [marca?.ok ? await marca.text() : '', await r.text()];
+  for (const e of extras) if (e.ok) partes.push(await e.text());
+  const corpo = partes.join('\n;\n');
   return new Response(corpo, {
     headers: {
       'Content-Type': 'application/javascript; charset=utf-8',
