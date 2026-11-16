@@ -871,6 +871,7 @@
     '.p12r h1,.p12r h2,.p12r h3,.p12r p{margin:0}',
     '.p12r button{font:inherit}',
     '@media (max-width:640px){.p12r{padding-inline:0}}',
+    '@media (max-width:760px){.p12r-filtros{position:static}.p12r-sel{max-width:none;flex:1 1 150px}.p12r-topo h1{font-size:22px}.p12r-kpi-v{font-size:24px}}',
     '.p12r-topo{padding-top:24px;display:flex;flex-direction:column;gap:2px}',
     '.p12r-topo h1{font-size:26px;line-height:1.2;font-weight:600;letter-spacing:-.02em}',
     '.p12r-topo p{color:rgb(var(--slate-11,176 180 186));font-size:14px}',
@@ -917,7 +918,7 @@
     '.p12r-kpi-r{color:rgb(var(--slate-11,176 180 186));font-size:12.5px}',
     '.p12r-kpi-v{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:28px;font-weight:600;line-height:1.15;letter-spacing:-.02em}',
     '.p12r-kpi-a{color:rgb(var(--slate-10,119 123 132));font-size:12px;position:relative;z-index:1}',
-    '.p12r-spark{position:absolute;right:0;bottom:0;width:46%;height:38px;opacity:.55;pointer-events:none}',
+    '.p12r-spark{position:absolute;right:0;bottom:0;width:38%;height:34px;opacity:.4;pointer-events:none}',
     '.p12r-chip{font-size:12px;font-weight:500;padding:1px 7px;border-radius:999px;letter-spacing:0;white-space:nowrap}',
     '.p12r-bom{color:rgb(var(--teal-9,18 165 148));background:rgb(var(--teal-9,18 165 148) / .15)}',
     '.p12r-ruim{color:rgb(var(--ruby-9,229 70 102));background:rgb(var(--ruby-9,229 70 102) / .15)}',
@@ -952,7 +953,7 @@
     '.p12r-g-hit i:hover{background:rgb(var(--slate-12,237 238 240) / .05)}',
     '.p12r-g-hit i b{display:none;position:absolute;left:50%;width:9px;height:9px;margin:0 0 -4.5px -4.5px;border-radius:50%;border:2px solid rgb(var(--solid-1,23 23 26))}',
     '.p12r-g-hit i:hover b{display:block}',
-    '.p12r-g-x{position:relative;color:rgb(var(--slate-10,119 123 132));font-size:11px}',
+    '.p12r-g-x{grid-column:2;position:relative;color:rgb(var(--slate-10,119 123 132));font-size:11px}',
     '.p12r-g-x span{position:absolute;top:8px;transform:translateX(-50%);white-space:nowrap}',
     '.p12r-leg{display:flex;flex-wrap:wrap;gap:6px 16px;color:rgb(var(--slate-11,176 180 186));font-size:12px;margin-bottom:10px}',
     '.p12r-leg span{display:inline-flex;align-items:center;gap:6px}',
@@ -1420,7 +1421,7 @@
   }
 
   function atendentesSemAtividade(res) {
-    return !!res && res.length > 0 && res.every(function (r) { return !num(r.conversations_count) && !num(r.handled_conversations_count); });
+    return !!res && res.length > 0 && res.every(function (r) { return !num(r.conversations_count); });
   }
 
   function vistaAtendentes(d, m) {
@@ -1436,13 +1437,14 @@
     if (atendentesSemAtividade(res)) {
       aviso = htmlVazio('Ninguém atribui conversas nesta conta',
         (abertas ? n(abertas) + ' conversas abertas estão sem atendente. ' : '') +
-        'Por isso os números por atendente ficam em zero. O trabalho aparece no funil e nas etiquetas.');
+        'Sem atribuição, o Chatwoot não soma conversas por atendente. A tabela mostra em quantas conversas cada um respondeu; o andamento do trabalho aparece no funil e nas etiquetas.');
     }
+    var temAtribuidas = linhas.some(function (l) { return l.conversas > 0; });
     var cols = [{ k: 'nome', r: 'Atendente', t: 't', fixa: true }, { k: 'status', r: 'Agora', t: 't' }, { k: 'papel', r: 'Papel', t: 't' }].concat(COLS_ATENDIMENTO);
     var tabela = visaoTabela({
       id: 'atendentes', titulo: 'Atendentes', desc: 'Quem respondeu, quanto e em quanto tempo',
-      cols: cols, linhas: linhas, metrica: 'conversas',
-      vazio: htmlVazio('Nenhum atendente', 'Esta conta não tem atendentes cadastrados.'),
+      cols: cols, linhas: linhas, metrica: temAtribuidas ? 'conversas' : 'atendidas',
+      vazio: htmlVazio('Nenhum atendente','Esta conta não tem atendentes cadastrados.'),
       sub: function (l) { return l.status; },
     });
     return (aviso ? '<div>' + aviso + '</div>' : '') + tabela;
