@@ -140,9 +140,14 @@ sai do padrão `<id>-<cliente-sem-acento>` (id de `sequencia_planilhas`) ou do p
 
 ```bash
 npx wrangler r2 object get crm-auto-backups/planilhas/2026-11-16/1-taina-aci.json.gz --file taina.json.gz --remote
-node scripts/backup/restaurar-planilha.mjs taina.json.gz              # só mostra o que faria
-node scripts/backup/restaurar-planilha.mjs taina.json.gz --confirmar  # cria a aba "Backup 2026-11-16"
+node scripts/restaurar-planilha.mjs taina.json.gz              # só mostra o que faria
+node scripts/restaurar-planilha.mjs taina.json.gz --confirmar  # cria a aba "Backup 2026-11-16"
 ```
 
-Usa `CLIENT_ID`, `CLIENT_SECRET` e `REFRESH_TOKEN` do `.env`. Quem decide copiar a aba de
-volta para a original é a pessoa. Apague o arquivo baixado depois: tem dado pessoal.
+Usa `CLIENT_ID`, `CLIENT_SECRET` e `REFRESH_TOKEN` do `.env`. Grava o texto como aparecia
+(RAW): telefone e zero à esquerda ficam iguais, nenhuma fórmula roda, e data e hora entram
+como texto. Quem decide copiar a aba de volta para a original é a pessoa. Apague o arquivo
+baixado depois: tem dado pessoal.
+
+O script fica em `scripts/` e não em `scripts/backup/` porque o `.gitignore` ignora pastas
+`backup*` (lá ficam cópias locais com dado pessoal).
