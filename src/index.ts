@@ -13,6 +13,7 @@ import { preencherOrigemNasGerais } from './pipelines/origemPlanilha';
 import { moverParaPendente } from './pipelines/pendente';
 import { vigiarVersaoChatwoot } from './pipelines/avisosChatwoot';
 import { rodarSequencia, expurgarAvisosDaSequencia } from './pipelines/sequencia';
+import { rodarBackupPlanilhas } from './pipelines/backupPlanilhas';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -73,6 +74,12 @@ export default {
       ctx.waitUntil(
         rodarSequencia(env, new Date(ev.scheduledTime)).catch((e) =>
           console.log(JSON.stringify({ acao: 'sequencia_erro', erro: String((e as Error).message).slice(0, 300) })),
+        ),
+      );
+      // backup diario das planilhas, em paralelo: nao segura nem atrasa a sequencia
+      ctx.waitUntil(
+        rodarBackupPlanilhas(env, new Date(ev.scheduledTime)).catch((e) =>
+          console.log(JSON.stringify({ acao: 'backup_planilhas_erro', erro: String((e as Error).message).slice(0, 300) })),
         ),
       );
       return;

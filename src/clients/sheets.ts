@@ -94,6 +94,19 @@ export class SheetsClient {
     return (j.values ?? []).map((l) => l.map((v) => String(v)));
   }
 
+  /**
+   * A aba inteira do jeito que o Sheets entrega, sem converter para texto. Serve ao
+   * backup: `formula` traz a formula e a data como numero de serie, o que o valor
+   * formatado esconde.
+   */
+  async abaBruta(doc: string, aba: string, modo: 'formatado' | 'formula'): Promise<unknown[][]> {
+    const q = modo === 'formatado'
+      ? 'valueRenderOption=FORMATTED_VALUE'
+      : 'valueRenderOption=FORMULA&dateTimeRenderOption=SERIAL_NUMBER';
+    const j = await this.req<{ values?: unknown[][] }>('GET', `/${doc}/values/${intervalo(aba, 'A:ZZ')}?${q}`);
+    return j.values ?? [];
+  }
+
   /** A primeira linha da aba. */
   async cabecalho(doc: string, aba: string): Promise<string[]> {
     const j = await this.req<{ values?: string[][] }>('GET', `/${doc}/values/${intervalo(aba, '1:1')}`);

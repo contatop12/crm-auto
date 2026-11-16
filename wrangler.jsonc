@@ -34,6 +34,15 @@
     }
   ],
 
+  "r2_buckets": [
+    {
+      // copia diaria das planilhas de leads que o motor de sequencia altera
+      // (src/pipelines/backupPlanilhas.ts). Privado; objetos somem em 30 dias.
+      "binding": "BACKUPS",
+      "bucket_name": "crm-auto-backups"
+    }
+  ],
+
   "queues": {
     "producers": [{ "binding": "QUEUE", "queue": "crm-auto-events" }],
     "consumers": [

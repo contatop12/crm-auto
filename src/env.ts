@@ -4,6 +4,8 @@ export interface Env {
   CACHE: KVNamespace;
   QUEUE: Queue<QueueMessage>;
   ASSETS: Fetcher;
+  /** Backup diario das planilhas de leads (R2 `crm-auto-backups`, apaga em 30 dias). */
+  BACKUPS: R2Bucket;
 
   ENVIRONMENT: string;
 
