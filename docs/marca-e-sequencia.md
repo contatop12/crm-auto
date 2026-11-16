@@ -84,3 +84,65 @@ A linha `ANTES` é o que guardar para voltar atrás (mesmo comando, com os valor
 Ficam com o nome antigo: o `manifest.json` (nome ao instalar como aplicativo) e as
 ilustrações com azul desenhado dentro do SVG. `BRAND_URL` e `WIDGET_BRAND_URL` entram
 na troca de domínio.
+
+## 3. Voltar atrás
+
+### Marca
+
+Valores de antes de 12/11/2026 do `InstallationConfig` do Chatwoot: `INSTALLATION_NAME` e
+`BRAND_NAME` = `Chatwoot`; `LOGO` = `/brand-assets/logo.svg`; `LOGO_DARK` =
+`/brand-assets/logo_dark.svg`; `LOGO_THUMBNAIL` = `/brand-assets/logo_thumbnail.svg`.
+Gravar com o mesmo comando rails da seção 2, trocando o hash `novo` por esses valores.
+
+A cor sai tirando `/chatwoot-marca.js` da lista em `src/routes/categorias.ts` (e publicando).
+
+### Ordem do kanban
+
+A tabela `p12_bkp_kanban_prefs_20261113`, no Postgres do Chatwoot, guarda as preferências
+de antes de 13/11/2026. **Não apague essa tabela.** Para restaurar:
+
+```sql
+UPDATE kanban_account_user_preferences p
+   SET preferences = b.preferences, updated_at = NOW()
+  FROM p12_bkp_kanban_prefs_20261113 b
+ WHERE b.id = p.id;
+
+DELETE FROM kanban_account_user_preferences
+ WHERE id NOT IN (SELECT id FROM p12_bkp_kanban_prefs_20261113);
+```
+
+### Sequência
+
+1. Desligar o motor do CRM: `UPDATE sequencia_estado SET valor = 'desligado' WHERE chave = 'modo'`
+   (D1 `crm_auto`). Antes de qualquer outra coisa: os dois ligados dão a mesma linha dois números.
+2. Colar o código de `legado/apps-script-sequencia/` (`Sequencia.gs`, `Ordenacao.gs`,
+   `appsscript.json`) no projeto "Sequencia Leads - Todos os Clientes" (dono contato@; o
+   original foi exportado em 13/11/2026, id do arquivo
+   `1H3tP6opvvaPqdSSfK_yF-rBX4u0CONN4RwrQuU6TufbAnCS_3Ra88xN6`) e recriar os dois acionadores
+   por tempo, rodando `gatilhoSequencia` e `gatilhoOrdenacao`: `gerarSequencias` a cada 1
+   minuto e `ordenarTodas` a cada 5.
+3. Se uma planilha ficou errada, restaurar do backup diário (abaixo). O histórico de versões
+   do próprio Google também serve.
+
+### Backup diário das planilhas
+
+`src/pipelines/backupPlanilhas.ts`, no cron de minuto: depois de 01:00 (São Paulo), grava
+um `.json.gz` por planilha ativa de `sequencia_planilhas` no bucket R2 privado
+`crm-auto-backups`, em `planilhas/AAAA-MM-DD/<id>-<cliente>.json.gz`. Objetos somem em 30
+dias (tem nome e telefone). Cada arquivo traz `{doc, aba, cliente, em, formatado, bruto}`:
+o texto como aparece e as fórmulas/números de série por baixo.
+
+O estado do dia fica em `sequencia_estado`, chave `backup_planilhas` (`concluido`, `arquivos`,
+`bytes`, `erros`). Planilha com erro é tentada de novo a cada 30 min, até 4 vezes.
+
+Para restaurar, em uma aba nova (a original nunca é tocada). A CLI não lista objetos: o nome
+sai do padrão `<id>-<cliente-sem-acento>` (id de `sequencia_planilhas`) ou do painel do R2.
+
+```bash
+npx wrangler r2 object get crm-auto-backups/planilhas/2026-11-16/1-taina-aci.json.gz --file taina.json.gz --remote
+node scripts/backup/restaurar-planilha.mjs taina.json.gz              # só mostra o que faria
+node scripts/backup/restaurar-planilha.mjs taina.json.gz --confirmar  # cria a aba "Backup 2026-11-16"
+```
+
+Usa `CLIENT_ID`, `CLIENT_SECRET` e `REFRESH_TOKEN` do `.env`. Quem decide copiar a aba de
+volta para a original é a pessoa. Apague o arquivo baixado depois: tem dado pessoal.
