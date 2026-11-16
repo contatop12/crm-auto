@@ -658,6 +658,8 @@
     '@media (max-width:760px){.p12f-linha{grid-template-columns:minmax(0,1fr);gap:4px}.p12f-lado{flex-direction:row;gap:10px;text-align:left}.p12f-entre>div:first-child,.p12f-entre>div:last-child{display:none}}',
   ].join('\n');
 
+  window.__p12Funil.css = CSS;
+
   var CHAVE_PREF = 'p12-funil-v1';
 
   function lerPref() {
