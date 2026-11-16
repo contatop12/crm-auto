@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import type { Env } from '../env';
 import { avisarScriptQuebrado } from '../pipelines/avisosChatwoot';
 import type { ProblemaDoScript } from '../domain/versaoChatwoot';
+import { agregarOrigem, type LinhaDeLead } from '../domain/relatorioOrigem';
 
 /**
  * Categorias de etiquetas do Chatwoot, consumidas pelo script injetado no painel
@@ -28,7 +29,7 @@ const origemDoChatwoot = (env: Env) => new URL(env.CHATWOOT_BASE_URL).origin;
 categorias.get('/script.js', async (c) => {
   const arquivo = (nome: string) => c.env.ASSETS.fetch(new Request(new URL(nome, c.req.url)));
   const [marca, r, ...extras] = await Promise.all(
-    ['/chatwoot-marca.js', '/chatwoot-categorias.js', '/chatwoot-ordem.js', '/chatwoot-funil.js'].map(arquivo),
+    ['/chatwoot-marca.js', '/chatwoot-categorias.js', '/chatwoot-ordem.js', '/chatwoot-funil.js', '/chatwoot-relatorios.js'].map(arquivo),
   );
   if (!r || !r.ok) return c.text('', 404);
   // Cada arquivo e' um bloco fechado: o que faltar fica de fora sem derrubar os outros.
@@ -99,6 +100,52 @@ function nomeValido(v: unknown): string | null {
   const nome = typeof v === 'string' ? v.trim() : '';
   return nome && nome.length <= 60 ? nome : null;
 }
+
+// Leads do cliente desta conta por origem, campanha e dia, para a pagina de Relatorios.
+// Qualquer atendente da conta pode ler; so' numeros agregados saem daqui.
+const MAX_LEADS_DO_PERIODO = 20000;
+const MAX_DIAS = 400;
+
+categorias.get('/:conta{[0-9]+}/origem', async (c) => {
+  const conta = contaDe(c);
+  const r = await exigir(c, conta);
+  if ('erro' in r) return r.erro;
+
+  const since = Number(c.req.query('since'));
+  const until = Number(c.req.query('until'));
+  const tzBruto = c.req.query('tz');
+  const tz = tzBruto === undefined ? -3 : Number(tzBruto);
+  if (!Number.isInteger(since) || !Number.isInteger(until) || since <= 0 || until <= since || until - since > MAX_DIAS * 86400) {
+    return c.json({ erro: 'periodo_invalido' }, 400);
+  }
+  if (!Number.isInteger(tz) || tz < -14 || tz > 14) return c.json({ erro: 'fuso_invalido' }, 400);
+
+  const donos = await c.env.DB.prepare('SELECT tenant_id AS id FROM tenant_config WHERE cw_account_id = ?')
+    .bind(conta)
+    .all<{ id: number }>();
+  if (!donos.results.length) return c.json({ cliente: false });
+
+  const marcas = donos.results.map(() => '?').join(',');
+  const ids = donos.results.map((d) => d.id);
+  const leads = await c.env.DB.prepare(
+    `SELECT created_at, utm_source, utm_campaign, utm_campaign_nome, gclid, gbraid, wbraid, ctwa_clid, fbc,
+            evento, origem, quiz_version
+       FROM leads
+      WHERE tenant_id IN (${marcas}) AND created_at >= datetime(?, 'unixepoch') AND created_at < datetime(?, 'unixepoch')
+      LIMIT ${MAX_LEADS_DO_PERIODO}`,
+  )
+    .bind(...ids, since, until + 1)
+    .all<LinhaDeLead>();
+  const diretos = await c.env.DB.prepare(
+    `SELECT created_at AS quando FROM leads_diretos
+      WHERE tenant_id IN (${marcas}) AND created_at >= datetime(?, 'unixepoch') AND created_at < datetime(?, 'unixepoch')
+      LIMIT ${MAX_LEADS_DO_PERIODO}`,
+  )
+    .bind(...ids, since, until + 1)
+    .all<{ quando: string }>();
+
+  return c.json({ cliente: true, ...agregarOrigem(leads.results, diretos.results.map((d) => d.quando), tz) });
+});
 
 categorias.get('/:conta{[0-9]+}', async (c) => {
   const conta = contaDe(c);

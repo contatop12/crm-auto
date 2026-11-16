@@ -250,3 +250,44 @@ describe('script e sinal', () => {
     expect(envios).toEqual([]);
   });
 });
+
+describe('origem dos leads (relatorios)', () => {
+  const T0 = Date.parse('2026-11-10T00:00:00Z') / 1000;
+  const periodo = `since=${T0}&until=${T0 + 86400 * 5}`;
+
+  function comCliente() {
+    const a = ambiente();
+    a.exec(`INSERT INTO tenants (id, slug, nome) VALUES (1, 'p', 'P'), (2, 'o', 'Outro')`);
+    a.exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, ingest_key) VALUES (1, 5, 9, 'k'), (2, 8, 9, 'k2')`);
+    a.exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_raw, gclid, utm_campaign, created_at) VALUES
+      (1, 'a', 'Ana Secreta', '5511999990000', 'g', 'Persianas', '2026-11-11 15:00:00'),
+      (1, 'b', 'Bia', '5511999990001', NULL, NULL, '2026-11-12 15:00:00'),
+      (1, 'velho', 'Velho', NULL, 'g', 'Persianas', '2026-10-01 15:00:00'),
+      (2, 'c', 'Outro cliente', NULL, 'g', 'X', '2026-11-11 15:00:00')`);
+    return a;
+  }
+
+  test('conta os leads do periodo so do cliente desta conta, sem dado pessoal', async () => {
+    const { env } = comCliente();
+    const r = await pedir(env, 'GET', `/5/origem?${periodo}&tz=-3`);
+    expect(r.status).toBe(200);
+    const corpo = (await r.json()) as { cliente: boolean; total: number; porDia: unknown[] };
+    expect(corpo.cliente).toBe(true);
+    expect(corpo.total).toBe(2);
+    expect(corpo.porDia).toHaveLength(2);
+    const texto = JSON.stringify(corpo);
+    expect(texto).not.toMatch(/Ana|Bia|5511|Outro/);
+  });
+
+  test('conta sem cliente no CRM responde cliente:false', async () => {
+    const { env } = ambiente();
+    expect(await (await pedir(env, 'GET', `/5/origem?${periodo}`)).json()).toEqual({ cliente: false });
+  });
+
+  test('periodo ou fuso invalido: 400; sem sessao: 401', async () => {
+    const { env } = comCliente();
+    expect((await pedir(env, 'GET', '/5/origem?since=10&until=5')).status).toBe(400);
+    expect((await pedir(env, 'GET', `/5/origem?${periodo}&tz=40`)).status).toBe(400);
+    expect((await pedir(env, 'GET', `/5/origem?${periodo}`, undefined, {})).status).toBe(401);
+  });
+});
