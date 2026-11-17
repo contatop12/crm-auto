@@ -577,8 +577,8 @@
         .map(function (k) {
           return (
             '<div class="p12r-kpi"' + (k.dica ? ' title="' + esc(k.dica) + '"' : '') + '>' +
-            '<span class="p12r-kpi-r">' + esc(k.rotulo) + '</span>' +
-            '<span class="p12r-kpi-v">' + esc(k.valor) + chip(k.var) + '</span>' +
+            '<span class="p12r-kpi-r"><span>' + esc(k.rotulo) + '</span>' + chip(k.var) + '</span>' +
+            '<span class="p12r-kpi-v">' + esc(k.valor) + '</span>' +
             '<span class="p12r-kpi-a">' + esc(k.apoio || '') + '</span>' +
             htmlSpark(k.serie, COR.principal) + '</div>'
           );
@@ -882,9 +882,11 @@
     '.p12r-seg button{flex:none;border:0;background:none;padding:0 12px;border-radius:7px;color:rgb(var(--slate-11,176 180 186));cursor:pointer;white-space:nowrap}',
     '.p12r-seg button:hover{color:rgb(var(--slate-12,237 238 240))}',
     '.p12r-seg button.p12r-on{background:rgb(var(--solid-active,53 57 66));color:rgb(var(--slate-12,237 238 240));font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,.18)}',
-    '.p12r-sel{width:auto!important;height:34px;max-width:200px;padding:0 28px 0 10px;border-radius:9px;border:1px solid rgb(var(--slate-4,40 42 48));background-color:rgb(var(--solid-1,23 23 26));color:rgb(var(--slate-12,237 238 240));cursor:pointer}',
+    // o Chatwoot da' margem embaixo a todo select/input: sem zerar, o centro da linha
+    // conta a margem e os seletores ficam ~8px acima do periodo e do "Comparar"
+    '.p12r-sel{width:auto!important;height:34px;max-width:200px;margin:0!important;padding:0 28px 0 10px;border-radius:9px;border:1px solid rgb(var(--slate-4,40 42 48));background-color:rgb(var(--solid-1,23 23 26));color:rgb(var(--slate-12,237 238 240));cursor:pointer}',
     '.p12r-sel.p12r-ativo{border-color:rgb(var(--blue-9,110 86 207));box-shadow:inset 0 0 0 1px rgb(var(--blue-9,110 86 207) / .5)}',
-    '.p12r-data{flex:none;width:150px!important;height:34px;padding:0 8px;border-radius:9px;border:1px solid rgb(var(--slate-4,40 42 48));background:rgb(var(--solid-1,23 23 26));color:rgb(var(--slate-12,237 238 240));color-scheme:light dark}',
+    '.p12r-data{flex:none;width:150px!important;height:34px;margin:0!important;padding:0 8px;border-radius:9px;border:1px solid rgb(var(--slate-4,40 42 48));background:rgb(var(--solid-1,23 23 26));color:rgb(var(--slate-12,237 238 240));color-scheme:light dark}',
     '.p12r-interr{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 4px;border:0;background:none;color:rgb(var(--slate-11,176 180 186));cursor:pointer}',
     '.p12r-interr i{position:relative;width:30px;height:18px;border-radius:999px;background:rgb(var(--slate-6,54 58 63));transition:background .15s}',
     '.p12r-interr i:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .15s}',
@@ -902,20 +904,25 @@
     '.p12r-bloco>h2+*,.p12r-bloco>p+*{margin-top:14px}',
     // alertas
     '.p12r-alertas{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}',
-    '.p12r-alerta{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:12px 14px 12px 18px;border-radius:10px;border:1px solid rgb(var(--slate-4,40 42 48));background:rgb(var(--solid-1,23 23 26));color:inherit;text-decoration:none;overflow:hidden}',
+    // linha do detalhe com o resto da altura: o detalhe fica colado no titulo em todos os
+    // cartoes, mesmo quando o vizinho da mesma fileira e' mais alto
+    '.p12r-alerta{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto 1fr;align-content:start;gap:4px 12px;padding:12px 14px 12px 18px;border-radius:10px;border:1px solid rgb(var(--slate-4,40 42 48));background:rgb(var(--solid-1,23 23 26));color:inherit;text-decoration:none;overflow:hidden}',
     '.p12r-alerta:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:rgb(var(--slate-8,82 87 96))}',
     '.p12r-alerta.p12r-n-alto:before{background:rgb(var(--ruby-9,229 70 102))}',
     '.p12r-alerta.p12r-n-medio:before{background:rgb(var(--amber-9,255 197 61))}',
     '.p12r-alerta:hover{border-color:rgb(var(--slate-7,67 72 78))}',
     '.p12r-alerta-t{font-weight:600;font-size:14px}',
-    '.p12r-alerta-d{grid-column:1;color:rgb(var(--slate-11,176 180 186));font-size:12.5px}',
+    '.p12r-alerta-d{grid-column:1;align-self:start;color:rgb(var(--slate-11,176 180 186));font-size:12.5px}',
     '.p12r-alerta-s{grid-row:1 / span 2;grid-column:2;align-self:center;color:rgb(var(--slate-10,119 123 132));font-size:20px}',
     '.p12r-nada{padding:14px 16px;border-radius:10px;border:1px dashed rgb(var(--slate-5,46 49 56));color:rgb(var(--slate-11,176 180 186))}',
     '.p12r-nada.p12r-ok{border-style:solid;border-color:rgb(var(--teal-9,18 165 148) / .4);background:rgb(var(--teal-9,18 165 148) / .08)}',
     // numeros-chave
     '.p12r-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}',
     '.p12r-kpi{position:relative;display:flex;flex-direction:column;gap:3px;min-width:0;padding:14px 16px;border-radius:12px;border:1px solid rgb(var(--slate-4,40 42 48));background:rgb(var(--solid-1,23 23 26));overflow:hidden}',
-    '.p12r-kpi-r{color:rgb(var(--slate-11,176 180 186));font-size:12.5px}',
+    // rotulo e variacao na mesma linha: o numero grande nunca divide espaco com o chip,
+    // entao nao quebra linha ("2 h 56 min") e todos os cartoes ficam na mesma altura
+    '.p12r-kpi-r{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:20px;color:rgb(var(--slate-11,176 180 186));font-size:12.5px}',
+    '.p12r-kpi-r>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.p12r-kpi-v{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:28px;font-weight:600;line-height:1.15;letter-spacing:-.02em}',
     '.p12r-kpi-a{color:rgb(var(--slate-10,119 123 132));font-size:12px;position:relative;z-index:1}',
     '.p12r-spark{position:absolute;right:0;bottom:0;width:38%;height:34px;opacity:.4;pointer-events:none}',
@@ -1594,7 +1601,7 @@
     l.porOrigem.forEach(function (o) { porPlat[o.plataforma] += o.total; });
     var tiles = '<div class="p12r-grid3">' + [['Google', 'google'], ['Meta', 'meta'], ['Sem anúncio', 'direto']].map(function (x) {
       var ant = m.leadsAnt ? m.leadsAnt.porOrigem.reduce(function (s, o) { return s + (o.plataforma === x[1] ? o.total : 0); }, 0) : null;
-      return '<div class="p12r-kpi"><span class="p12r-kpi-r">' + x[0] + '</span><span class="p12r-kpi-v">' + n(porPlat[x[1]]) + chip(m.ctx.f.comparar ? variacao(porPlat[x[1]], ant) : null) + '</span><span class="p12r-kpi-a">' + pct(porPlat[x[1]] / l.total) + ' dos leads</span></div>';
+      return '<div class="p12r-kpi"><span class="p12r-kpi-r"><span>' + x[0] + '</span>' + chip(m.ctx.f.comparar ? variacao(porPlat[x[1]], ant) : null) + '</span><span class="p12r-kpi-v">' + n(porPlat[x[1]]) + '</span><span class="p12r-kpi-a">' + pct(porPlat[x[1]] / l.total) + ' dos leads</span></div>';
     }).join('') + '</div>';
     var linhasOrigem = l.porOrigem.map(function (o) { return { nome: origemRotulo(o), total: o.total, parte: o.total / l.total }; });
     var linhasCamp = l.porCampanha.map(function (c) { return { nome: c.campanha, plataforma: c.plataforma === 'google' ? 'Google' : c.plataforma === 'meta' ? 'Meta' : 'Outras', total: c.total, parte: c.total / l.total }; });
