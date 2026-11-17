@@ -638,6 +638,19 @@
     return lista;
   }
 
+  // "Visao geral" no menu e' a pagina de relatorios (ver NOME_RELATORIOS); o sub-item do Kanban
+  // com o mesmo nome (tela de todos os funis) passa a se chamar assim.
+  var NOME_VISAO_KANBAN = 'Todos os funis';
+
+  function renomearVisaoDoKanban(item) {
+    var link = item.querySelector(':scope > ul:not([data-p12-fav]) a[href$="/kanban/overview"]');
+    if (!link) return;
+    var rotulo = link.querySelector('.truncate');
+    var texto = rotulo && rotulo.firstChild;
+    if (texto && texto.nodeType === 3 && texto.nodeValue !== NOME_VISAO_KANBAN) texto.nodeValue = NOME_VISAO_KANBAN;
+    if (link.title && link.title !== NOME_VISAO_KANBAN) link.title = NOME_VISAO_KANBAN;
+  }
+
   function aplicarMenu() {
     // Favoritar so' acontece no Kanban: basta reler ao entrar ou sair dele, nao a cada conversa.
     var emKanban = /\/kanban(?:\/|$)/.test(location.pathname);
@@ -649,6 +662,7 @@
     var kanban = document.querySelector('a[href$="/kanban/overview"]');
     var item = kanban && kanban.closest('li');
     if (!item) return;
+    renomearVisaoDoKanban(item);
     var atual = item.querySelector(':scope > ul[data-p12-fav]');
     if (!menu.favoritos.length) {
       if (atual) atual.remove();
