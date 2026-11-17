@@ -48,8 +48,9 @@ function tem(re: RegExp, ...vals: Array<string | null | undefined>): boolean {
 }
 
 /**
- * Os nomes que o link do perfil usa na UTM. O padrao da P12 e'
- * `utm_source=google&utm_medium=organic&utm_campaign=meu_negocio`.
+ * Os nomes que o link do perfil usa na UTM. O padrao da P12 desde 17/11/2026 e'
+ * `utm_source=google_meu_negocio&utm_medium=organic&utm_campaign=google_meu_negocio`;
+ * antes era `utm_source=google&...&utm_campaign=meu_negocio` (Taina).
  */
 const RE_PERFIL = /-(meu-negocio|google-meu-negocio|gmn|gmb|gbp|google-business|google-business-profile|google-my-business|perfil-da-empresa)-/;
 

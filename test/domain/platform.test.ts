@@ -132,6 +132,12 @@ describe('Perfil da Empresa no Google (Google Meu Negocio)', () => {
     expect(detectPlatform({ utmSource: 'chatgpt.com', utmMedium: 'organic', utmCampaign: 'meu_negocio' })).toBe('gmn');
   });
 
+  test('o padrao dos perfis desde 17/11: google_meu_negocio na source e na campanha', () => {
+    expect(detectPlatform({ utmSource: 'google_meu_negocio', utmMedium: 'organic', utmCampaign: 'google_meu_negocio' })).toBe('gmn');
+    // o ChatGPT troca a source; a campanha segura
+    expect(detectPlatform({ utmSource: 'chatgpt.com', utmMedium: 'organic', utmCampaign: 'google_meu_negocio' })).toBe('gmn');
+  });
+
   test('aceita os outros nomes do perfil, com ou sem acento', () => {
     expect(detectPlatform({ utmSource: 'gmb' })).toBe('gmn');
     expect(detectPlatform({ utmSource: 'gmn' })).toBe('gmn');
