@@ -5,7 +5,11 @@
  * "Mensagem do Lead". Alimenta as etiquetas e os custom attributes da conversa.
  */
 
-export type Plataforma = 'google' | 'meta' | 'outro';
+/**
+ * `gmn` e' o Perfil da Empresa no Google (o antigo Google Meu Negocio): lead
+ * de verdade, que entra no funil, mas organico — a conversao NAO volta ao Ads.
+ */
+export type Plataforma = 'google' | 'meta' | 'gmn' | 'outro';
 export type Origem = 'mensagem' | 'formulario';
 
 export interface SinaisAtribuicao {
@@ -43,7 +47,35 @@ function tem(re: RegExp, ...vals: Array<string | null | undefined>): boolean {
   return vals.some((v) => re.test('-' + tok(v) + '-'));
 }
 
+/**
+ * Os nomes que o link do perfil usa na UTM. O padrao da P12 e'
+ * `utm_source=google&utm_medium=organic&utm_campaign=meu_negocio`.
+ */
+const RE_PERFIL = /-(meu-negocio|google-meu-negocio|gmn|gmb|gbp|google-business|google-business-profile|google-my-business|perfil-da-empresa)-/;
+
+/** `tok` sem acento: "Meu Negócio" viraria "meu-neg-cio". */
+function tokSemAcento(v: string | null | undefined): string {
+  return tok(String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, ''));
+}
+
+/**
+ * O lead veio do Perfil da Empresa no Google, sem anuncio.
+ *
+ * Vem antes do Google porque o link do perfil leva `utm_source=google`: ate'
+ * 17/11/2026 os leads da Taina por ele entravam como Google Ads e subiam
+ * conversao. A campanha decide, nao a source — o ChatGPT cita o link do perfil
+ * e troca a source por `chatgpt.com`.
+ *
+ * Com click id o perfil apareceu DENTRO de um anuncio (anuncio local, P-Max
+ * com local): ai' o clique e' pago e a conversao e' do Ads.
+ */
+export function ehDoPerfilGoogle(s: SinaisAtribuicao): boolean {
+  if (s.gclid || s.gbraid || s.wbraid) return false;
+  return [s.utmCampaign, s.utmSource, s.utmMedium].some((v) => RE_PERFIL.test('-' + tokSemAcento(v) + '-'));
+}
+
 export function detectPlatform(s: SinaisAtribuicao): Plataforma {
+  if (ehDoPerfilGoogle(s)) return 'gmn';
   if (tem(RE_GOOGLE, s.utmSource)) return 'google';
   if (tem(RE_META, s.utmSource)) return 'meta';
 

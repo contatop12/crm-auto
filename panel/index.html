@@ -1122,6 +1122,7 @@
                       <select id="f-plataforma">
                         <option value="google">Google Ads</option>
                         <option value="meta">Meta Ads</option>
+                        <option value="gmn">Google Meu Negócio (perfil)</option>
                       </select>
                     </div>
                     <div class="linha-acoes form-linha">
@@ -2912,8 +2913,9 @@
           ? '<table><thead><tr><th>Mensagem</th><th>Anúncio</th><th>Etiqueta</th><th>Cadastrada</th><th></th></tr></thead><tbody>' +
             lista.map(function (f) {
               const meta = f.plataforma === 'meta';
-              return '<tr><td>' + esc(f.frase) + '</td><td>' + (meta ? 'Meta Ads' : 'Google Ads') + '</td>' +
-                '<td class="mono">' + (meta ? 'mensagem' : 'msg-nat') + '</td>' +
+              const perfil = f.plataforma === 'gmn';
+              return '<tr><td>' + esc(f.frase) + '</td><td>' + (perfil ? 'Google Meu Negócio' : meta ? 'Meta Ads' : 'Google Ads') + '</td>' +
+                '<td class="mono">' + (perfil ? 'google-meu-negocio' : meta ? 'mensagem' : 'msg-nat') + '</td>' +
                 '<td title="' + esc(hora(f.created_at)) + '">' + haQuanto(f.created_at) + '</td>' +
                 '<td><button class="f-del" data-f="' + f.id + '">remover</button></td></tr>';
             }).join('') + '</tbody></table>'

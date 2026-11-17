@@ -314,8 +314,11 @@ export async function atribuirLead(
   // Promove so' o que veio de anuncio de verdade. `outro` cobre o clique sem
   // gclid e sem utm de plataforma — nao ha o que atribuir a uma campanha.
   const daAds = plataforma === 'google' || plataforma === 'meta';
+  // Perfil da Empresa no Google: lead de verdade, entra no funil como o do
+  // anuncio, mas organico — nenhuma conversao volta ao Ads (pedido de 17/11/2026).
+  const doPerfil = plataforma === 'gmn';
   const jaNoFunil = str(attrs.funil) === 'Lead';
-  const promover = daAds && !jaNoFunil;
+  const promover = (daAds || doPerfil) && !jaNoFunil;
 
   const atribuicao = {
     protocolo: lead.protocol,
@@ -348,14 +351,15 @@ export async function atribuirLead(
   // Lead com protocolo mas sem anuncio (clique do site sem gclid nem UTM):
   // nao sobe conversao, entao nada levava ele a planilha. No cliente que tem a
   // aba de lead direto ele entra na Geral e nela; o Banco recebe o clique.
-  if (!daAds && cfg.sheets_aba_direto) {
+  // O do perfil tambem: sem conversao, e' daqui que ele chega a Geral.
+  if (!daAds && (cfg.sheets_aba_direto || (doPerfil && promover))) {
     await espelharNaPlanilha(env, tenantId, { tipo: 'entrada', protocolo: lead.protocol, ensaio: false })
       .catch((e: Error) => {
         console.log(JSON.stringify({ acao: 'planilha_falhou', tipo: 'entrada', protocolo: lead.protocol, erro: e.message }));
       });
   }
 
-  if (promover) {
+  if (promover && daAds) {
     await dispararConversaoDeEntrada(env, tenantId, lead.protocol, conversaId);
   }
 
@@ -382,14 +386,17 @@ export async function atribuirLead(
       quizVersion: lead.quiz_version,
       quizValor: lead.quiz_valor,
       pagina: lead.page_url,
-      trafego: daAds ? 'pago' : leadDoClique && veioDoSite ? 'organico' : null,
+      // O do perfil leva so' a etiqueta do perfil: `organico`/`site` contariam a
+      // mesma coisa duas vezes.
+      trafego: daAds ? 'pago' : leadDoClique && veioDoSite && !doPerfil ? 'organico' : null,
       // Mensagem: `msg-nat` quando veio direto do anuncio (texto pronto da
       // extensao de mensagem, ou o clique do anuncio da Meta); `msg-site` quando
       // passou pelo site. O buildLabels decide quem usa o canal (so' o Google).
       canal: origem === 'formulario'
         ? (veioDoSite ? 'formulario-do-site' : null)
+        : doPerfil ? null
         : anuncio || clid || lead.evento === 'frase_entrada' ? 'msg-nat' : 'msg-site',
-      viaSite: !daAds && veioDoSite,
+      viaSite: !daAds && !doPerfil && veioDoSite,
     },
     vocab,
   );
@@ -442,7 +449,8 @@ export async function atribuirLead(
     motivo:
       `conversa ${conversaId} atribuida a ${lead.protocol} (${plataforma}/${campanha.slug || 'sem campanha'})` +
       (aplicadas.length ? ` · etiquetas: ${aplicadas.join(', ')}` : ' · etiquetas ja estavam') +
-      (promover ? ' · marcada para promover ao funil de Ads'
+      (promover && doPerfil ? ' · Google Meu Negocio: marcada para promover ao funil, sem conversao'
+        : promover ? ' · marcada para promover ao funil de Ads'
         : jaNoFunil ? ' · ja estava no funil'
         : ' · sem plataforma de anuncio, fica no Organico'),
   };

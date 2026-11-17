@@ -5,6 +5,7 @@ import { exigir } from '../domain/config';
 import { espelharNaPlanilha } from './planilha';
 import { criarEventoMeta } from './metaCapi';
 import { destinoDoLead } from '../domain/plataformaLead';
+import { ehDoPerfilGoogle } from '../domain/platform';
 import type { EventoMeta } from '../domain/eventoMeta';
 
 /**
@@ -58,6 +59,8 @@ interface Lead {
   wbraid: string | null;
   valor_proposta: number | null;
   utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
   fbc: string | null;
   ctwa_clid: string | null;
   origem: string | null;
@@ -112,8 +115,8 @@ export async function enviarConversao(
   }
 
   const lead = await env.DB.prepare(
-    `SELECT email, phone_e164, phone_key, gclid, gbraid, wbraid, valor_proposta, utm_source, fbc,
-            ctwa_clid, origem, evento, created_at
+    `SELECT email, phone_e164, phone_key, gclid, gbraid, wbraid, valor_proposta, utm_source,
+            utm_medium, utm_campaign, fbc, ctwa_clid, origem, evento, created_at
      FROM leads WHERE tenant_id = ? AND protocol = ?`,
   )
     .bind(tenantId, protocolo)
@@ -123,6 +126,21 @@ export async function enviarConversao(
   }
 
   const quando = data(str(p.step_changed_at) ?? str(p.updated_at)) ?? Date.now();
+
+  /**
+   * Lead do Perfil da Empresa no Google nao volta para plataforma nenhuma.
+   *
+   * Ele nao veio de anuncio: subir pelo telefone faria o Google Ads contar como
+   * dele o lead organico (foi o que aconteceu com 5 leads da Taina ate'
+   * 17/11/2026). Fica no funil e na planilha, para o time e para a lista de
+   * remarketing.
+   */
+  if (ehDoPerfilGoogle({
+    utmSource: lead.utm_source, utmMedium: lead.utm_medium, utmCampaign: lead.utm_campaign,
+    gclid: lead.gclid, gbraid: lead.gbraid, wbraid: lead.wbraid,
+  })) {
+    return { status: 'ignorado', motivo: `${protocolo}: lead do Google Meu Negocio, a conversao nao volta ao Ads` };
+  }
 
   /**
    * A conversão volta para a plataforma que trouxe o lead.

@@ -67,8 +67,11 @@ export function buildLabels(i: LabelInput, vocabulario: LabelVocabulary[]): Labe
   // canal no vocabulario fica com `mensagem`, como antes.
   const msgDoGoogle =
     i.origem === 'mensagem' && i.plataforma === 'google' && (i.canal === 'msg-site' || i.canal === 'msg-nat');
+  // Mensagem do Perfil da Empresa no Google: a etiqueta do perfil ja' diz tudo.
+  // `mensagem` e' da Meta e `msg-*` sao do anuncio.
+  const msgDoPerfil = i.origem === 'mensagem' && i.plataforma === 'gmn';
   if (msgDoGoogle) quer(i.canal as string, 'mensagem');
-  else if (i.origem) quer(i.origem);
+  else if (i.origem && !msgDoPerfil) quer(i.origem);
 
   // A etiqueta passa a ser a REDE, nao "o anuncio veio de tal lugar":
   // `google-ads` virou `google`, e `meta-ads` se desdobra em `instagram` ou
@@ -78,6 +81,8 @@ export function buildLabels(i: LabelInput, vocabulario: LabelVocabulary[]): Labe
   // vocabulario de antes, e desde 11/09 os leads delas saiam sem a rede.
   if (i.plataforma === 'google') quer('google', 'google-ads');
   if (i.plataforma === 'meta') quer(redeDoMeta(i.utmSource), 'meta-ads');
+  // A Persianas ja' tinha `gmn` no Chatwoot; os outros ganharam `google-meu-negocio`.
+  if (i.plataforma === 'gmn') quer('google-meu-negocio', 'gmn');
 
   if (i.viaSite) quer('site');
   // `msg-site`/`msg-nat` sao so' do Google e ja' entraram no lugar da origem.

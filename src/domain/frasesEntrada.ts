@@ -32,6 +32,12 @@ function normal(s: string | null | undefined): string {
  */
 export const FRASE_PADRAO_GOOGLE = 'Olá, vim pelo anúncio do Google!';
 
+/**
+ * O texto pronto do botao WhatsApp do Perfil da Empresa no Google. O botao vai
+ * direto ao WhatsApp (sem site, sem UTM): a frase e' a unica pista da origem.
+ */
+export const FRASE_PADRAO_PERFIL = 'Olá, vim pelo Google Meu Negócio!';
+
 /** Abaixo disto a frase casaria com conversa comum ("oi, bom dia"). */
 export const FRASE_MINIMA = 6;
 
@@ -102,7 +108,9 @@ export function validarFraseDeEntrada(
   if (t.length < FRASE_MINIMA) {
     return `mensagem curta demais (mínimo ${FRASE_MINIMA} letras): casaria com conversa comum`;
   }
-  if (plataforma !== 'google' && plataforma !== 'meta') return 'escolha Google Ads ou Meta Ads';
+  if (plataforma !== 'google' && plataforma !== 'meta' && plataforma !== 'gmn') {
+    return 'escolha Google Ads, Meta Ads ou Google Meu Negócio';
+  }
   return null;
 }
 

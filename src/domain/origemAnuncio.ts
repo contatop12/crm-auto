@@ -1,3 +1,5 @@
+import { ehDoPerfilGoogle } from './platform';
+
 /**
  * A plataforma de onde o lead veio, para a coluna ORIGEM da planilha de leads:
  * google, facebook, instagram, meta, gpt, outro — ou vazio, sem evidencia.
@@ -10,10 +12,13 @@
  * campanha de mensagem sem o link do anuncio).
  */
 
-export type OrigemAnuncio = 'google' | 'facebook' | 'instagram' | 'meta' | 'gpt' | 'outro' | '';
+export type OrigemAnuncio =
+  | 'google' | 'google-meu-negocio' | 'facebook' | 'instagram' | 'meta' | 'gpt' | 'outro' | '';
 
 export interface SinaisDeOrigem {
   utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
   gclid?: string | null;
   gbraid?: string | null;
   wbraid?: string | null;
@@ -42,6 +47,11 @@ const PROPRIOS = /(persianaspaulista|locadoraexatidao|vitaaudio|tileservicos|tai
  * organica do Google, por exemplo).
  */
 export function origemDoAnuncio(s: SinaisDeOrigem): OrigemAnuncio {
+  // O perfil vence o `gpt`: o ChatGPT cita o link do perfil e troca so' a source.
+  if (ehDoPerfilGoogle({
+    utmSource: s.utm_source, utmMedium: s.utm_medium, utmCampaign: s.utm_campaign,
+    gclid: s.gclid, gbraid: s.gbraid, wbraid: s.wbraid,
+  })) return 'google-meu-negocio';
   const fonte = normalizar(s.utm_source);
   const ref = hostDo(s.referrer);
   if (/chatgpt|openai|\bgpt\b/.test(fonte) || /chatgpt\.com|openai\.com/.test(ref)) return 'gpt';

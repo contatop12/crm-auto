@@ -1,4 +1,5 @@
 import { destinoDoLead } from './plataformaLead';
+import { ehDoPerfilGoogle } from './platform';
 import { tipoDoCanal } from './canal';
 
 /**
@@ -9,6 +10,7 @@ import { tipoDoCanal } from './canal';
 export interface LinhaDeLead {
   created_at: string;
   utm_source: string | null;
+  utm_medium?: string | null;
   utm_campaign: string | null;
   utm_campaign_nome: string | null;
   gclid: string | null;
@@ -32,7 +34,18 @@ export interface RelatorioDeOrigem {
 
 const MAX_CAMPANHAS = 30;
 
+/** O lead do Perfil da Empresa no Google: sem anuncio, mas nao e' "direto". */
+function doPerfil(l: LinhaDeLead): boolean {
+  return ehDoPerfilGoogle({
+    utmSource: l.utm_source, utmMedium: l.utm_medium, utmCampaign: l.utm_campaign,
+    gclid: l.gclid, gbraid: l.gbraid, wbraid: l.wbraid,
+  });
+}
+
 function plataformaDe(l: LinhaDeLead): PlataformaDoRelatorio {
+  // Nao e' anuncio: conta em "Sem anuncio", com canal proprio. Antes contava
+  // como Google, porque o link do perfil leva utm_source=google.
+  if (doPerfil(l)) return 'direto';
   const temSinal = !!(l.gclid || l.gbraid || l.wbraid || l.ctwa_clid || l.fbc || l.evento === 'meta_lead_form' || (l.utm_source ?? '').trim());
   if (!temSinal) return 'direto';
   return destinoDoLead(l).plataforma;
@@ -74,8 +87,10 @@ export function agregarOrigem(linhas: LinhaDeLead[], diretos: string[], tzHoras:
 
   for (const l of linhas) {
     const plataforma = plataformaDe(l);
-    const canal = tipoDoCanal({ origem: l.origem === 'formulario' ? 'formulario' : 'mensagem', quizVersion: l.quiz_version });
-    contar(l.created_at, plataforma, canal, nomeDaCampanha(l));
+    const tipo = tipoDoCanal({ origem: l.origem === 'formulario' ? 'formulario' : 'mensagem', quizVersion: l.quiz_version });
+    // `meu_negocio` nao e' campanha: fica fora da lista de campanhas
+    if (doPerfil(l)) contar(l.created_at, plataforma, 'Google Meu Negócio', null);
+    else contar(l.created_at, plataforma, tipo, nomeDaCampanha(l));
   }
   for (const criadoEm of diretos) contar(criadoEm, 'direto', 'WhatsApp direto', null);
 

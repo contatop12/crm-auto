@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import {
   FRASE_PADRAO_GOOGLE,
+  FRASE_PADRAO_PERFIL,
   casarFraseDeEntrada,
   fraseRepetida,
   protocoloDaFrase,
@@ -96,10 +97,23 @@ describe('validarFraseDeEntrada', () => {
     expect(validarFraseDeEntrada('MA21RMKT', 'meta')).toBeNull();
   });
 
+  test('aceita a frase do Perfil da Empresa no Google', () => {
+    expect(validarFraseDeEntrada(FRASE_PADRAO_PERFIL, 'gmn')).toBeNull();
+  });
+
+  test('a frase do perfil e a do anuncio nao se confundem', () => {
+    const frases: FraseEntrada[] = [
+      { frase: FRASE_PADRAO_GOOGLE, origem: 'mensagem', plataforma: 'google' },
+      { frase: FRASE_PADRAO_PERFIL, origem: 'mensagem', plataforma: 'gmn' },
+    ];
+    expect(casarFraseDeEntrada('Ola vim pelo Google Meu Negocio, voces abrem sabado?', frases)?.plataforma).toBe('gmn');
+    expect(casarFraseDeEntrada('Olá, vim pelo anúncio do Google!', frases)?.plataforma).toBe('google');
+  });
+
   test('recusa vazia, curta demais e plataforma desconhecida', () => {
     expect(validarFraseDeEntrada('  ', 'google')).toMatch(/cole/);
     expect(validarFraseDeEntrada('oi!', 'google')).toMatch(/curta/);
-    expect(validarFraseDeEntrada(FRASE_PADRAO_GOOGLE, 'tiktok')).toMatch(/Google Ads ou Meta Ads/);
+    expect(validarFraseDeEntrada(FRASE_PADRAO_GOOGLE, 'tiktok')).toMatch(/Google Ads, Meta Ads ou Google Meu Negócio/);
   });
 
   test('repetida ignora acento, caixa e espaco', () => {

@@ -25,7 +25,7 @@ const ambiente = () => {
 type Lista = { frases: Array<{ id: number; frase: string; plataforma: string }>; leads_30d: number };
 
 describe('mensagem pronta do anuncio no painel', () => {
-  test('cliente novo ja nasce com a mensagem da extensao do Google', async () => {
+  test('cliente novo ja nasce com a mensagem da extensao do Google e a do perfil', async () => {
     const { env } = ambiente();
     const r = await pedir(env, 'POST', '/api/tenants', {
       nome: 'Cliente Novo', slug: '', cw_account_id: '9', cw_board_funil_id: '20', cw_board_organico_id: '21',
@@ -34,7 +34,10 @@ describe('mensagem pronta do anuncio no painel', () => {
     expect(r.status).toBe(201);
     const { id } = (await r.json()) as { id: number };
     const l = (await (await pedir(env, 'GET', `/api/tenants/${id}/frases-entrada`)).json()) as Lista;
-    expect(l.frases.map((f) => [f.frase, f.plataforma])).toEqual([['Olá, vim pelo anúncio do Google!', 'google']]);
+    expect(l.frases.map((f) => [f.frase, f.plataforma])).toEqual([
+      ['Olá, vim pelo anúncio do Google!', 'google'],
+      ['Olá, vim pelo Google Meu Negócio!', 'gmn'],
+    ]);
   });
 
   test('cadastra, lista com os leads de 30 dias e remove', async () => {

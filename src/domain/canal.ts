@@ -32,6 +32,9 @@ export function tipoDoCanal(i: CanalInput): TipoDeCanal {
 }
 
 export function montarCanal(i: CanalInput): string {
+  // O perfil nao e' campanha. "Mensagem" no rotulo e' o que a rota do aviso
+  // procura (`canal_contem: Mensagem` na Pulseboard).
+  if (i.plataforma === 'gmn') return `Google Meu Negócio - ${tipoDoCanal(i)}`;
   const onde = PLATAFORMA[String(i.plataforma ?? '')] ?? 'Direto';
   return `Campanha de ${tipoDoCanal(i)} - ${onde}`;
 }

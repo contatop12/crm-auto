@@ -95,7 +95,7 @@ async function leadsPorTelefone(env: Env, tenantId: number, chaves: string[]): P
   for (let i = 0; i < chaves.length; i += 50) {
     const lote = chaves.slice(i, i + 50);
     const { results } = await env.DB.prepare(
-      `SELECT phone_key, utm_source, gclid, gbraid, wbraid, fbc, referrer FROM leads
+      `SELECT phone_key, utm_source, utm_medium, utm_campaign, gclid, gbraid, wbraid, fbc, referrer FROM leads
        WHERE tenant_id = ? AND phone_key IN (${lote.map(() => '?').join(',')})
        ORDER BY created_at DESC`,
     )

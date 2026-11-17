@@ -128,7 +128,7 @@ categorias.get('/:conta{[0-9]+}/origem', async (c) => {
   const marcas = donos.results.map(() => '?').join(',');
   const ids = donos.results.map((d) => d.id);
   const leads = await c.env.DB.prepare(
-    `SELECT created_at, utm_source, utm_campaign, utm_campaign_nome, gclid, gbraid, wbraid, ctwa_clid, fbc,
+    `SELECT created_at, utm_source, utm_medium, utm_campaign, utm_campaign_nome, gclid, gbraid, wbraid, ctwa_clid, fbc,
             evento, origem, quiz_version
        FROM leads
       WHERE tenant_id IN (${marcas}) AND created_at >= datetime(?, 'unixepoch') AND created_at < datetime(?, 'unixepoch')

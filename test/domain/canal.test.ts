@@ -37,3 +37,10 @@ describe('montarCanal', () => {
     expect(montarCanal({})).toBe('Campanha de Mensagem - Direto');
   });
 });
+
+describe('montarCanal do Perfil da Empresa no Google', () => {
+  test('nao e campanha, e o perfil; e leva "Mensagem" para a rota do aviso', () => {
+    expect(montarCanal({ origem: 'mensagem', plataforma: 'gmn' })).toBe('Google Meu Negócio - Mensagem');
+    expect(montarCanal({ origem: 'formulario', plataforma: 'gmn' })).toBe('Google Meu Negócio - Formulário');
+  });
+});

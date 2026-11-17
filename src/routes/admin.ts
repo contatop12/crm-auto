@@ -36,7 +36,7 @@ import {
   GATILHO_TEMPO,
   MOTIVO_AUTOMATICA,
 } from '../domain/respostasAutomaticas';
-import { FRASE_PADRAO_GOOGLE, fraseRepetida, validarFraseDeEntrada } from '../domain/frasesEntrada';
+import { FRASE_PADRAO_GOOGLE, FRASE_PADRAO_PERFIL, fraseRepetida, validarFraseDeEntrada } from '../domain/frasesEntrada';
 import { vigiarWhatsapp } from '../pipelines/vigiaWhatsapp';
 import { metaAds } from './metaAds';
 import {
@@ -213,6 +213,12 @@ admin.post('/tenants', async (c) => {
     `INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma) VALUES (?, ?, 'mensagem', 'google')`,
   )
     .bind(t!.id, FRASE_PADRAO_GOOGLE)
+    .run();
+  // O botao WhatsApp do Perfil da Empresa no Google manda este (Google Meu Negocio).
+  await c.env.DB.prepare(
+    `INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma) VALUES (?, ?, 'mensagem', 'gmn')`,
+  )
+    .bind(t!.id, FRASE_PADRAO_PERFIL)
     .run();
 
   console.log(JSON.stringify({ acao: 'criar_cliente', por: c.get('identity').email, slug }));

@@ -172,6 +172,29 @@ describe('enviarConversao', () => {
     expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
   });
 
+  test('lead do Google Meu Negocio nao sobe conversao para lugar nenhum', async () => {
+    // O link do perfil leva utm_source=google: sem a trava ele subia pelo
+    // telefone e o Ads contava como dele o lead organico (Taina, ate' 17/11).
+    const { env, exec, consultar } = cenario();
+    exec(`UPDATE leads SET gclid = NULL, utm_source = 'google', utm_medium = 'organic', utm_campaign = 'meu_negocio'
+          WHERE protocol = 'VITA-123'`);
+
+    const r = await enviarConversao(env, 1, card());
+    expect(r.status).toBe('ignorado');
+    expect(r.motivo).toContain('Google Meu Negocio');
+    expect(chamadas).toHaveLength(0);
+    expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
+  });
+
+  test('perfil com gclid veio de anuncio local: sobe normal', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`UPDATE leads SET utm_source = 'google', utm_medium = 'organic', utm_campaign = 'meu_negocio'
+          WHERE protocol = 'VITA-123'`);
+    const r = await enviarConversao(env, 1, card());
+    expect(r.status).toBe('ok');
+    expect(consultar('SELECT * FROM conversions')).toHaveLength(1);
+  });
+
   test('lead de formulario do Meta, sem fbc, tambem nao sobe', async () => {
     const { env, exec } = cenario();
     exec(`UPDATE leads SET gclid = NULL, utm_source = 'meta' WHERE protocol = 'VITA-123'`);

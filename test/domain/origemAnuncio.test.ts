@@ -8,6 +8,13 @@ describe('origemDoAnuncio', () => {
     expect(origemDoAnuncio({ utm_source: 'google_ads' })).toBe('google');
   });
 
+  test('o link do Perfil da Empresa no Google tem ORIGEM propria, mesmo citado pelo ChatGPT', () => {
+    expect(origemDoAnuncio({ utm_source: 'google', utm_medium: 'organic', utm_campaign: 'meu_negocio' })).toBe('google-meu-negocio');
+    expect(origemDoAnuncio({ utm_source: 'chatgpt.com', utm_medium: 'organic', utm_campaign: 'meu_negocio' })).toBe('google-meu-negocio');
+    // dentro de anuncio local, com gclid, e' o Ads
+    expect(origemDoAnuncio({ utm_source: 'google', utm_campaign: 'meu_negocio', gclid: 'Cj0' })).toBe('google');
+  });
+
   test('rede da Meta pela utm_source ou pelo cookie', () => {
     expect(origemDoAnuncio({ utm_source: 'instagram' })).toBe('instagram');
     expect(origemDoAnuncio({ utm_source: 'facebook' })).toBe('facebook');

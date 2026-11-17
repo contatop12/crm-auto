@@ -291,6 +291,10 @@ describe('planilha de leads: aba Geral e aba do canal', () => {
     expect(abasDoLead(abas, 'meta')).toEqual(['Geral', 'Meta Mensagem']);
   });
 
+  test('lead do Google Meu Negocio fica so na Geral, nem na do Google nem na direta', () => {
+    expect(abasDoLead({ ...abas, direto: 'WhatsApp Direto' }, 'gmn')).toEqual(['Geral']);
+  });
+
   test('cliente sem aba do canal fica so na Geral', () => {
     expect(abasDoLead({ geral: 'Geral', google: null, meta: null }, 'google')).toEqual(['Geral']);
   });

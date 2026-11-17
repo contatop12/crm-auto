@@ -157,3 +157,29 @@ describe('buildLabels com o vocabulario antigo', () => {
     expect(buildLabels({ origem: 'mensagem', plataforma: 'google' }, ambos).slugs).toEqual(['mensagem', 'google']);
   });
 });
+
+describe('buildLabels do Perfil da Empresa no Google', () => {
+  const comPerfil: LabelVocabulary[] = [
+    ...vocab,
+    { slug: 'google-meu-negocio', labelChatwoot: 'google-meu-negocio', labelWhatsapp: null },
+  ];
+
+  test('mensagem do perfil leva so a etiqueta do perfil', () => {
+    // `mensagem` e' a etiqueta da Meta; `google` e' do anuncio
+    const r = buildLabels({ origem: 'mensagem', plataforma: 'gmn' }, comPerfil);
+    expect(r.slugs).toEqual(['google-meu-negocio']);
+  });
+
+  test('formulario do perfil mantem a origem formulario', () => {
+    const r = buildLabels({ origem: 'formulario', plataforma: 'gmn' }, comPerfil);
+    expect(r.slugs).toEqual(['formulario', 'google-meu-negocio']);
+  });
+
+  test('Persianas usa a gmn que ja tinha', () => {
+    const r = buildLabels(
+      { origem: 'mensagem', plataforma: 'gmn' },
+      [...vocab, { slug: 'gmn', labelChatwoot: 'gmn', labelWhatsapp: null }],
+    );
+    expect(r.slugs).toEqual(['gmn']);
+  });
+});

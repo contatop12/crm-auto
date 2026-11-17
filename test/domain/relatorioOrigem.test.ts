@@ -31,6 +31,21 @@ describe('relatorio de origem', () => {
     expect(r.porDia).toEqual([{ dia: '2026-11-10', google: 2, meta: 1, direto: 2 }]);
   });
 
+  test('Google Meu Negocio conta em "Sem anuncio", com canal proprio e sem virar campanha', () => {
+    const r = agregarOrigem(
+      [
+        lead({ utm_source: 'google', utm_medium: 'organic', utm_campaign: 'meu_negocio' }),
+        lead({ utm_source: 'chatgpt.com', utm_medium: 'organic', utm_campaign: 'meu_negocio' }),
+        lead({ utm_source: 'gmn', evento: 'frase_entrada' }),
+      ],
+      [],
+      -3,
+    );
+    expect(r.porOrigem).toEqual([{ plataforma: 'direto', canal: 'Google Meu Negócio', total: 3 }]);
+    expect(r.porCampanha).toEqual([]);
+    expect(r.porDia).toEqual([{ dia: '2026-11-10', google: 0, meta: 0, direto: 3 }]);
+  });
+
   test('campanha sem nome usa o ID, e sem nada vira "(sem campanha)"', () => {
     const r = agregarOrigem([lead({ gclid: 'a', utm_campaign: '999' }), lead({ gclid: 'b' })], [], -3);
     expect(r.porCampanha.map((c) => c.campanha).sort()).toEqual(['(sem campanha)', '999']);

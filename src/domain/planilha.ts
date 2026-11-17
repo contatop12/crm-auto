@@ -269,7 +269,8 @@ export function montarRegistro(
       : montarCanal({ origem, plataforma, quizVersion: null }),
     plataforma,
     origem_anuncio: origemDoAnuncio({
-      utm_source: lead?.utm_source, gclid: lead?.gclid, gbraid: lead?.gbraid, wbraid: lead?.wbraid,
+      utm_source: lead?.utm_source, utm_medium: lead?.utm_medium, utm_campaign: lead?.utm_campaign,
+      gclid: lead?.gclid, gbraid: lead?.gbraid, wbraid: lead?.wbraid,
       fbc: lead?.fbc, referrer: lead?.referrer,
     }),
     // O nome da campanha, quando o Google devolveu (a `utm_campaign` chega com
@@ -439,9 +440,11 @@ export function abasDoLead(
 ): string[] {
   // Sem anuncio (plataforma `outro`) o lugar e' a aba de lead direto — so' no
   // cliente que tem essa aba; nos outros fica como sempre foi, so' a Geral.
+  // O do Google Meu Negocio fica so' na Geral: nao e' o "Google Mensagem" (do
+  // anuncio) nem o lead direto do WhatsApp.
   const doCanal = plataforma === 'google' ? abas.google
     : plataforma === 'meta' ? abas.meta
-    : origem === 'formulario' ? null
+    : plataforma === 'gmn' || origem === 'formulario' ? null
     : (abas.direto ?? null);
   const canal: CanalDaGeral = plataforma === 'google' || plataforma === 'meta' ? plataforma : 'direto';
   const naGeral = geralCanais === null || geralCanais.includes(canal);

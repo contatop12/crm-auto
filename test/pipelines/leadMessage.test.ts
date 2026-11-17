@@ -240,6 +240,47 @@ describe('atribuirLead', () => {
     expect(cs[0]!.conversion_value).toBe(10);
   });
 
+  test('lead do Google Meu Negocio pelo site: entra no funil, com a etiqueta, sem conversao', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
+          VALUES (1, 'google-meu-negocio', 'google-meu-negocio', NULL)`);
+    exec(`UPDATE leads SET gclid = NULL, utm_source = 'google', utm_medium = 'organic', utm_campaign = 'meu_negocio',
+          utm_id = NULL WHERE tenant_id = 1`);
+    etiquetasAtuais = [];
+
+    const r = await atribuirLead(env, 1, webhook());
+    expect(r.status).toBe('ok');
+    expect(r.motivo).toMatch(/Google Meu Negocio/);
+    const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+    expect(attrs.funil).toBe('PROMOVER');
+    const corpo = corpoDe<{ labels: string[] }>(/labels/);
+    expect(corpo.labels).toContain('google-meu-negocio');
+    expect(corpo.labels).not.toContain('google');
+    expect(corpo.labels).not.toContain('mensagem');
+    expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
+    expect(chamadas.some((c) => /googleads|datamanager/.test(c.url) && c.metodo !== 'GET' && !/searchStream|search$/.test(c.url))).toBe(false);
+  });
+
+  test('frase pronta do botao WhatsApp do perfil vira lead do Google Meu Negocio', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`DELETE FROM leads WHERE tenant_id = 1`);
+    exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
+          VALUES (1, 'google-meu-negocio', 'google-meu-negocio', NULL)`);
+    exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+          VALUES (1, 'Olá, vim pelo anúncio do Google!', 'mensagem', 'google'),
+                 (1, 'Olá, vim pelo Google Meu Negócio!', 'mensagem', 'gmn')`);
+
+    const r = await atribuirLead(env, 1, webhook({ content: 'Olá, vim pelo Google Meu Negócio! Vocês abrem sábado?' }));
+    expect(r.status).toBe('ok');
+    const leads = consultar<{ protocol: string; utm_source: string }>('SELECT * FROM leads WHERE tenant_id = 1');
+    expect(leads).toHaveLength(1);
+    expect(leads[0]!.utm_source).toBe('gmn');
+    const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+    expect(attrs.funil).toBe('PROMOVER');
+    expect(corpoDe<{ labels: string[] }>(/labels/).labels).toEqual(expect.arrayContaining(['google-meu-negocio']));
+    expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
+  });
+
   test('lead que nao promove nao sobe conversao', async () => {
     const { env, exec, consultar } = cenario();
     exec(`UPDATE leads SET gclid = NULL, utm_source = 'organico' WHERE tenant_id = 1`);

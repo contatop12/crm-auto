@@ -4,6 +4,7 @@ import {
   detectOrigin,
   campaignId,
   classifyCampaign,
+  ehDoPerfilGoogle,
 } from '../../src/domain/platform';
 
 describe('detectPlatform', () => {
@@ -115,5 +116,36 @@ describe('classifyCampaign', () => {
 
   test('sem nada identificavel devolve Desconhecido', () => {
     expect(classifyCampaign({ plataforma: 'google' }).tipo).toBe('Desconhecido');
+  });
+});
+
+describe('Perfil da Empresa no Google (Google Meu Negocio)', () => {
+  const doPerfil = { utmSource: 'google', utmMedium: 'organic', utmCampaign: 'meu_negocio' };
+
+  test('a UTM do perfil nao e anuncio: vira gmn, nao google', () => {
+    // 13 leads da Taina com esta UTM subiram como Google Ads (5 com conversao)
+    expect(detectPlatform(doPerfil)).toBe('gmn');
+    expect(ehDoPerfilGoogle(doPerfil)).toBe(true);
+  });
+
+  test('o ChatGPT troca a utm_source mas a campanha continua dizendo o perfil', () => {
+    expect(detectPlatform({ utmSource: 'chatgpt.com', utmMedium: 'organic', utmCampaign: 'meu_negocio' })).toBe('gmn');
+  });
+
+  test('aceita os outros nomes do perfil, com ou sem acento', () => {
+    expect(detectPlatform({ utmSource: 'gmb' })).toBe('gmn');
+    expect(detectPlatform({ utmSource: 'gmn' })).toBe('gmn');
+    expect(detectPlatform({ utmCampaign: 'Google Meu Negócio' })).toBe('gmn');
+    expect(detectPlatform({ utmSource: 'google', utmCampaign: 'gbp' })).toBe('gmn');
+  });
+
+  test('com gclid o perfil apareceu num anuncio local: e Google Ads', () => {
+    expect(detectPlatform({ ...doPerfil, gclid: 'Cj0KCQ' })).toBe('google');
+    expect(ehDoPerfilGoogle({ ...doPerfil, wbraid: 'x' })).toBe(false);
+  });
+
+  test('campanha de anuncio comum continua Google', () => {
+    expect(detectPlatform({ utmSource: 'google', utmMedium: 'cpc', utmCampaign: 'negocios-locais' })).toBe('google');
+    expect(ehDoPerfilGoogle({ utmSource: 'google', utmCampaign: 'search-meu-produto' })).toBe(false);
   });
 });
