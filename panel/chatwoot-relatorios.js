@@ -1819,6 +1819,9 @@
       }
       return;
     }
+    // Seletor e campo de data sao tratados no `change`. Tratar o clique neles redesenhava
+    // a barra e apagava o <select> aberto: a lista fechava sozinha (so' clicando e segurando).
+    if (/^(SELECT|OPTION|INPUT|TEXTAREA)$/.test(alvo.tagName)) return;
     var acao = alvo.getAttribute('data-acao');
     var v = alvo.getAttribute('data-v');
     var f = estado.f;
