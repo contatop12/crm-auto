@@ -20,7 +20,7 @@
 
   var PERIODOS = { hoje: 'Hoje', '7d': '7 dias', '30d': '30 dias', mes: 'Este mês', mespassado: 'Mês passado', custom: 'Personalizado' };
   var VISOES = {
-    geral: 'Visão geral',
+    geral: 'Resumo',
     funil: 'Funil',
     origem: 'Origem dos leads',
     atendimento: 'Atendimento',
@@ -1682,7 +1682,7 @@
 
   function htmlTopo(m) {
     var p = m.ctx.p;
-    return '<div class="p12r-topo"><h1>Relatórios</h1><p>Leads, atendimento e funil · ' + esc(p.chave === 'hoje' ? 'hoje' : p.rotulo) +
+    return '<div class="p12r-topo"><h1>Visão geral</h1><p>Leads, atendimento e funil · ' + esc(p.chave === 'hoje' ? 'hoje' : p.rotulo) +
       (p.dias > 1 ? ' (' + p.dias + ' dias)' : '') + '</p></div>';
   }
 

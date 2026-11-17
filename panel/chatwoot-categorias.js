@@ -674,7 +674,9 @@
   // ordem. O resto some, mas o da tela aberta continua (no fim), para quem abriu
   // Configuracoes pelo endereco conseguir navegar la' dentro. So' marca os itens: a ordem e'
   // CSS `order` na lista, que ja' e' flex; nada sai do lugar no DOM do Vue.
-  var MENU = ['kanban', 'dashboard', 'internal-chat', 'contacts', 'reports'];
+  // Relatorios vai primeiro e se chama "Visao geral" (pedido de 17/11/2026).
+  var MENU = ['reports', 'kanban', 'dashboard', 'internal-chat', 'contacts'];
+  var NOME_RELATORIOS = 'Visão geral';
   var ESTILO_MENU =
     'li[data-p12-menu="x"]{display:none!important}' +
     [1, 2, 3, 4, 5, 6]
@@ -725,6 +727,43 @@
       if (marca) li.setAttribute('data-p12-menu', marca);
       else li.removeAttribute('data-p12-menu');
     });
+    renomearRelatorios();
+  }
+
+  /** Troca so' o texto do no' que o Vue ja' usa: ele nao reescreve um rotulo que nao mudou. */
+  function renomearRelatorios() {
+    var link = document.querySelector('a[name="Reports"]');
+    if (!link) return;
+    var rotulo = link.querySelector('.text-body-main');
+    var texto = rotulo && rotulo.firstChild;
+    if (texto && texto.nodeType === 3 && texto.nodeValue !== NOME_RELATORIOS) texto.nodeValue = NOME_RELATORIOS;
+    if (link.title && link.title !== NOME_RELATORIOS) link.title = NOME_RELATORIOS;
+  }
+
+  // ---- abrir no funil com estrela -------------------------------------------------
+
+  // Ao abrir o CRM, a tela inicial do Chatwoot (Conversas) da' lugar ao primeiro funil com
+  // estrela do atendente. So' na carga da pagina, e so' se os favoritos chegarem logo: clicar
+  // em Conversas depois, ou abrir um link direto (conversa, kanban, relatorio), segue normal.
+  var ESPERA_ABERTURA_MS = 8000;
+  var abertura = { decidida: false, inicio: Date.now() };
+
+  function ehTelaInicial(caminho) {
+    return /^\/app\/accounts\/\d+\/dashboard\/?$/.test(caminho || '');
+  }
+
+  function aplicarAbertura() {
+    if (abertura.decidida) return;
+    var caminho = location.pathname;
+    if (!contaDaUrl(caminho)) return; // ainda em /app: o roteador do Chatwoot vai decidir
+    if (!ehTelaInicial(caminho) || Date.now() - abertura.inicio > ESPERA_ABERTURA_MS) {
+      abertura.decidida = true;
+      return;
+    }
+    if (menu.carregando || !menu.carregadoEm) return; // favoritos ainda chegando
+    abertura.decidida = true;
+    var favorito = menu.favoritos[0];
+    if (favorito) navegar('/app/accounts/' + estado.conta + '/kanban/' + favorito.id);
   }
 
   // ---- "Configuracao" no menu do perfil -------------------------------------------
@@ -1151,6 +1190,7 @@
       menu.carregadoEm = 0;
     }
     seguro(aplicarMenu)();
+    seguro(aplicarAbertura)();
     seguro(aplicarMenuEnxuto)();
     seguro(aplicarConfiguracaoNoPerfil)();
 
@@ -1196,6 +1236,7 @@
     resumirTotais: resumirTotais,
     posicaoNoMenu: posicaoNoMenu,
     ocultoNoMenu: ocultoNoMenu,
+    ehTelaInicial: ehTelaInicial,
   };
 
   seguro(function () {

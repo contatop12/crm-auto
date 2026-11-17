@@ -144,14 +144,26 @@ describe('script do painel', () => {
     expect(api.funisFavoritos(null).length).toBe(0);
   });
 
-  test('menu: Kanban, Conversas, Chat Interno, Contatos e Relatorios, nessa ordem', () => {
+  test('menu: Visao geral (relatorios), Kanban, Conversas, Chat Interno e Contatos, nessa ordem', () => {
     const { api } = carregar();
     const aqui = '/app/accounts/7/dashboard';
-    expect(api.posicaoNoMenu('/app/accounts/7/kanban/overview', aqui)).toBe(1);
-    expect(api.posicaoNoMenu('/app/accounts/7/dashboard', aqui)).toBe(2);
-    expect(api.posicaoNoMenu('/app/accounts/7/internal-chat', aqui)).toBe(3);
-    expect(api.posicaoNoMenu('/app/accounts/7/contacts?page=1', aqui)).toBe(4);
-    expect(api.posicaoNoMenu('/app/accounts/7/reports/overview', aqui)).toBe(5);
+    expect(api.posicaoNoMenu('/app/accounts/7/reports/overview', aqui)).toBe(1);
+    expect(api.posicaoNoMenu('/app/accounts/7/kanban/overview', aqui)).toBe(2);
+    expect(api.posicaoNoMenu('/app/accounts/7/dashboard', aqui)).toBe(3);
+    expect(api.posicaoNoMenu('/app/accounts/7/internal-chat', aqui)).toBe(4);
+    expect(api.posicaoNoMenu('/app/accounts/7/contacts?page=1', aqui)).toBe(5);
+  });
+
+  test('abertura: so a tela inicial do Chatwoot (Conversas) leva ao funil com estrela', () => {
+    const { api } = carregar();
+    expect(api.ehTelaInicial('/app/accounts/7/dashboard')).toBe(true);
+    expect(api.ehTelaInicial('/app/accounts/7/dashboard/')).toBe(true);
+    // link direto para uma conversa, kanban ou relatorio abre onde foi pedido
+    expect(api.ehTelaInicial('/app/accounts/7/conversations/120')).toBe(false);
+    expect(api.ehTelaInicial('/app/accounts/7/kanban/13')).toBe(false);
+    expect(api.ehTelaInicial('/app/accounts/7/reports/overview')).toBe(false);
+    expect(api.ehTelaInicial('/app/accounts/7/dashboard/mentions')).toBe(false);
+    expect(api.ehTelaInicial('/app/login')).toBe(false);
   });
 
   test('menu: o resto some, menos o da tela aberta', () => {
