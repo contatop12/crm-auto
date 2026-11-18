@@ -88,8 +88,9 @@ export function agregarOrigem(linhas: LinhaDeLead[], diretos: string[], tzHoras:
   for (const l of linhas) {
     const plataforma = plataformaDe(l);
     const tipo = tipoDoCanal({ origem: l.origem === 'formulario' ? 'formulario' : 'mensagem', quizVersion: l.quiz_version });
-    // `meu_negocio` nao e' campanha: fica fora da lista de campanhas
-    if (doPerfil(l)) contar(l.created_at, plataforma, 'Google Meu Negócio', null);
+    // `meu_negocio` nao e' campanha: fica fora da lista de campanhas. "GMN" e' o
+    // mesmo nome curto do aviso no grupo (canal.ts), pedido em 18/11/2026.
+    if (doPerfil(l)) contar(l.created_at, plataforma, 'GMN', null);
     else contar(l.created_at, plataforma, tipo, nomeDaCampanha(l));
   }
   for (const criadoEm of diretos) contar(criadoEm, 'direto', 'WhatsApp direto', null);

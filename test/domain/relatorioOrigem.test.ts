@@ -41,7 +41,7 @@ describe('relatorio de origem', () => {
       [],
       -3,
     );
-    expect(r.porOrigem).toEqual([{ plataforma: 'direto', canal: 'Google Meu Negócio', total: 3 }]);
+    expect(r.porOrigem).toEqual([{ plataforma: 'direto', canal: 'GMN', total: 3 }]);
     expect(r.porCampanha).toEqual([]);
     expect(r.porDia).toEqual([{ dia: '2026-11-10', google: 0, meta: 0, direto: 3 }]);
   });
