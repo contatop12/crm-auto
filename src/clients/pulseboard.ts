@@ -104,6 +104,29 @@ export class PulseboardClient {
     }
     return conferirEnvio(texto);
   }
+
+  /**
+   * Conta a Pulseboard que o lead de formulario/quiz abriu conversa no Chatwoot.
+   * Quem avisa o grupo desses leads e' o fluxo do formulario; a Pulseboard poe o
+   * link no aviso que ainda espera ou manda UM complemento (resposta `acao`).
+   * `<endereco do cliente>/conversa`, na mesma URL (e secret) do aviso.
+   */
+  async avisarConversa(c: { telefone: string; conversa: string; nome?: string }): Promise<string> {
+    const u = new URL(this.endpoint);
+    u.pathname = `${u.pathname.replace(/\/+$/, '')}/conversa`;
+    const r = await fetch(u.toString(), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ telefone: c.telefone, conversa: c.conversa, ...(c.nome ? { nome: c.nome } : {}) }),
+    });
+    const texto = await r.text();
+    if (!r.ok) throw new ErroPulseboard(`Pulseboard (conversa) respondeu ${r.status}: ${texto.slice(0, 200)}`, false);
+    try {
+      return String((JSON.parse(texto) as { acao?: string }).acao ?? '');
+    } catch {
+      return '';
+    }
+  }
 }
 
 /**

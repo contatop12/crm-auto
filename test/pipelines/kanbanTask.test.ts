@@ -150,12 +150,62 @@ describe('avisarLeadNoGrupo', () => {
 
     expect(r.status).toBe('ignorado');
     expect(r.motivo).toContain('formulário');
-    expect(enviados).toHaveLength(0);
+    // so' a conversa vai a Pulseboard (corpo com `conversa`), nunca o aviso completo
+    expect(enviados.filter((e) => !('conversa' in e))).toHaveLength(0);
     const linha = consultar<{ status: string; canal: string }>(
       'SELECT status, canal FROM group_notifications WHERE tenant_id = 1',
     )[0]!;
     expect(linha.status).toBe('ignorado');
     expect(linha.canal).toBe('Campanha de Formulário - Google');
+  });
+
+  describe('link da conversa no aviso do formulario/quiz', () => {
+    const insereFormulario = (exec: (sql: string) => void) =>
+      exec(`INSERT INTO leads (tenant_id, protocol, nome, origem, evento, gclid, page_url)
+            VALUES (1, 'PERS-1720000000000-ABC', 'Waldira Ferreira', 'formulario', 'form_submit', 'Cj0KC',
+                    'https://andaime.x.com.br/itaquera?a=1')`);
+
+    test('entrega a conversa a Pulseboard e continua ignorando o aviso completo', async () => {
+      const { env, exec, consultar } = cenario();
+      insereFormulario(exec);
+      const chamadas: Array<{ url: string; corpo: Record<string, unknown> }> = [];
+      vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+        chamadas.push({ url: String(url), corpo: JSON.parse(String(init.body)) });
+        return new Response(JSON.stringify({ ok: true, acao: 'anexada' }), { status: 200 });
+      });
+
+      const r = await avisarLeadNoGrupo(env, 1, task());
+
+      expect(r.status).toBe('ignorado');
+      expect(chamadas).toHaveLength(1);
+      expect(chamadas[0]!.url).toBe('https://pulseboard.teste/persianas/conversa');
+      expect(chamadas[0]!.corpo.telefone).toBe('5511996316799');
+      expect(chamadas[0]!.corpo.conversa).toBe('https://cw.teste/app/accounts/7/conversations/28');
+      expect(consultar<{ status: string }>('SELECT status FROM group_notifications WHERE tenant_id = 1')[0]!.status)
+        .toBe('ignorado');
+    });
+
+    test('Pulseboard fora do ar nao quebra o pipeline', async () => {
+      const { env, exec } = cenario();
+      insereFormulario(exec);
+      vi.stubGlobal('fetch', async () => new Response('bad gateway', { status: 502 }));
+      const r = await avisarLeadNoGrupo(env, 1, task());
+      expect(r.status).toBe('ignorado');
+
+      const { env: env2, exec: exec2 } = cenario();
+      insereFormulario(exec2);
+      vi.stubGlobal('fetch', async () => { throw new Error('rede'); });
+      expect((await avisarLeadNoGrupo(env2, 1, task())).status).toBe('ignorado');
+    });
+
+    test('cliente com o aviso desligado nao chama a Pulseboard', async () => {
+      const { env, exec } = cenario();
+      insereFormulario(exec);
+      exec(`UPDATE tenant_config SET pulseboard_ativo = 0 WHERE tenant_id = 1`);
+      const r = await avisarLeadNoGrupo(env, 1, task());
+      expect(r.status).toBe('ignorado');
+      expect(enviados).toHaveLength(0);
+    });
   });
 
   test('nao avisa lead de quiz: quem avisa e o fluxo do quiz', async () => {
@@ -166,7 +216,8 @@ describe('avisarLeadNoGrupo', () => {
     const r = await avisarLeadNoGrupo(env, 1, task());
 
     expect(r.status).toBe('ignorado');
-    expect(enviados).toHaveLength(0);
+    // so' a conversa vai a Pulseboard (corpo com `conversa`), nunca o aviso completo
+    expect(enviados.filter((e) => !('conversa' in e))).toHaveLength(0);
     expect(consultar<{ canal: string }>('SELECT canal FROM group_notifications WHERE tenant_id = 1')[0]!.canal)
       .toBe('Campanha de Quiz - Google');
   });

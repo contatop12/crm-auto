@@ -263,6 +263,20 @@ export async function avisarLeadNoGrupo(
   if (tipo !== 'Mensagem') {
     const msg = `lead de ${tipo.toLowerCase()}: quem avisa o grupo e' o fluxo do ${tipo.toLowerCase()}`;
     await marcar('ignorado', msg);
+    // O aviso do formulario nao conhece a conversa: a Pulseboard poe o link nele
+    // (ou manda um complemento). Falhar aqui so' deixa o grupo sem o link.
+    if (cfg.pulseboard_ativo === 1 && cfg.pulseboard_url && cfg.cw_account_id && t.conversaDisplay && telefone) {
+      try {
+        const acao = await new PulseboardClient(cfg.pulseboard_url).avisarConversa({
+          telefone,
+          nome,
+          conversa: `${env.CHATWOOT_BASE_URL}/app/accounts/${cfg.cw_account_id}/conversations/${t.conversaDisplay}`,
+        });
+        console.log(JSON.stringify({ acao: 'conversa_no_aviso', task: t.taskId, resultado: acao }));
+      } catch (e) {
+        console.log(JSON.stringify({ acao: 'conversa_no_aviso_falhou', task: t.taskId, erro: (e as Error).message }));
+      }
+    }
     return { status: 'ignorado', motivo: `${msg} · ${nome} · ${canal}` };
   }
 
