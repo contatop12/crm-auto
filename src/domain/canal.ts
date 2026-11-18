@@ -33,8 +33,10 @@ export function tipoDoCanal(i: CanalInput): TipoDeCanal {
 
 export function montarCanal(i: CanalInput): string {
   // O perfil nao e' campanha. "Mensagem" no rotulo e' o que a rota do aviso
-  // procura (`canal_contem: Mensagem` na Pulseboard).
-  if (i.plataforma === 'gmn') return `Google Meu Negócio - ${tipoDoCanal(i)}`;
+  // procura (`canal_contem: Mensagem` na Pulseboard). "GMN" (Google Meu
+  // Negocio) e' o nome curto que o usuario pediu no grupo em 18/11/2026; a
+  // Pulseboard reconhece "GMN - Mensagem" como aviso do CRM.
+  if (i.plataforma === 'gmn') return `GMN - ${tipoDoCanal(i)}`;
   const onde = PLATAFORMA[String(i.plataforma ?? '')] ?? 'Direto';
   return `Campanha de ${tipoDoCanal(i)} - ${onde}`;
 }
