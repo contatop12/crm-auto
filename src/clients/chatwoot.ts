@@ -374,6 +374,22 @@ export class ChatwootClient {
     });
   }
 
+  /**
+   * Contatos cuja busca casa com `q` (nome, e-mail, telefone ou identificador;
+   * o Chatwoot procura por pedaco). So' a primeira pagina: quem busca por
+   * telefone passa digitos suficientes para ela bastar.
+   */
+  async contatosPorBusca(
+    acc: number,
+    q: string,
+  ): Promise<Array<{ id: number; phone_number: string | null; name?: string | null }>> {
+    const r = await this.req<{ payload?: Array<{ id: number; phone_number: string | null; name?: string | null }> }>(
+      'GET',
+      `/api/v1/accounts/${acc}/contacts/search?q=${encodeURIComponent(q)}`,
+    );
+    return r.payload ?? [];
+  }
+
   /** Conversas do contato em todas as caixas (display ids em `id`). */
   async conversasDoContato(acc: number, contatoId: number): Promise<ConversaDoContato[]> {
     const r = await this.req<{ payload?: ConversaDoContato[] }>(

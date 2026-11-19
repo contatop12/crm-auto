@@ -12,6 +12,11 @@ import { telefoneNoTituloDoCard } from '../pipelines/tituloCard';
 import { voltarDoPendente } from '../pipelines/pendente';
 import { atribuirEmRodizio } from '../pipelines/rodizio';
 import { alertarContatoDuplicado } from '../pipelines/contatoDuplicado';
+import {
+  agendarLinkDaConversa,
+  entregarLinkDaConversa,
+  EVENTO_CONVERSA_DO_FORMULARIO,
+} from '../pipelines/conversaDoFormulario';
 
 /**
  * Consumidor da fila — onde o trabalho real acontece.
@@ -39,10 +44,16 @@ const ESPERA_ADIADA_S = 20;
 
 async function processar(msg: QueueMessage, env: Env, payload: string, tentativa = 1): Promise<Resultado> {
   switch (msg.source) {
-    case 'click':
+    case 'click': {
       // cabeca da corrente: sem a linha em `leads`, o protocolo que o lead
       // manda depois nao casa com nada
-      return registrarClique(env, msg.tenantId, payload);
+      const r = await registrarClique(env, msg.tenantId, payload);
+      // Formulario/quiz: a conversa do Chatwoot nasce segundos depois, e o aviso
+      // do grupo precisa do link dela. So' na primeira entrega; engole o proprio
+      // erro, o clique ja' esta' gravado.
+      if (r.status === 'ok' && tentativa === 1) await agendarLinkDaConversa(env, msg.tenantId, payload);
+      return r;
+    }
 
     case 'chatwoot':
       // Toda mensagem traz o telefone: o card troca o nome do perfil por ele.
@@ -58,6 +69,10 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
         await atribuirEmRodizio(env, msg.tenantId, payload);
       }
       switch (msg.eventType) {
+        case EVENTO_CONVERSA_DO_FORMULARIO:
+          // agendado pelo clique de formulario/quiz: acha a conversa do lead e
+          // entrega o link a Pulseboard
+          return entregarLinkDaConversa(env, msg.tenantId, payload, { tentativa });
         case 'conversation_created':
           return {
             status: 'ignorado',

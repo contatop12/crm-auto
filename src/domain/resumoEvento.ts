@@ -269,6 +269,7 @@ export function nomeDoPipeline(source: string, eventType: string | null): string
     case 'message_created':
     case 'message_incoming': return 'mensagem do lead';
     case 'message_outgoing': return 'resposta do vendedor';
+    case 'conversa_formulario': return 'link da conversa no aviso';
     default: return 'sem pipeline';
   }
 }
