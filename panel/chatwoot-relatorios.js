@@ -362,19 +362,45 @@
     return lista;
   }
 
+  // "Nao atendida" no Chatwoot = o lead mandou a ultima mensagem. Como ninguem resolve conversa,
+  // a que terminou num "ok, obrigado" fica nessa lista para sempre (Taina, 19/11/2026: 226, das
+  // quais 129 com mais de 30 dias). O alerta conta so' quem espera ha ate 7 dias.
+  var JANELA_ESPERA_S = 7 * 86400;
+
+  /** Das conversas "nao atendidas", quantas esperam ha no maximo `janela` s e a espera mais longa delas. */
+  function esperaRecente(conversas, agoraS, janela) {
+    var recentes = 0;
+    var maisAntiga = null;
+    (conversas || []).forEach(function (cv) {
+      var desde = cv && cv.waiting_since;
+      if (!desde) return;
+      var espera = Math.max(0, agoraS - desde);
+      if (espera > janela) return;
+      recentes++;
+      if (maisAntiga == null || espera > maisAntiga) maisAntiga = espera;
+    });
+    return { recentes: recentes, maisAntiga: maisAntiga };
+  }
+
   /**
-   * O que pede acao agora. `c` = { conta, quadro, agora:{unattended,open,unassigned}, esperaMaisAntiga,
-   * funil (modelo), caixas:[{nome,conversas}], atendentes:{todosSemAtividade, abertas} }.
+   * O que pede acao agora. `c` = { conta, quadro, agora:{unattended,open,unassigned},
+   * espera:{recentes,maisAntiga,mais} (ver esperaRecente), funil (modelo), caixas:[{nome,conversas}],
+   * atendentes:{todosSemAtividade, abertas} }.
    */
   function alertas(c) {
     var lista = [];
     var conta = '/app/accounts/' + c.conta;
     var ag = c.agora;
-    if (ag && ag.unattended > 0) {
+    var esp = c.espera;
+    if (ag && esp && esp.recentes > 0) {
+      var antigas = Math.max(0, num(ag.unattended) - esp.recentes);
       lista.push({
-        id: 'semresposta', nivel: c.esperaMaisAntiga != null && c.esperaMaisAntiga > 86400 ? 'alto' : ag.unattended >= 20 ? 'alto' : 'medio',
-        titulo: n(ag.unattended) + (ag.unattended === 1 ? ' conversa sem resposta' : ' conversas sem resposta'),
-        detalhe: c.esperaMaisAntiga != null ? 'A mais antiga espera há ' + dur(c.esperaMaisAntiga) : 'Ninguém da equipe respondeu ainda',
+        id: 'semresposta',
+        nivel: (esp.maisAntiga != null && esp.maisAntiga > 86400) || esp.recentes >= 20 ? 'alto' : 'medio',
+        titulo: n(esp.recentes) + (esp.mais ? '+' : '') + (esp.recentes === 1 && !esp.mais ? ' lead esperando resposta' : ' leads esperando resposta'),
+        detalhe:
+          (esp.maisAntiga != null ? 'O mais antigo espera há ' + dur(esp.maisAntiga) : 'Mandaram a última mensagem nos últimos 7 dias') +
+          (antigas > 0 && !esp.mais ? ' · mais ' + n(antigas) + ' paradas há mais de 7 dias' : ''),
         href: conta + '/unattended/conversations',
       });
     }
@@ -530,6 +556,7 @@
     variacao: variacao,
     kpis: kpis,
     alertas: alertas,
+    esperaRecente: esperaRecente,
     ordenar: ordenar,
     colunasUteis: colunasUteis,
     csvDe: csvDe,
@@ -1209,12 +1236,23 @@
     d.agora = obter('agora:' + conta + ':' + c.chaveDim, function () {
       return cw(c.A + '/reports/conversations?' + consulta({ type: c.dim.type, id: c.dim.id }));
     }, AGORA_MS);
+    // Mais recente primeiro, 25 por pagina: para quando passa da janela de 7 dias (ou em 8 paginas).
     d.espera = obter('espera:' + conta, function () {
-      return cw('/api/v1/accounts/' + conta + '/conversations?status=open&conversation_type=unattended&sort_by=last_activity_at_asc&page=1').then(function (r) {
-        var primeira = r && r.data && r.data.payload && r.data.payload[0];
-        var desde = primeira && (primeira.waiting_since || primeira.timestamp);
-        return desde ? Math.max(0, Math.floor(Date.now() / 1000) - desde) : null;
-      });
+      var agoraS = Math.floor(Date.now() / 1000);
+      var todas = [];
+      function pagina(p) {
+        return cw('/api/v1/accounts/' + conta + '/conversations?status=open&conversation_type=unattended&sort_by=waiting_since_desc&page=' + p).then(function (r) {
+          var lista = (r && r.data && r.data.payload) || [];
+          todas = todas.concat(lista);
+          var ultima = lista[lista.length - 1];
+          var dentro = ultima && (!ultima.waiting_since || agoraS - ultima.waiting_since <= JANELA_ESPERA_S);
+          if (lista.length >= 25 && dentro && p < 8) return pagina(p + 1);
+          var e = esperaRecente(todas, agoraS, JANELA_ESPERA_S);
+          e.mais = lista.length >= 25 && !!dentro;
+          return e;
+        });
+      }
+      return pagina(1);
     }, AGORA_MS);
     d.serieConversas = obter('s:conv:' + conta + c.chaveDim + c.sufixo(c.p), function () { return cw(c.rep(c.p, 'conversations_count', 'day')); });
     d.serieRecebidas = obter('s:rec:' + conta + c.chaveDim + c.sufixo(c.p), function () { return cw(c.rep(c.p, 'incoming_messages_count', 'day')); });
@@ -1480,7 +1518,7 @@
     if (!ag) return carregando();
     var t = [
       ['Abertas agora', ag.open, 'conversas em aberto'],
-      ['Sem resposta', ag.unattended, 'a equipe ainda não respondeu'],
+      ['Lead falou por último', ag.unattended, 'abertas; inclui antigas que ninguém fechou'],
       ['Sem atendente', ag.unassigned, 'ninguém atribuído'],
       ['Pendentes', ag.pending, 'aguardando retorno'],
     ];
@@ -1701,7 +1739,7 @@
     var f = m.ctx.f;
     var lista = alertas({
       conta: estado.conta, quadro: quadro(), agora: m.agora && { unattended: num(m.agora.unattended), open: num(m.agora.open), unassigned: num(m.agora.unassigned) },
-      esperaMaisAntiga: m.espera, funil: m.funil,
+      espera: m.espera, funil: m.funil,
       caixas: (pronto(d.tabCaixas) ? linhasPorNome(listaDe(d.caixas), pronto(d.tabCaixas)) : []).map(function (l) { return { nome: l.nome, conversas: l.conversas }; }),
       atendentes: { todosSemAtividade: false, abertas: m.agora ? num(m.agora.open) : 0 },
     });

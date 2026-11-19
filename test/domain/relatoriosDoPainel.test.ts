@@ -138,13 +138,38 @@ describe('variacao e numeros-chave', () => {
 });
 
 describe('alertas', () => {
-  const base = { conta: 7, quadro: 13, agora: { unattended: 321, open: 1004, unassigned: 1004 }, esperaMaisAntiga: 3 * 86400 };
+  const base = {
+    conta: 7, quadro: 13, agora: { unattended: 321, open: 1004, unassigned: 1004 },
+    espera: { recentes: 43, maisAntiga: 3 * 86400, mais: false },
+  };
 
-  test('sem resposta vem primeiro, com a espera mais antiga e o link da lista certa', () => {
+  test('sem resposta conta so quem espera ha ate 7 dias; as antigas ficam no detalhe', () => {
     const a = j(R.alertas({ ...base, caixas: [{ nome: 'Site', conversas: 0 }], atendentes: { todosSemAtividade: true, abertas: 1004 } }));
     expect(a[0]).toMatchObject({ id: 'semresposta', nivel: 'alto', href: '/app/accounts/7/unattended/conversations' });
+    expect(a[0].titulo).toBe('43 leads esperando resposta');
     expect(a[0].detalhe).toMatch(/3 d/);
+    expect(a[0].detalhe).toMatch(/278 paradas há mais de 7 dias/);
     expect(a.map((x: any) => x.id)).toEqual(['semresposta', 'caixaSite', 'sematendente']);
+  });
+
+  test('sem resposta: nenhuma recente = sem alerta, mesmo com antigas; espera ainda chegando = sem alerta', () => {
+    const nada = j(R.alertas({ ...base, espera: { recentes: 0, maisAntiga: null, mais: false }, caixas: [] }));
+    expect(nada.some((x: any) => x.id === 'semresposta')).toBe(false);
+    const semEspera = j(R.alertas({ ...base, espera: null, caixas: [] }));
+    expect(semEspera.some((x: any) => x.id === 'semresposta')).toBe(false);
+  });
+
+  test('esperaRecente: conta so ate a janela e acha a mais antiga dentro dela', () => {
+    const agora = 1_000_000;
+    const conversas = [
+      { waiting_since: agora - 60 },
+      { waiting_since: agora - 2 * 86400 },
+      { waiting_since: null },
+      { waiting_since: agora - 6 * 86400 },
+      { waiting_since: agora - 9 * 86400 },
+    ];
+    expect(j(R.esperaRecente(conversas, agora, 7 * 86400))).toEqual({ recentes: 3, maisAntiga: 6 * 86400 });
+    expect(j(R.esperaRecente([], agora, 7 * 86400))).toEqual({ recentes: 0, maisAntiga: null });
   });
 
   test('funil: lead parado na primeira etapa, card velho e maior perda', () => {
