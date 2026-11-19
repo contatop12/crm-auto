@@ -109,7 +109,7 @@ export function validarFraseDeEntrada(
     return `mensagem curta demais (mínimo ${FRASE_MINIMA} letras): casaria com conversa comum`;
   }
   if (plataforma !== 'google' && plataforma !== 'meta' && plataforma !== 'gmn') {
-    return 'escolha Google Ads, Meta Ads ou Google Meu Negócio';
+    return 'escolha Google Ads, Meta Ads ou GMN';
   }
   return null;
 }

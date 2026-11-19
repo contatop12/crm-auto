@@ -113,7 +113,7 @@ describe('validarFraseDeEntrada', () => {
   test('recusa vazia, curta demais e plataforma desconhecida', () => {
     expect(validarFraseDeEntrada('  ', 'google')).toMatch(/cole/);
     expect(validarFraseDeEntrada('oi!', 'google')).toMatch(/curta/);
-    expect(validarFraseDeEntrada(FRASE_PADRAO_GOOGLE, 'tiktok')).toMatch(/Google Ads, Meta Ads ou Google Meu Negócio/);
+    expect(validarFraseDeEntrada(FRASE_PADRAO_GOOGLE, 'tiktok')).toMatch(/Google Ads, Meta Ads ou GMN/);
   });
 
   test('repetida ignora acento, caixa e espaco', () => {
