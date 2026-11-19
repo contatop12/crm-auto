@@ -81,8 +81,9 @@ export function buildLabels(i: LabelInput, vocabulario: LabelVocabulary[]): Labe
   // vocabulario de antes, e desde 11/09 os leads delas saiam sem a rede.
   if (i.plataforma === 'google') quer('google', 'google-ads');
   if (i.plataforma === 'meta') quer(redeDoMeta(i.utmSource), 'meta-ads');
-  // A Persianas ja' tinha `gmn` no Chatwoot; os outros ganharam `google-meu-negocio`.
-  if (i.plataforma === 'gmn') quer('google-meu-negocio', 'gmn');
+  // A Persianas ja' tinha `gmn`; os outros tinham `google-meu-negocio`, renomeada
+  // para `gmn` em 19/11/2026 (migration 0043). A velha fica de reserva.
+  if (i.plataforma === 'gmn') quer('gmn', 'google-meu-negocio');
 
   if (i.viaSite) quer('site');
   // `msg-site`/`msg-nat` sao so' do Google e ja' entraram no lugar da origem.

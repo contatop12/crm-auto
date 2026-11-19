@@ -243,7 +243,7 @@ describe('atribuirLead', () => {
   test('lead do Google Meu Negocio pelo site: entra no funil, com a etiqueta, sem conversao', async () => {
     const { env, exec, consultar } = cenario();
     exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
-          VALUES (1, 'google-meu-negocio', 'google-meu-negocio', NULL)`);
+          VALUES (1, 'gmn', 'gmn', NULL)`);
     exec(`UPDATE leads SET gclid = NULL, utm_source = 'google', utm_medium = 'organic', utm_campaign = 'meu_negocio',
           utm_id = NULL WHERE tenant_id = 1`);
     etiquetasAtuais = [];
@@ -254,7 +254,7 @@ describe('atribuirLead', () => {
     const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
     expect(attrs.funil).toBe('PROMOVER');
     const corpo = corpoDe<{ labels: string[] }>(/labels/);
-    expect(corpo.labels).toContain('google-meu-negocio');
+    expect(corpo.labels).toContain('gmn');
     expect(corpo.labels).not.toContain('google');
     expect(corpo.labels).not.toContain('mensagem');
     expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
@@ -265,7 +265,7 @@ describe('atribuirLead', () => {
     const { env, exec, consultar } = cenario();
     exec(`DELETE FROM leads WHERE tenant_id = 1`);
     exec(`INSERT INTO label_vocabulary (tenant_id, slug, label_chatwoot, label_whatsapp)
-          VALUES (1, 'google-meu-negocio', 'google-meu-negocio', NULL)`);
+          VALUES (1, 'gmn', 'gmn', NULL)`);
     exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
           VALUES (1, 'Olá, vim pelo anúncio do Google!', 'mensagem', 'google'),
                  (1, 'Olá, vim pelo Google Meu Negócio!', 'mensagem', 'gmn')`);
@@ -277,7 +277,7 @@ describe('atribuirLead', () => {
     expect(leads[0]!.utm_source).toBe('gmn');
     const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
     expect(attrs.funil).toBe('PROMOVER');
-    expect(corpoDe<{ labels: string[] }>(/labels/).labels).toEqual(expect.arrayContaining(['google-meu-negocio']));
+    expect(corpoDe<{ labels: string[] }>(/labels/).labels).toEqual(expect.arrayContaining(['gmn']));
     expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
   });
 

@@ -2915,7 +2915,7 @@
               const meta = f.plataforma === 'meta';
               const perfil = f.plataforma === 'gmn';
               return '<tr><td>' + esc(f.frase) + '</td><td>' + (perfil ? 'GMN' : meta ? 'Meta Ads' : 'Google Ads') + '</td>' +
-                '<td class="mono">' + (perfil ? 'google-meu-negocio' : meta ? 'mensagem' : 'msg-nat') + '</td>' +
+                '<td class="mono">' + (perfil ? 'gmn' : meta ? 'mensagem' : 'msg-nat') + '</td>' +
                 '<td title="' + esc(hora(f.created_at)) + '">' + haQuanto(f.created_at) + '</td>' +
                 '<td><button class="f-del" data-f="' + f.id + '">remover</button></td></tr>';
             }).join('') + '</tbody></table>'

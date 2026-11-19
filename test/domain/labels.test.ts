@@ -161,25 +161,26 @@ describe('buildLabels com o vocabulario antigo', () => {
 describe('buildLabels do Perfil da Empresa no Google', () => {
   const comPerfil: LabelVocabulary[] = [
     ...vocab,
-    { slug: 'google-meu-negocio', labelChatwoot: 'google-meu-negocio', labelWhatsapp: null },
+    { slug: 'gmn', labelChatwoot: 'gmn', labelWhatsapp: null },
   ];
 
   test('mensagem do perfil leva so a etiqueta do perfil', () => {
     // `mensagem` e' a etiqueta da Meta; `google` e' do anuncio
     const r = buildLabels({ origem: 'mensagem', plataforma: 'gmn' }, comPerfil);
-    expect(r.slugs).toEqual(['google-meu-negocio']);
+    expect(r.slugs).toEqual(['gmn']);
+    expect(r.chatwoot).toEqual(['gmn']);
   });
 
   test('formulario do perfil mantem a origem formulario', () => {
     const r = buildLabels({ origem: 'formulario', plataforma: 'gmn' }, comPerfil);
-    expect(r.slugs).toEqual(['formulario', 'google-meu-negocio']);
+    expect(r.slugs).toEqual(['formulario', 'gmn']);
   });
 
-  test('Persianas usa a gmn que ja tinha', () => {
+  test('vocabulario ainda com google-meu-negocio continua valendo', () => {
     const r = buildLabels(
       { origem: 'mensagem', plataforma: 'gmn' },
-      [...vocab, { slug: 'gmn', labelChatwoot: 'gmn', labelWhatsapp: null }],
+      [...vocab, { slug: 'google-meu-negocio', labelChatwoot: 'google-meu-negocio', labelWhatsapp: null }],
     );
-    expect(r.slugs).toEqual(['gmn']);
+    expect(r.slugs).toEqual(['google-meu-negocio']);
   });
 });
