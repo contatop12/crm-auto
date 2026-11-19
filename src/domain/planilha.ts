@@ -24,7 +24,7 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'hora', rotulo: 'Hora do clique' },
   { campo: 'canal', rotulo: 'Canal do anúncio' },
   { campo: 'plataforma', rotulo: 'Plataforma (google / meta)' },
-  { campo: 'origem_anuncio', rotulo: 'Origem do anúncio (google / facebook / instagram / gpt / outro) — coluna ORIGEM' },
+  { campo: 'origem_anuncio', rotulo: 'Origem do anúncio (google / gmn / facebook / instagram / gpt / outro) — coluna ORIGEM' },
   { campo: 'campanha', rotulo: 'Campanha' },
   { campo: 'pagina', rotulo: 'Página de entrada, sem domínio' },
   { campo: 'pagina_url', rotulo: 'Página de entrada com domínio, sem parâmetros (coluna URL)' },

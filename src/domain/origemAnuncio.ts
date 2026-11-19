@@ -2,7 +2,8 @@ import { ehDoPerfilGoogle } from './platform';
 
 /**
  * A plataforma de onde o lead veio, para a coluna ORIGEM da planilha de leads:
- * google, facebook, instagram, meta, gpt, outro — ou vazio, sem evidencia.
+ * google, gmn, facebook, instagram, meta, gpt, outro — ou vazio, sem evidencia.
+ * `gmn` e' o Perfil da Empresa no Google (era `google-meu-negocio` ate' 19/11/2026).
  *
  * "Canal" continua dizendo o TIPO de entrada ("Campanha de Mensagem - Google",
  * "Campanha de Formulario - Direto") e e' lido pelos fluxos de aviso; ORIGEM
@@ -13,7 +14,7 @@ import { ehDoPerfilGoogle } from './platform';
  */
 
 export type OrigemAnuncio =
-  | 'google' | 'google-meu-negocio' | 'facebook' | 'instagram' | 'meta' | 'gpt' | 'outro' | '';
+  | 'google' | 'gmn' | 'facebook' | 'instagram' | 'meta' | 'gpt' | 'outro' | '';
 
 export interface SinaisDeOrigem {
   utm_source?: string | null;
@@ -51,7 +52,7 @@ export function origemDoAnuncio(s: SinaisDeOrigem): OrigemAnuncio {
   if (ehDoPerfilGoogle({
     utmSource: s.utm_source, utmMedium: s.utm_medium, utmCampaign: s.utm_campaign,
     gclid: s.gclid, gbraid: s.gbraid, wbraid: s.wbraid,
-  })) return 'google-meu-negocio';
+  })) return 'gmn';
   const fonte = normalizar(s.utm_source);
   const ref = hostDo(s.referrer);
   if (/chatgpt|openai|\bgpt\b/.test(fonte) || /chatgpt\.com|openai\.com/.test(ref)) return 'gpt';

@@ -9,9 +9,9 @@ describe('origemDoAnuncio', () => {
   });
 
   test('o link do Perfil da Empresa no Google tem ORIGEM propria, mesmo citado pelo ChatGPT', () => {
-    expect(origemDoAnuncio({ utm_source: 'google', utm_medium: 'organic', utm_campaign: 'meu_negocio' })).toBe('google-meu-negocio');
-    expect(origemDoAnuncio({ utm_source: 'chatgpt.com', utm_medium: 'organic', utm_campaign: 'meu_negocio' })).toBe('google-meu-negocio');
-    expect(origemDoAnuncio({ utm_source: 'google_meu_negocio', utm_campaign: 'google_meu_negocio' })).toBe('google-meu-negocio');
+    expect(origemDoAnuncio({ utm_source: 'google', utm_medium: 'organic', utm_campaign: 'meu_negocio' })).toBe('gmn');
+    expect(origemDoAnuncio({ utm_source: 'chatgpt.com', utm_medium: 'organic', utm_campaign: 'meu_negocio' })).toBe('gmn');
+    expect(origemDoAnuncio({ utm_source: 'google_meu_negocio', utm_campaign: 'google_meu_negocio' })).toBe('gmn');
     // dentro de anuncio local, com gclid, e' o Ads
     expect(origemDoAnuncio({ utm_source: 'google', utm_campaign: 'meu_negocio', gclid: 'Cj0' })).toBe('google');
   });
