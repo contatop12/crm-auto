@@ -835,5 +835,61 @@ describe('atribuirLead', () => {
 
       expect(corpoDe<{ labels: string[] }>(/\/labels$/).labels).toEqual(expect.arrayContaining(['google']));
     });
+
+    describe('o que o telefone acha na volta', () => {
+      /** Ciclo anterior de clique (sem formulario): no casamento pelo telefone ganha o mais novo. */
+      function voltaDeClique() {
+        const ctx = volta();
+        ctx.exec(`UPDATE leads SET origem = 'clique', evento = 'whatsapp_click', quiz_version = NULL, quiz_valor = NULL,
+                  quiz_form_id = NULL WHERE protocol = '${ANTIGO}'`);
+        return ctx;
+      }
+
+      test('retentativa da fila: a copia continua copia, sem etiqueta e sem segunda linha', async () => {
+        // na segunda execucao o telefone acha a propria copia (a mais nova), que
+        // ainda nao esta' em `usados`: nem por isso ela vira anuncio novo
+        const { env, consultar, exec, retorno } = voltaDeClique();
+        exec(`UPDATE tenant_config SET evo_instancia = 'vita' WHERE tenant_id = 1`);
+        etiquetasAtuais = [];
+
+        const primeira = await atribuirLead(env, 1, mensagem('Voltei'), { retorno });
+        const segunda = await atribuirLead(env, 1, mensagem('Voltei'), { retorno });
+
+        expect([primeira.status, segunda.status]).toEqual(['ok', 'ok']);
+        expect(consultar(`SELECT protocol FROM leads WHERE tenant_id = 1 AND protocol LIKE '%-R%'`))
+          .toEqual([{ protocol: `${ANTIGO}-R1` }]);
+        expect(chamadas.filter((c) => /labels/.test(c.url))).toEqual([]);
+        expect(chamadas.filter((c) => /evo\.teste/.test(c.url))).toEqual([]);
+      });
+
+      test('formulario mais velho que o ciclo anterior, nunca usado: nao e anuncio novo, vale a copia', async () => {
+        // no casamento pelo telefone o formulario ganha do clique; mas o que e'
+        // anterior ao ultimo ciclo nao pode ter trazido o lead agora
+        const { env, consultar, exec, retorno, criarCard } = voltaDeClique();
+        exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_key, utm_source, origem, evento, created_at)
+              VALUES (1, 'VITA-MFORM00001', 'Vital', '1199990000', 'google', 'formulario', 'form_submit',
+                      datetime('now', '-60 day'))`);
+
+        await atribuirLead(env, 1, mensagem('Oi, quero outro orcamento'), { retorno });
+
+        const ciclo = lead(consultar, `${ANTIGO}-R1`);
+        expect(ciclo?.retorno_de).toBe(ANTIGO);
+        expect(criarCard.mock.calls[0]![0].protocolo).toBe(`${ANTIGO}-R1`);
+        expect(lead(consultar, 'VITA-MFORM00001')!.nome).toBe('Vital');
+      });
+
+      test('clique mais novo que o ciclo anterior, nunca usado: e o anuncio novo', async () => {
+        const { env, consultar, exec, retorno, criarCard } = voltaDeClique();
+        exec(`INSERT INTO leads (tenant_id, protocol, phone_key, gclid, utm_source, utm_medium, utm_campaign, origem, evento, created_at)
+              VALUES (1, 'VITA-MNOVO00004', '1199990000', 'Cj0novo', 'google', 'cpc', 'Vita - Search - Novo', 'clique',
+                      'whatsapp_click', datetime('now', '-2 day'))`);
+
+        await atribuirLead(env, 1, mensagem('Oi, quero outro orcamento'), { retorno });
+
+        expect(lead(consultar, `${ANTIGO}-R1`)).toBeUndefined();
+        expect(criarCard.mock.calls[0]![0].protocolo).toBe('VITA-MNOVO00004');
+        expect(lead(consultar, 'VITA-MNOVO00004')!.retorno_de).toBeNull();
+      });
+    });
   });
 });

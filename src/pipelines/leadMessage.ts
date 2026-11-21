@@ -4,7 +4,7 @@ import { EvolutionClient } from '../clients/evolution';
 import { GoogleAdsClient } from '../clients/googleAds';
 import { findProtocol } from '../domain/protocol';
 import { phoneKey, normFone } from '../domain/phone';
-import { matchLead } from '../domain/matching';
+import { matchLead, parseDataBR } from '../domain/matching';
 import { detectPlatform, detectOrigin, classifyCampaign } from '../domain/platform';
 import { buildLabels } from '../domain/labels';
 import { utmsDoCard, precisaResolverNome } from '../domain/padroes';
@@ -207,14 +207,22 @@ export async function atribuirLead(
       : null;
   }
 
-  // Volta: protocolo que um ciclo desta conversa ja' usou nao e' anuncio novo
-  // (o clique antigo achado pelo telefone, ou a mensagem antiga repetida). Sem
-  // anuncio novo, o ciclo herda a origem do anterior: as conversoes voltam para
-  // a mesma campanha.
-  let herdado = false;
-  if (retorno && (!lead || retorno.usados.includes(lead.protocol))) {
-    lead = await leadHerdado(env, tenantId, retorno);
-    herdado = !!lead;
+  // Volta: anuncio novo e' o que trouxe o lead AGORA. Nao e':
+  // - protocolo que um ciclo desta conversa ja' usou (o clique antigo achado
+  //   pelo telefone, ou a mensagem antiga repetida);
+  // - o que o telefone acha de antes do ciclo anterior, mesmo nunca usado: no
+  //   casamento o formulario ganha do clique e devolveria um lead velho.
+  // Sem anuncio novo, o ciclo herda a origem do anterior: as conversoes voltam
+  // para a mesma campanha.
+  if (retorno) {
+    const anterior = await linhaDoAnterior(env, tenantId, retorno.anterior);
+    const peloTelefone = !protocoloDito && !anuncio && !clid && !!leadDoClique;
+    // `parseDataBR`: o importador de cliques ja' gravou mais de um formato
+    const velho = peloTelefone && !!lead && !!anterior
+      && parseDataBR(lead.created_at) <= parseDataBR(anterior.created_at);
+    if (!lead || retorno.usados.includes(lead.protocol) || velho) {
+      lead = anterior ? await leadHerdado(env, tenantId, anterior, retorno.n) : null;
+    }
   }
 
   if (!lead) {
@@ -235,6 +243,11 @@ export async function atribuirLead(
     // contato na primeira mensagem depois da integracao).
     return { status: 'ignorado', motivo: retorno ? MOTIVO_VOLTA_SEM_LEAD : semLead };
   }
+
+  // O ciclo e' a copia do anterior? Fato da linha, nao do caminho que a achou:
+  // na retentativa da fila o telefone acha a propria copia (a mais nova), que
+  // ainda nao esta' em `usados`.
+  const cicloHerdado = !!retorno && lead.evento === 'retorno';
 
   const sinais = {
     utmSource: lead.utm_source,
@@ -292,7 +305,7 @@ export async function atribuirLead(
   // nao passa por lead novo. Ate' 09/11/2026 isto marcava o aviso como
   // 'ignorado' e a Martinelli perdeu 11 avisos de leads reais em 07 e 08/11.
   // Volta com o protocolo antigo repetido nao e' entrega atrasada: o lead e' a copia.
-  if (protocoloDito && leadDoClique && lead === leadDoClique) {
+  if (protocoloDito && leadDoClique && !cicloHerdado) {
     const atraso = atrasoDaMensagem(leadDoClique.created_at, Date.now());
     if (atraso.atrasada) {
       console.log(JSON.stringify({ acao: 'mensagem_atrasada', protocolo: lead.protocol, conversa: conversaId, horas: atraso.horas }));
@@ -444,7 +457,7 @@ export async function atribuirLead(
   const vocab = await vocabulario(env, tenantId);
   // A copia herda a origem do primeiro ciclo, cujas etiquetas a conversa ja'
   // tem: recalcular pelo `evento = 'retorno'` acrescentaria um `msg-site` errado.
-  const etiquetas = herdado ? { slugs: [], chatwoot: [], whatsapp: [] } : buildLabels(
+  const etiquetas = cicloHerdado ? { slugs: [], chatwoot: [], whatsapp: [] } : buildLabels(
     {
       origem,
       plataforma,
@@ -602,6 +615,20 @@ const HERDADAS = `nome, email, phone_raw, phone_e164, phone_key,
                   utm_id, utm_term, utm_content, fbp, fbc, client_id, ctwa_clid,
                   page_url, whatsapp_url, referrer, user_agent, ip_address`;
 
+interface LinhaAnterior {
+  protocol: string;
+  retorno_de: string | null;
+  created_at: string;
+}
+
+/** A linha do ciclo anterior em `leads`; null = nao havia lead, ou ha' o protocolo sem linha. */
+async function linhaDoAnterior(env: Env, tenantId: number, protocolo: string | null): Promise<LinhaAnterior | null> {
+  if (!protocolo) return null;
+  return env.DB.prepare('SELECT protocol, retorno_de, created_at FROM leads WHERE tenant_id = ? AND protocol = ?')
+    .bind(tenantId, protocolo)
+    .first<LinhaAnterior>();
+}
+
 /**
  * Volta sem anuncio novo: o lead do ciclo e' uma copia do anterior.
  *
@@ -610,15 +637,9 @@ const HERDADAS = `nome, email, phone_raw, phone_e164, phone_key,
  * Google olha; `created_at` e' agora, a hora da volta na Geral e no aviso.
  * `DO NOTHING`: a retentativa da fila acha a copia feita e segue.
  */
-async function leadHerdado(env: Env, tenantId: number, r: ModoRetorno): Promise<LinhaLead | null> {
-  if (!r.anterior) return null;
-  const ant = await env.DB.prepare('SELECT protocol, retorno_de FROM leads WHERE tenant_id = ? AND protocol = ?')
-    .bind(tenantId, r.anterior)
-    .first<{ protocol: string; retorno_de: string | null }>();
-  if (!ant) return null;
-
+async function leadHerdado(env: Env, tenantId: number, ant: LinhaAnterior, n: number): Promise<LinhaLead | null> {
   const raiz = ant.retorno_de ?? ant.protocol;
-  const protocolo = protocoloDoCiclo(raiz, r.n);
+  const protocolo = protocoloDoCiclo(raiz, n);
   await env.DB.prepare(
     `INSERT INTO leads (tenant_id, protocol, ${HERDADAS}, origem, evento, retorno_de, clique_em)
      SELECT tenant_id, ?, ${HERDADAS}, 'mensagem', 'retorno', ?, COALESCE(clique_em, created_at)
