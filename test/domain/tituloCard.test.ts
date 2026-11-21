@@ -65,4 +65,21 @@ describe('tituloDoCard', () => {
   test('o card orfao continua achando a conversa pelo titulo novo', () => {
     expect(conversaCitada(tituloDoCard('Conversa #28 - Carol Nunes', FONE, 'Carol Nunes'))).toBe(28);
   });
+
+  test('o sufixo da volta (#n) fica no fim quando o nome muda', () => {
+    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital Novo'))
+      .toBe('#1240 - 5511999990000 - Vital Novo #1');
+  });
+
+  test('titulo da volta ja certo nao troca', () => {
+    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital')).toBeNull();
+  });
+
+  test('volta sem nome no titulo', () => {
+    expect(tituloDoCard('#1240 - 5511999990000 #1', '+5511999990000', null)).toBeNull();
+  });
+
+  test('Instagram (sem telefone) com sufixo continua null', () => {
+    expect(tituloDoCard('#1240 - Vital #1', null, 'Vital')).toBeNull();
+  });
 });

@@ -1,5 +1,6 @@
 import { nomeUtil } from './nomeLead';
 import { normFone } from './phone';
+import { semVolta, voltaDoTitulo } from './retorno';
 
 /**
  * Titulo do card do Kanban: "#1240 - 5511932346062 - Vital".
@@ -23,7 +24,10 @@ export function tituloDoCard(
   nome: string | null | undefined,
 ): string | null {
   const atual = String(titulo ?? '');
-  const m = TITULO_DO_CARD.exec(atual);
+  // " #n" no fim e' a volta do lead (ver retorno.ts): sai antes do regex e
+  // volta no fim, senao o "#n" viraria parte do nome e o nome novo o apagaria
+  const volta = voltaDoTitulo(atual);
+  const m = TITULO_DO_CARD.exec(volta ? semVolta(atual) : atual);
   // card criado a mao: o titulo e' de quem criou
   if (!m) return null;
 
@@ -43,6 +47,7 @@ export function tituloDoCard(
   const doTitulo = (m[2] ?? '').replace(/^\+?\d{10,}\s*(?:-\s*)?/, '');
   const quem = nomeUtil(nome, { telefone }) ?? nomeUtil(doTitulo, { telefone });
 
-  const novo = quem ? `#${m[1]} - ${digitos} - ${quem}` : `#${m[1]} - ${digitos}`;
+  const base = quem ? `#${m[1]} - ${digitos} - ${quem}` : `#${m[1]} - ${digitos}`;
+  const novo = volta ? `${base} #${volta}` : base;
   return novo === atual ? null : novo;
 }
