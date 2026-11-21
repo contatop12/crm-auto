@@ -35,6 +35,7 @@ export const CAMPOS_PLANILHA: Array<{ campo: string; rotulo: string }> = [
   { campo: 'link_anuncio', rotulo: 'Link do anúncio do Meta (post)' },
   { campo: 'protocolo', rotulo: 'Protocolo' },
   { campo: 'nome', rotulo: 'Nome do lead' },
+  { campo: 'volta', rotulo: 'Volta do lead (0 = primeiro ciclo; 1, 2... = voltou depois de Ganho/Perda)' },
   { campo: 'telefone', rotulo: 'Telefone (55 + DDD + número)' },
   { campo: 'link_whatsapp', rotulo: 'Link do WhatsApp' },
   { campo: 'email', rotulo: 'E-mail' },
@@ -85,6 +86,8 @@ export interface LeadDaPlanilha {
   valor_proposta?: number | null;
   /** `datetime('now')` do D1: UTC, `YYYY-MM-DD HH:MM:SS` */
   created_at?: string | null;
+  /** Numero da volta do lead (lead que volta); NULL ou 0 = primeiro ciclo. */
+  volta?: number | null;
 }
 
 export interface ContextoPlanilha {
@@ -289,6 +292,9 @@ export function montarRegistro(
       ? t(lead?.page_url) : '',
     protocolo: ctx.protocolo,
     nome: nomeLead,
+    // A linha da volta na Geral e' a do telefone com " #n" no NOME; quem diz
+    // que o lead E' uma volta e' este dado, nao o nome (o perfil "Ana #2" nao e').
+    volta: Number(lead?.volta) > 0 ? Number(lead?.volta) : 0,
     // a planilha de leads ja' guardava o numero assim (5511...), sem o `+`
     telefone: digitos,
     link_whatsapp: digitos ? `https://wa.me/${digitos}` : '',
@@ -547,11 +553,16 @@ export function linhaDoTelefone(cabecalho: string[], corpo: string[][], telefone
 /**
  * A linha do lead com este telefone NESTA volta, ou -1.
  *
- * O lead que volta (cartao novo, ciclo novo) tem outra linha com o mesmo
- * telefone: o NOME termina em " #n". A planilha e' reordenada por outro processo,
- * entao "a primeira" nao e' "a mais antiga": a volta 0 pula as linhas com sufixo
- * e a volta n so' casa com o sufixo exato. Sem coluna NOME nao ha como distinguir:
- * vale a primeira do telefone, como sempre foi.
+ * O lead que volta (card novo, ciclo novo) tem outra linha com o mesmo
+ * telefone: o NOME termina em " #n". `volta` vem do dado (`leads.volta`,
+ * `retornos`), nunca do nome do lead, entao so' a volta n > 0 exige o sufixo
+ * exato.
+ *
+ * A volta 0 e' o lead de sempre, que pode ter um nome terminado em " #2" sem
+ * ser volta nenhuma: prefere a linha do telefone sem sufixo (a planilha e'
+ * reordenada por outro processo, entao a primeira nao e' a mais antiga) e, sem
+ * ela, fica com a primeira do telefone, exatamente como antes da volta existir.
+ * Sem coluna NOME nao ha como distinguir: vale a primeira do telefone.
  */
 export function linhaDoLead(cabecalho: string[], corpo: string[][], telefone: string, volta: number): number {
   const alvo = phoneKey(telefone);
@@ -560,12 +571,23 @@ export function linhaDoLead(cabecalho: string[], corpo: string[][], telefone: st
     .map((h, i) => ({ campo: campoDaColunaLeads(h), i }))
     .filter((c) => c.campo === 'telefone' || c.campo === 'link_whatsapp')
     .map((c) => c.i);
+  const doTelefone = (l: string[]) => colunas.some((i) => phoneKey(l[i] ?? '') === alvo);
+  if (cabecalho.findIndex((h) => campoDaColunaLeads(h) === 'nome') < 0) return corpo.findIndex(doTelefone);
+  if (volta > 0) return corpo.findIndex((l) => doTelefone(l) && voltaDaLinha(cabecalho, l) === volta);
+  const semSufixo = corpo.findIndex((l) => doTelefone(l) && voltaDaLinha(cabecalho, l) === 0);
+  return semSufixo >= 0 ? semSufixo : corpo.findIndex(doTelefone);
+}
+
+/**
+ * O " #n" do NOME desta linha da aba, 0 = sem sufixo ou aba sem NOME.
+ *
+ * Serve a releitura: a linha relida tem de ser a mesma que `linhaDoLead`
+ * escolheu (telefone e sufixo), mesmo quando a volta 0 caiu numa linha com
+ * " #2" por nao haver outra.
+ */
+export function voltaDaLinha(cabecalho: string[], linha: string[]): number {
   const iNome = cabecalho.findIndex((h) => campoDaColunaLeads(h) === 'nome');
-  return corpo.findIndex(
-    (l) =>
-      colunas.some((i) => phoneKey(l[i] ?? '') === alvo) &&
-      (iNome < 0 || voltaDoNome(l[iNome] ?? '') === volta),
-  );
+  return iNome < 0 ? 0 : voltaDoNome(linha[iNome] ?? '');
 }
 
 /**

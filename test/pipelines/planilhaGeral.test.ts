@@ -103,8 +103,9 @@ describe('lead que volta: outra linha com o mesmo telefone', () => {
 
   function comRetorno() {
     const c = cenario();
-    c.exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_e164, utm_source, utm_medium, origem, evento)
-            VALUES (5, 'TAINA-VOLTA-1', 'Vital #1', '+5511999990000', 'instagram', 'mensagem', 'mensagem', 'ctwa')`);
+    // `volta = 1`: a atribuicao em modo de volta grava o numero na linha do lead
+    c.exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_e164, utm_source, utm_medium, origem, evento, volta)
+            VALUES (5, 'TAINA-VOLTA-1', 'Vital #1', '+5511999990000', 'instagram', 'mensagem', 'mensagem', 'ctwa', 1)`);
     abas.Geral!.push(original);
     return c;
   }
@@ -131,6 +132,32 @@ describe('lead que volta: outra linha com o mesmo telefone', () => {
     expect(abas.Geral![1]).toEqual(original);
     expect(abas.Geral![2]![6]).toBe('Vital #1');
     expect(abas.Geral![2]![5]).not.toBe('');
+  });
+});
+
+describe('lead comum com " #n" no nome do perfil: o sufixo e texto, nao volta', () => {
+  function comAna(linhaNaAba: string[]) {
+    const c = cenario();
+    // sem `volta`: lead comum, cujo perfil do WhatsApp se chama "Ana #2"
+    c.exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_e164, utm_source, utm_medium, origem, evento)
+            VALUES (5, 'TAINA-ANA', 'Ana #2', '+5511999990000', 'instagram', 'mensagem', 'mensagem', 'ctwa')`);
+    abas.Geral!.push(linhaNaAba);
+    return c;
+  }
+
+  test('a linha da aba diz "Ana": completa ela, sem segunda linha', async () => {
+    const { env } = comAna(['', '', '', '', '1', '', 'Ana', '5511999990000']);
+    await espelharNaPlanilha(env, 5, { tipo: 'entrada', protocolo: 'TAINA-ANA', ensaio: false });
+    expect(abas.Geral!.length).toBe(2);
+    expect(abas.Geral![1]![6]).toBe('Ana');
+    expect(abas.Geral![1]![5]).not.toBe('');
+  });
+
+  test('a linha da aba diz "Ana #2": e a do telefone, completa ela', async () => {
+    const { env } = comAna(['', '', '', '', '1', '', 'Ana #2', '5511999990000']);
+    await espelharNaPlanilha(env, 5, { tipo: 'entrada', protocolo: 'TAINA-ANA', ensaio: false });
+    expect(abas.Geral!.length).toBe(2);
+    expect(abas.Geral![1]![5]).not.toBe('');
   });
 });
 

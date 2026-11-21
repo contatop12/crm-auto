@@ -654,9 +654,11 @@ async function leadHerdado(env: Env, tenantId: number, ant: LinhaAnterior, n: nu
 }
 
 /**
- * O nome do lead do ciclo termina em " #n": a Geral acha a linha da volta pelo
- * telefone E pelo #n (so' o telefone cairia na linha do ciclo antigo), e o
- * aviso do grupo mostra que e' volta. Vale para a copia e para o anuncio novo.
+ * O lead do ciclo leva a volta como dado (`leads.volta = n`) e o nome termina
+ * em " #n". A Geral acha a linha da volta pelo telefone E pela volta (so' o
+ * telefone cairia na linha do ciclo antigo); o " #n" do NOME e' o que distingue
+ * a linha na aba, e o aviso do grupo mostra que e' volta. Vale para a copia e
+ * para o anuncio novo.
  *
  * O nome e' o que `gravarContatoNoLead` deixaria (o do lead, senao o do
  * contato), pela mesma regra de nome util. Sem nome que preste, "Sem nome #n":
@@ -671,8 +673,8 @@ async function nomearLeadDoCiclo(
 ): Promise<void> {
   const ctx = { telefone: c.telefone, nomesProprios: [c.cliente] };
   const nome = comVolta(nomeUtil(lead.nome, ctx) ?? nomeUtil(c.nome, ctx) ?? SEM_NOME_NO_CICLO, n);
-  await env.DB.prepare(`UPDATE leads SET nome = ?, updated_at = datetime('now') WHERE tenant_id = ? AND protocol = ?`)
-    .bind(nome, tenantId, lead.protocol)
+  await env.DB.prepare(`UPDATE leads SET nome = ?, volta = ?, updated_at = datetime('now') WHERE tenant_id = ? AND protocol = ?`)
+    .bind(nome, n, tenantId, lead.protocol)
     .run();
 }
 

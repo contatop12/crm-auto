@@ -12,6 +12,11 @@ ALTER TABLE tenant_config ADD COLUMN retorno_dias INTEGER;
 ALTER TABLE leads ADD COLUMN retorno_de TEXT;
 ALTER TABLE leads ADD COLUMN clique_em TEXT;
 
+-- O numero da volta do lead do ciclo (copia ou anuncio novo); NULL ou 0 = nao
+-- e' volta. A Geral separa a linha da volta por este dado, nao pelo " #n" do
+-- nome: um perfil do WhatsApp chamado "Ana #2" nao e' volta nenhuma.
+ALTER TABLE leads ADD COLUMN volta INTEGER;
+
 -- Uma linha por volta. As duas UNIQUE seguram a corrida: o mesmo card antigo
 -- so' gera um card novo, e a mesma conversa so' tem uma volta de cada numero,
 -- mesmo que o webhook chegue duas vezes. `desligou_antigo` marca que o card

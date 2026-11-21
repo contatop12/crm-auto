@@ -697,6 +697,23 @@ describe('atribuirLead', () => {
       expect(escritasNoChatwoot()).toEqual([]);
     });
 
+    test('a volta fica como dado na linha do ciclo (`leads.volta`), na copia e no anuncio novo', async () => {
+      // e' por ela, e nao pelo " #n" do nome, que a Geral acha a linha da volta
+      const copia = volta();
+      await atribuirLead(copia.env, 1, mensagem('Oi, quero fazer outro orcamento'), { retorno: copia.retorno });
+      expect(copia.consultar<{ protocol: string; volta: number | null }>(
+        `SELECT protocol, volta FROM leads WHERE protocol LIKE '${ANTIGO}%' ORDER BY protocol`,
+      ))
+        .toEqual([{ protocol: ANTIGO, volta: null }, { protocol: `${ANTIGO}-R1`, volta: 1 }]);
+
+      const anuncio = volta({ retorno: { n: 2 } });
+      anuncio.exec(`INSERT INTO leads (tenant_id, protocol, gclid, utm_source, utm_medium, origem, evento, created_at)
+                    VALUES (1, 'VITA-MNOVO00002', 'Cj0novo', 'google', 'cpc', 'clique', 'whatsapp_click', datetime('now', '-5 minutes'))`);
+      await atribuirLead(anuncio.env, 1, mensagem('Oi! [Protocolo: VITA-MNOVO00002]'), { retorno: anuncio.retorno });
+      expect(anuncio.consultar<{ volta: number | null }>(`SELECT volta FROM leads WHERE protocol = 'VITA-MNOVO00002'`))
+        .toEqual([{ volta: 2 }]);
+    });
+
     test('sem nome aproveitavel: "Sem nome #1", para a Geral ainda achar a linha da volta', async () => {
       const { env, consultar, exec, retorno } = volta();
       exec(`UPDATE leads SET nome = NULL WHERE protocol = '${ANTIGO}'`);

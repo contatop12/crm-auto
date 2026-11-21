@@ -1,10 +1,9 @@
 import type { Env } from '../env';
-import { voltaDoNome } from '../domain/retorno';
 import { postarNaPlanilha } from '../clients/n8n';
 import { SheetsClient } from '../clients/sheets';
 import {
   montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna, campoDaColunaLeads, jaTemTelefone, linhaDoLead,
-  abasDoLead, lerCanaisDaGeral, telefoneEmLink, dataHoraBrasilia,
+  voltaDaLinha, abasDoLead, lerCanaisDaGeral, telefoneEmLink, dataHoraBrasilia,
   type CanalDaGeral, type ContextoPlanilha, type LeadDaPlanilha,
 } from '../domain/planilha';
 
@@ -113,7 +112,7 @@ async function gravarNaPlanilha(
     `SELECT nome, email, phone_e164, gclid, gbraid, wbraid, utm_source, utm_medium,
             utm_campaign, utm_campaign_nome, utm_id, utm_term, utm_content, fbp, fbc, client_id, origem,
             evento, page_url, whatsapp_url, referrer, user_agent, ip_address, quiz_version,
-            quiz_valor, quiz_form_id, valor_proposta, created_at
+            quiz_valor, quiz_form_id, valor_proposta, created_at, volta
      FROM leads WHERE tenant_id = ? AND protocol = ?`,
   )
     .bind(tenantId, ctx.protocolo)
@@ -239,10 +238,12 @@ async function acrescentarLead(
    */
   // Lead que volta tem outra linha com o mesmo telefone, com " #n" no NOME: o
   // telefone sozinho nao diz de quem e' a linha, a volta tambem tem que bater.
-  const volta = voltaDoNome(String(registro.nome ?? ''));
-  const iNome = cab.findIndex((h) => campoDaColunaLeads(h) === 'nome');
-  const doLead = (l: string[]) =>
-    jaTemTelefone([l[iFone] ?? '', l[iLink] ?? ''], telefone) && (iNome < 0 || voltaDoNome(l[iNome] ?? '') === volta);
+  // A volta e' o dado da linha do lead (`leads.volta`), nunca o nome: o perfil
+  // "Ana #2" de um lead comum nao pode ganhar uma segunda linha.
+  const volta = Number(registro.volta) > 0 ? Number(registro.volta) : 0;
+  // a linha relida tem de ter o telefone e o sufixo da que foi escolhida
+  const doLead = (l: string[], sufixo: number) =>
+    jaTemTelefone([l[iFone] ?? '', l[iLink] ?? ''], telefone) && voltaDaLinha(cab, l) === sufixo;
   const completar = (atual: string[]) =>
     cab.map((_, i) => (String(atual[i] ?? '').trim() ? String(atual[i]) : (linha[i] ?? '')));
   const igual = (a: string[], atual: string[]) => a.every((v, i) => v === String(atual[i] ?? ''));
@@ -253,6 +254,7 @@ async function acrescentarLead(
     return;
   }
   if (igual(completar(corpo[n]!), corpo[n]!)) return;
+  let sufixo = voltaDaLinha(cab, corpo[n]!);
 
   /**
    * A posicao lida acima pode nao ser mais a do lead: o script da planilha
@@ -264,14 +266,16 @@ async function acrescentarLead(
   const ultima = indiceParaColuna(cab.length - 1);
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     const atual = await sheets.linha(doc, aba, n + 2, ultima);
-    if (doLead(atual)) {
+    if (doLead(atual, sufixo)) {
       const completa = completar(atual);
       if (!igual(completa, atual)) await sheets.atualizar(doc, aba, n + 2, ultima, completa);
       return;
     }
-    n = linhaDoLead(cab, (await sheets.tudo(doc, aba)).slice(1), telefone, volta);
+    const relido = (await sheets.tudo(doc, aba)).slice(1);
+    n = linhaDoLead(cab, relido, telefone, volta);
     // apagado da aba neste meio tempo: foi o time, nao recria
     if (n < 0) return;
+    sufixo = voltaDaLinha(cab, relido[n]!);
   }
   throw new Error(`o lead mudou de linha a cada leitura da "${aba}"; nada gravado`);
 }

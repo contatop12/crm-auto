@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral, linhaDoTelefone, linhaDoLead, colunaDaEtapa } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral, linhaDoTelefone, linhaDoLead, voltaDaLinha, colunaDaEtapa } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -75,6 +75,13 @@ describe('montarRegistro — planilha de leads', () => {
   test('traz cada campo que a tela promete', () => {
     const r = montarRegistro(conversao, lead);
     for (const { campo } of CAMPOS_PLANILHA) expect(r).toHaveProperty(campo);
+  });
+
+  test('a volta vem da linha do lead (`leads.volta`), nao do nome', () => {
+    expect(montarRegistro(conversao, { ...lead, nome: 'Vital #1', volta: 1 }).volta).toBe(1);
+    // o perfil "Ana #2" de um lead comum nao e' volta
+    expect(montarRegistro(conversao, { ...lead, nome: 'Ana #2', volta: null }).volta).toBe(0);
+    expect(montarRegistro(conversao, null).volta).toBe(0);
   });
 
   test('data e hora sao as do clique, quando o lead chegou', () => {
@@ -421,6 +428,22 @@ describe('etapa do card na coluna Status da Geral', () => {
       expect(linhaDoLead(['TELEFONE'], corpo, '5511999990000', 0)).toBe(0);
       expect(linhaDoLead(['TELEFONE'], corpo, '5511999990000', 1)).toBe(0);
     });
+
+    test('volta 0 sem linha sem sufixo: a primeira do telefone, como antes da volta existir', () => {
+      // o perfil "Ana #2" e' so' um nome: o " #2" nao faz da linha a de uma volta
+      const ana2 = ['5511999990000', 'Ana #2'];
+      expect(linhaDoLead(cabN, [['5511888880000', 'Outro'], ana2], '5511999990000', 0)).toBe(1);
+    });
+
+    test('volta 0 com as duas: a sem sufixo vence, mesmo depois', () => {
+      expect(linhaDoLead(cabN, [['5511999990000', 'Ana #2'], ['5511999990000', 'Ana']], '5511999990000', 0)).toBe(1);
+    });
+  });
+
+  test('voltaDaLinha: o " #n" do NOME da linha; sem coluna NOME, 0', () => {
+    expect(voltaDaLinha(['TELEFONE', 'NOME'], ['5511999990000', 'Vital #1'])).toBe(1);
+    expect(voltaDaLinha(['TELEFONE', 'NOME'], ['5511999990000', 'Vital'])).toBe(0);
+    expect(voltaDaLinha(['TELEFONE'], ['5511999990000'])).toBe(0);
   });
 
   test('coluna Status pelo nome, sem caixa nem acento', () => {
