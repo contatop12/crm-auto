@@ -374,12 +374,23 @@ export async function recuperarRespostasAnteriores(
   if (!conversaId) return null;
   const cw = ChatwootClient.fromEnv(env);
 
+  // Card novo de uma volta: so' conta o que foi dito depois dela. As falas do
+  // ciclo anterior ("segue a proposta") jogariam o card direto para uma etapa
+  // adiante, e quem acabou de voltar comeca de novo em Novo Lead.
+  const volta = await env.DB.prepare(
+    'SELECT created_at FROM retornos WHERE tenant_id = ? AND task_novo = ?',
+  )
+    .bind(tenantId, String(taskId))
+    .first<{ created_at: string }>();
+  // created_at do D1 e' UTC sem T nem Z; sem isso o Date le' como hora local
+  const desde = volta ? Date.parse(`${volta.created_at.replace(' ', 'T')}Z`) : undefined;
+
   // o card de agora, nao o do webhook: outra regra pode te-lo movido no meio
   const [card, stages, triggers, textos] = await Promise.all([
     cw.tarefa(acc, taskId),
     etapas(env, tenantId),
     frases(env, tenantId),
-    cw.textosDoVendedor(acc, conversaId),
+    cw.textosDoVendedor(acc, conversaId, undefined, Number.isFinite(desde) ? desde : undefined),
   ]);
   if (!card || !stages.length || !textos.length) return null;
 

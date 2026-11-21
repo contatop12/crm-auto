@@ -172,6 +172,52 @@ describe('enviarConversao', () => {
     expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
   });
 
+  describe('lead que voltou: o Google so aceita clique de ate 90 dias', () => {
+    const QUANDO = Date.parse('2026-09-03T22:08:49.303Z');
+    const cliqueHaDias = (dias: number, extraMs = 0) => new Date(QUANDO - dias * 86400000 - extraMs).toISOString();
+
+    test('clique de 91 dias: ignora e nao cria linha em conversions', async () => {
+      const { env, exec, consultar } = cenario();
+      exec(`UPDATE leads SET clique_em = '${cliqueHaDias(91)}' WHERE protocol = 'VITA-123'`);
+
+      const r = await enviarConversao(env, 1, card());
+      expect(r).toEqual({
+        status: 'ignorado',
+        motivo: 'VITA-123: clique original com mais de 90 dias, o Google nao aceita a conversao',
+      });
+      expect(chamadas).toHaveLength(0);
+      // a linha e' o dedupe: gravar agora impediria o envio se algo mudar depois
+      expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
+    });
+
+    test('clique de 89 dias segue e sobe', async () => {
+      const { env, exec } = cenario();
+      exec(`UPDATE leads SET clique_em = '${cliqueHaDias(89)}' WHERE protocol = 'VITA-123'`);
+      expect((await enviarConversao(env, 1, card())).status).toBe('ok');
+      expect(chamadas).toHaveLength(1);
+    });
+
+    test('exatamente 90 dias ainda sobe', async () => {
+      const { env, exec } = cenario();
+      exec(`UPDATE leads SET clique_em = '${cliqueHaDias(90)}' WHERE protocol = 'VITA-123'`);
+      expect((await enviarConversao(env, 1, card())).status).toBe('ok');
+    });
+
+    test('clique_em ilegivel nao barra: a conversao segue como sempre', async () => {
+      const { env, exec } = cenario();
+      exec(`UPDATE leads SET clique_em = 'ontem de manha' WHERE protocol = 'VITA-123'`);
+      expect((await enviarConversao(env, 1, card())).status).toBe('ok');
+    });
+
+    test('lead da Meta nao passa por esta regra', async () => {
+      const { env, exec } = cenario();
+      exec(`UPDATE leads SET gclid = NULL, utm_source = 'meta', fbc = 'fb.1.2.3',
+                   clique_em = '${cliqueHaDias(200)}' WHERE protocol = 'VITA-123'`);
+      const r = await enviarConversao(env, 1, card());
+      expect(r.motivo).not.toContain('90 dias');
+    });
+  });
+
   test('lead do Google Meu Negocio nao sobe conversao para lugar nenhum', async () => {
     // O link do perfil leva utm_source=google: sem a trava ele subia pelo
     // telefone e o Ads contava como dele o lead organico (Taina, ate' 17/11).

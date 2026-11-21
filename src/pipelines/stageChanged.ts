@@ -6,6 +6,7 @@ import { espelharNaPlanilha } from './planilha';
 import { criarEventoMeta } from './metaCapi';
 import { destinoDoLead } from '../domain/plataformaLead';
 import { ehDoPerfilGoogle } from '../domain/platform';
+import { parseDataBR } from '../domain/matching';
 import type { EventoMeta } from '../domain/eventoMeta';
 
 /**
@@ -66,7 +67,11 @@ interface Lead {
   origem: string | null;
   evento: string | null;
   created_at: string;
+  /** So' no lead copiado de um ciclo anterior: o clique original, que o Google confere. */
+  clique_em: string | null;
 }
+
+const LIMITE_CLIQUE_GOOGLE_MS = 90 * 86400000;
 
 export async function enviarConversao(
   env: Env,
@@ -116,7 +121,7 @@ export async function enviarConversao(
 
   const lead = await env.DB.prepare(
     `SELECT email, phone_e164, phone_key, gclid, gbraid, wbraid, valor_proposta, utm_source,
-            utm_medium, utm_campaign, fbc, ctwa_clid, origem, evento, created_at
+            utm_medium, utm_campaign, fbc, ctwa_clid, origem, evento, created_at, clique_em
      FROM leads WHERE tenant_id = ? AND protocol = ?`,
   )
     .bind(tenantId, protocolo)
@@ -153,6 +158,20 @@ export async function enviarConversao(
    */
   if (destinoDoLead(lead).plataforma === 'meta') {
     return criarEventoMeta(env, tenantId, { etapa, protocolo, lead, valorDoCard: num(p.value), quando });
+  }
+
+  /**
+   * O Google recusa conversao de clique com mais de 90 dias, e o lead que voltou
+   * leva o clique do primeiro ciclo. Fica de fora antes do INSERT: a linha em
+   * `conversions` e' o dedupe, e gravar uma conversao que nunca sobe a deixaria
+   * como erro eterno na fila. `clique_em` ilegivel nao barra (parseDataBR = 0).
+   */
+  const clique = parseDataBR(lead.clique_em);
+  if (clique && quando - clique > LIMITE_CLIQUE_GOOGLE_MS) {
+    return {
+      status: 'ignorado',
+      motivo: `${protocolo}: clique original com mais de 90 dias, o Google nao aceita a conversao`,
+    };
   }
 
   if (!etapa.conversion_event) {

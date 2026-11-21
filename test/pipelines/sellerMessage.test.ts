@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fakeD1 } from '../helpers/fakeD1';
-import { moverPelaResposta } from '../../src/pipelines/sellerMessage';
+import { moverPelaResposta, recuperarRespostasAnteriores } from '../../src/pipelines/sellerMessage';
 import type { Env } from '../../src/env';
 
 const FUNIL = 7;
@@ -343,5 +343,59 @@ describe('cliente com mensagem automatica: a que sai colada no lead nao move', (
 
     expect(r.status).toBe('erro');
     expect(moveu()).toBeUndefined();
+  });
+});
+
+describe('recuperarRespostasAnteriores no card de uma volta', () => {
+  const VOLTA = '2026-11-10 12:00:00'; // created_at do D1: UTC, sem T nem Z
+  const seg = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+  const fala = (id: number, iso: string, content: string) =>
+    ({ id, message_type: 1, private: false, content, created_at: seg(iso) });
+
+  function comVolta(mensagens: ReturnType<typeof fala>[]) {
+    const { env, exec } = cenario();
+    exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, task_anterior, task_novo, status, created_at)
+          VALUES (1, 76, 1, '1300', '1421', 'concluido', '${VOLTA}')`);
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const metodo = init.method ?? 'GET';
+      chamadas.push({ metodo, url: String(url), corpo: init.body ? JSON.parse(String(init.body)) : null });
+      if (/\/kanban\/tasks\/1421$/.test(String(url))) return Response.json({ id: 1421, board_step_id: 27 });
+      if (/\/conversations\/76\/messages/.test(String(url))) {
+        return Response.json({ payload: String(url).includes('before=') ? [] : mensagens });
+      }
+      return Response.json({ ok: true });
+    });
+    return env;
+  }
+
+  test('a frase de ANTES da volta nao move o card novo', async () => {
+    const env = comVolta([fala(1, '2026-11-10T11:00:00Z', 'Sua consulta ficou confirmada para terça às 14h.')]);
+    const r = await recuperarRespostasAnteriores(env, 1, 2, 1421, 76);
+    expect(r).toBeNull();
+    expect(moveu()).toBeUndefined();
+  });
+
+  test('a frase de DEPOIS da volta move', async () => {
+    const env = comVolta([
+      fala(1, '2026-11-10T11:00:00Z', 'Estou passando para saber como esta a adaptacao.'),
+      fala(2, '2026-11-10T13:00:00Z', 'Sua consulta ficou confirmada para terça às 14h.'),
+    ]);
+    const r = await recuperarRespostasAnteriores(env, 1, 2, 1421, 76);
+    expect(r).toMatch(/Agendamento Realizado/);
+    expect(moveu()!.corpo).toEqual({ board_step_id: 29 });
+  });
+
+  test('card que nao e de uma volta le a conversa inteira, como sempre', async () => {
+    const env = comVolta([fala(1, '2026-11-10T11:00:00Z', 'Sua consulta ficou confirmada para terça às 14h.')]);
+    // 1421 e' o card novo da volta; o 1500 nao esta em retornos
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      chamadas.push({ metodo: init.method ?? 'GET', url: String(url), corpo: init.body ? JSON.parse(String(init.body)) : null });
+      if (/\/kanban\/tasks\/1500$/.test(String(url))) return Response.json({ id: 1500, board_step_id: 27 });
+      if (/\/conversations\/76\/messages/.test(String(url))) {
+        return Response.json({ payload: String(url).includes('before=') ? [] : [fala(1, '2026-11-10T11:00:00Z', 'Sua consulta ficou confirmada para terça às 14h.')] });
+      }
+      return Response.json({ ok: true });
+    });
+    expect(await recuperarRespostasAnteriores(env, 1, 2, 1500, 76)).toMatch(/Agendamento Realizado/);
   });
 });

@@ -1367,7 +1367,18 @@ admin.get('/tenants/:id/cards-orfaos', async (c) => {
   const nomeBoard = new Map(todosOsBoards.map((b) => [b.id, b.name.trim()]));
   const nomeEtapa = new Map(porBoard.flatMap((b) => b.steps.map((s) => [s.id, s.name] as const)));
 
-  const cards = porBoard.flatMap((b) => classificarCards(b.tasks, vivas.ids)).map((o) => ({
+  // O card que uma volta desligou da conversa fica sem ela de proposito: nao e'
+  // orfao, e' o ciclo antigo do lead que voltou.
+  const { results: desligados } = await c.env.DB.prepare(
+    'SELECT task_anterior FROM retornos WHERE tenant_id = ? AND desligou_antigo = 1',
+  )
+    .bind(id)
+    .all<{ task_anterior: string }>();
+  const deVolta = new Set(desligados.map((r) => String(r.task_anterior)));
+
+  const cards = porBoard.flatMap((b) => classificarCards(b.tasks, vivas.ids))
+    .filter((o) => !deVolta.has(String(o.taskId)))
+    .map((o) => ({
     ...o,
     board: nomeBoard.get(o.boardId) ?? String(o.boardId),
     etapa: nomeEtapa.get(o.stepId) ?? String(o.stepId),
