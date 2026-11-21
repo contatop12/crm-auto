@@ -66,26 +66,50 @@ describe('tituloDoCard', () => {
     expect(conversaCitada(tituloDoCard('Conversa #28 - Carol Nunes', FONE, 'Carol Nunes'))).toBe(28);
   });
 
+  // Card de uma volta: a volta vem de `retornos` (quarto argumento), nao do texto.
   test('o sufixo da volta (#n) fica no fim quando o nome muda', () => {
-    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital Novo'))
+    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital Novo', 1))
       .toBe('#1240 - 5511999990000 - Vital Novo #1');
   });
 
   test('titulo da volta ja certo nao troca', () => {
-    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital')).toBeNull();
+    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital', 1)).toBeNull();
   });
 
   test('volta sem nome no titulo', () => {
-    expect(tituloDoCard('#1240 - 5511999990000 #1', '+5511999990000', null)).toBeNull();
+    expect(tituloDoCard('#1240 - 5511999990000 #1', '+5511999990000', null, 1)).toBeNull();
   });
 
   test('Instagram (sem telefone) com sufixo continua null', () => {
-    expect(tituloDoCard('#1240 - Vital #1', null, 'Vital')).toBeNull();
+    expect(tituloDoCard('#1240 - Vital #1', null, 'Vital', 1)).toBeNull();
   });
 
   test('nome do contato que ja traz o " #n" nao dobra o sufixo', () => {
-    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital #1')).toBeNull();
-    expect(tituloDoCard('#1240 - 5511999990000 - Antigo #1', '+5511999990000', 'Vital #1'))
+    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital #1', 1)).toBeNull();
+    expect(tituloDoCard('#1240 - 5511999990000 - Antigo #1', '+5511999990000', 'Vital #1', 1))
       .toBe('#1240 - 5511999990000 - Vital #1');
+  });
+
+  test('vale a volta dada, nao a que o titulo traz', () => {
+    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital', 2))
+      .toBe('#1240 - 5511999990000 - Vital #2');
+  });
+
+  describe(`card comum (volta 0): " #n" no nome e' so' texto, como antes da volta existir`, () => {
+    // esperados = o que a funcao de antes da volta (1830c17) devolve
+    test('contato "Ana #2" num card ja convertido: o nome entra inteiro', () => {
+      expect(tituloDoCard('#28 - 5511999990000 - Ana', '+5511999990000', 'Ana #2'))
+        .toBe('#28 - 5511999990000 - Ana #2');
+    });
+
+    test('titulo terminado em " #2" e contato com outro nome: o " #2" nao fica', () => {
+      expect(tituloDoCard('#28 - 5511999990000 - Ana #2', '+5511999990000', 'Beatriz'))
+        .toBe('#28 - 5511999990000 - Beatriz');
+    });
+
+    test('card novo do Chatwoot com o contato "Ana #2"', () => {
+      expect(tituloDoCard('Conversa #28 - Ana #2', '+5511999990000', 'Ana #2')).toBe('#28 - 5511999990000 - Ana #2');
+      expect(tituloDoCard('#28 - 5511999990000 - Ana #2', '+5511999990000', 'Ana #2')).toBeNull();
+    });
   });
 });

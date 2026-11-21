@@ -1,6 +1,8 @@
 import type { Env } from '../env';
 import { ChatwootClient } from '../clients/chatwoot';
 import { tituloDoCard } from '../domain/tituloCard';
+import { voltaDoTitulo } from '../domain/retorno';
+import { voltaDoCard } from '../db/retornos';
 
 /**
  * Reescreve o titulo do card como "#1240 - 5511932346062 - Vital".
@@ -39,7 +41,12 @@ export async function telefoneNoTituloDoCard(env: Env, tenantId: number, payload
     taskId = num(task?.id);
     if (!taskId) return;
 
-    const titulo = tituloDoCard(str(task?.title), telefone, str(obj(obj(conv?.meta)?.sender)?.name));
+    // A volta do card e' a de `retornos`, nao o " #n" do titulo (o contato
+    // "Ana #2" de um card comum). So' pergunta quando o titulo tem o sufixo: a
+    // mensagem comum continua sem custar consulta nenhuma.
+    const atual = str(task?.title);
+    const volta = voltaDoTitulo(atual) > 0 ? await voltaDoCard(env.DB, tenantId, taskId) : 0;
+    const titulo = tituloDoCard(atual, telefone, str(obj(obj(conv?.meta)?.sender)?.name), volta);
     if (!titulo) return;
 
     acc ??= await contaDoChatwoot(env, tenantId);

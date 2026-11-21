@@ -3,21 +3,27 @@ import { fakeD1 } from '../helpers/fakeD1';
 import { telefoneNoTituloDoCard } from '../../src/pipelines/tituloCard';
 import type { Env } from '../../src/env';
 
-function cenario() {
+/** Consultas ao banco da ultima execucao: mensagem comum nao pode custar a de `retornos`. */
+let consultas: string[];
+
+function cenario(antes: (exec: (sql: string) => void) => void = () => undefined) {
   const { d1, exec } = fakeD1();
   exec(`INSERT INTO tenants (id, slug, nome, ativo) VALUES (1, 'locadora', 'Locadora', 1)`);
   exec(`INSERT INTO tenant_config (tenant_id, cw_account_id, cw_board_funil_id, ingest_key) VALUES (1, 5, 9, 'k')`);
-  return { DB: d1, CHATWOOT_BASE_URL: 'https://cw.teste', CHATWOOT_API_TOKEN: 'tok' } as unknown as Env;
+  antes(exec);
+  consultas = [];
+  const DB = { prepare: (sql: string) => { consultas.push(sql); return d1.prepare(sql); } };
+  return { DB, CHATWOOT_BASE_URL: 'https://cw.teste', CHATWOOT_API_TOKEN: 'tok' } as unknown as Env;
 }
 
 /** Webhook de mensagem, na forma que o Chatwoot manda (conta 5, conversa 1240). */
-const msg = (task: Record<string, unknown> | null, telefone: string | null = '+5511932346062') =>
+const msg = (task: Record<string, unknown> | null, telefone: string | null = '+5511932346062', nome = 'Vital') =>
   JSON.stringify({
     message_type: 'incoming',
     content: 'oi',
     conversation: {
       id: 1240,
-      meta: { sender: { name: 'Vital', phone_number: telefone } },
+      meta: { sender: { name: nome, phone_number: telefone } },
       ...(task ? { kanban_task: { id: 3744, board_id: 9, title: 'Conversa #1240 - Vital', ...task } } : {}),
     },
   });
@@ -104,5 +110,30 @@ describe('telefoneNoTituloDoCard', () => {
   test('payload que nao e json nao derruba quem chamou', async () => {
     await expect(telefoneNoTituloDoCard(cenario(), 1, 'nao e json')).resolves.toBeUndefined();
     expect(chamadas).toEqual([]);
+  });
+
+  describe('a volta do card vem de `retornos`, nao do texto do titulo', () => {
+    const FONE = '+5511999990000';
+    const titulos = () => chamadas.filter((c) => c.metodo === 'PUT').map((c) => (c.corpo as { task: { title: string } }).task.title);
+
+    test('card de uma volta: o nome novo do contato mantem o " #1"', async () => {
+      const env = cenario((exec) => exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, task_anterior, task_novo, status)
+                                           VALUES (1, 1240, 1, '3000', '3744', 'feito')`));
+      await telefoneNoTituloDoCard(env, 1, msg({ title: '#1240 - 5511999990000 - Vital #1' }, FONE, 'Vital Novo'));
+      expect(titulos()).toEqual(['#1240 - 5511999990000 - Vital Novo #1']);
+    });
+
+    test('card comum e contato "Ana #2": o titulo de antes da volta, sem perguntar a `retornos`', async () => {
+      const env = cenario();
+      await telefoneNoTituloDoCard(env, 1, msg({ title: '#1240 - 5511999990000 - Ana' }, FONE, 'Ana #2'));
+      expect(titulos()).toEqual(['#1240 - 5511999990000 - Ana #2']);
+      expect(consultas.filter((s) => /retornos/.test(s))).toEqual([]);
+    });
+
+    test('card comum com titulo terminado em " #2" e sem volta registrada: o " #2" e texto', async () => {
+      const env = cenario();
+      await telefoneNoTituloDoCard(env, 1, msg({ title: '#1240 - 5511999990000 - Ana #2' }, FONE, 'Beatriz'));
+      expect(titulos()).toEqual(['#1240 - 5511999990000 - Beatriz']);
+    });
   });
 });

@@ -17,17 +17,23 @@ import { semVolta, voltaDoTitulo } from './retorno';
 
 const TITULO_DO_CARD = /^(?:Conversa\s*)?#(\d+)\s*(?:-\s*([\s\S]*))?$/i;
 
-/** O titulo novo, ou null quando nao ha o que trocar. */
+/**
+ * O titulo novo, ou null quando nao ha o que trocar.
+ *
+ * `volta`: a volta do card segundo `retornos` (ver retorno.ts), 0 = card comum.
+ * E' dado, nao texto: o card comum de um contato chamado "Ana #2" se comporta
+ * exatamente como antes da volta existir, com o " #2" como parte do nome.
+ */
 export function tituloDoCard(
   titulo: string | null | undefined,
   telefone: string | null | undefined,
   nome: string | null | undefined,
+  volta = 0,
 ): string | null {
   const atual = String(titulo ?? '');
-  // " #n" no fim e' a volta do lead (ver retorno.ts): sai antes do regex e
-  // volta no fim, senao o "#n" viraria parte do nome e o nome novo o apagaria
-  const volta = voltaDoTitulo(atual);
-  const m = TITULO_DO_CARD.exec(volta ? semVolta(atual) : atual);
+  // Card da volta: o " #n" do fim sai antes do regex e volta no fim, senao o
+  // "#n" viraria parte do nome e o nome novo o apagaria
+  const m = TITULO_DO_CARD.exec(volta > 0 && voltaDoTitulo(atual) > 0 ? semVolta(atual) : atual);
   // card criado a mao: o titulo e' de quem criou
   if (!m) return null;
 
@@ -45,11 +51,17 @@ export function tituloDoCard(
   // O nome do contato quando presta ("*~", emoji e o proprio telefone nao
   // prestam). Senao, o que o titulo ja' tinha depois do telefone.
   const doTitulo = (m[2] ?? '').replace(/^\+?\d{10,}\s*(?:-\s*)?/, '');
-  // O nome do lead tambem leva " #n" (retorno.ts); o sufixo do titulo e' um so',
-  // entao o do nome sai, e nome que sobra vazio vira "sem nome"
-  const quem = semVolta(nomeUtil(nome, { telefone }) ?? nomeUtil(doTitulo, { telefone }) ?? '').trim() || null;
+  const quem = nomeUtil(nome, { telefone }) ?? nomeUtil(doTitulo, { telefone });
 
-  const base = quem ? `#${m[1]} - ${digitos} - ${quem}` : `#${m[1]} - ${digitos}`;
-  const novo = volta ? `${base} #${volta}` : base;
+  if (volta > 0) {
+    // O nome do lead do ciclo tambem leva " #n" (retorno.ts); o sufixo do
+    // titulo e' um so', entao o do nome sai, e nome que sobra vazio vira "sem nome"
+    const doCiclo = semVolta(quem ?? '').trim() || null;
+    const base = doCiclo ? `#${m[1]} - ${digitos} - ${doCiclo}` : `#${m[1]} - ${digitos}`;
+    const novo = `${base} #${volta}`;
+    return novo === atual ? null : novo;
+  }
+
+  const novo = quem ? `#${m[1]} - ${digitos} - ${quem}` : `#${m[1]} - ${digitos}`;
   return novo === atual ? null : novo;
 }

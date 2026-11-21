@@ -87,9 +87,14 @@ describe('lead que volta: duas linhas com o mesmo telefone', () => {
 
   const cardVital = (title: string) =>
     card({ title, custom_attributes: {}, contacts: [{ name: 'Vital', phone_number: '+5511999990000' }] });
+  /** O card 2103 e' o card novo da volta #1: e' isto, e nao o titulo, que diz a volta. */
+  const daVolta1 = (exec: (sql: string) => void) =>
+    exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, task_anterior, task_novo, status)
+          VALUES (3, 94, 1, '1100', '2103', 'feito')`);
 
   test('card com sufixo #1 grava na linha "Vital #1", em qualquer ordem', async () => {
-    const { env } = cenario();
+    const { env, exec } = cenario();
+    daVolta1(exec);
     geral = [CAB, VITAL, VITAL1];
     await espelharEtapaNaGeral(env, 3, cardVital('#1240 - 5511999990000 - Vital #1'));
     expect(gravadas).toEqual([{ range: "'Geral'!I3", valor: 'Agendamento Realizado' }]);
@@ -108,7 +113,8 @@ describe('lead que volta: duas linhas com o mesmo telefone', () => {
   });
 
   test('as duas linhas trocam de lugar antes da releitura: a etapa nao cai na linha do irmao', async () => {
-    const { env } = cenario();
+    const { env, exec } = cenario();
+    daVolta1(exec);
     geral = [CAB, VITAL, VITAL1];
     // o script da planilha reordena depois da leitura inteira
     depoisDaLeitura = [CAB, VITAL1, VITAL];
@@ -119,11 +125,44 @@ describe('lead que volta: duas linhas com o mesmo telefone', () => {
   });
 
   test('card de uma volta que ainda nao tem linha nao grava no original', async () => {
-    const { env } = cenario();
+    const { env, exec } = cenario();
+    daVolta1(exec);
     geral = [CAB, VITAL];
     const r = await espelharEtapaNaGeral(env, 3, cardVital('#1240 - 5511999990000 - Vital #1'));
     expect(r.status).toBe('ignorado');
     expect(gravadas).toHaveLength(0);
+  });
+
+  test('card da volta com o titulo trocado a mao: a volta e a de `retornos`', async () => {
+    const { env, exec } = cenario();
+    daVolta1(exec);
+    geral = [CAB, VITAL, VITAL1];
+    await espelharEtapaNaGeral(env, 3, cardVital('Vital - segunda compra'));
+    expect(gravadas).toEqual([{ range: "'Geral'!I3", valor: 'Agendamento Realizado' }]);
+  });
+});
+
+describe('lead comum com " #n" no nome: o sufixo e texto, nao volta', () => {
+  const ANA = ['', 'Canal', '1', '', '', 'Ana', '5511999990000', '', ''];
+  const ANA2 = ['', 'Canal', '1', '', '', 'Ana #2', '5511999990000', '', ''];
+  const cardAna = card({
+    title: '#1240 - 5511999990000 - Ana #2', custom_attributes: {}, contacts: [{ name: 'Ana #2', phone_number: '+5511999990000' }],
+  });
+
+  test('card "… - Ana #2" sem volta registrada cai na linha do telefone ("Ana")', async () => {
+    const { env } = cenario();
+    geral = [CAB, MARCIA, ANA];
+    const r = await espelharEtapaNaGeral(env, 3, cardAna);
+    expect(r.status).toBe('ok');
+    expect(gravadas).toEqual([{ range: "'Geral'!I3", valor: 'Agendamento Realizado' }]);
+  });
+
+  test('a linha da aba tambem diz "Ana #2": e a do telefone, e a releitura confirma', async () => {
+    const { env } = cenario();
+    geral = [CAB, MARCIA, ANA2];
+    const r = await espelharEtapaNaGeral(env, 3, cardAna);
+    expect(r.status).toBe('ok');
+    expect(gravadas).toEqual([{ range: "'Geral'!I3", valor: 'Agendamento Realizado' }]);
   });
 });
 

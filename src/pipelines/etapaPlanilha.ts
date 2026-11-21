@@ -2,8 +2,8 @@ import type { Env } from '../env';
 import { SheetsClient } from '../clients/sheets';
 import { ChatwootClient } from '../clients/chatwoot';
 import { parseKanbanTask, type TaskDoKanban } from '../domain/kanbanTask';
-import { voltaDoTitulo } from '../domain/retorno';
-import { linhaDoLead, colunaDaEtapa, indiceParaColuna } from '../domain/planilha';
+import { voltaDoCard, voltasDosCards } from '../db/retornos';
+import { linhaDoLead, linhaDoTelefone, voltaDaLinha, colunaDaEtapa, indiceParaColuna } from '../domain/planilha';
 
 /**
  * A etapa do card no Kanban, espelhada na aba Geral: na coluna ETAPA quando a
@@ -11,7 +11,8 @@ import { linhaDoLead, colunaDaEtapa, indiceParaColuna } from '../domain/planilha
  *
  * O time da Vita abre a planilha, nao o Chatwoot: sem isto a Geral diz que o
  * lead chegou e mais nada. A linha e' achada pelo telefone (a chave que a
- * planilha e o WhatsApp tem em comum) e so' essa coluna muda.
+ * planilha e o WhatsApp tem em comum) e pela volta do card (`retornos`: o card
+ * da volta n escreve na linha "… #n"), e so' essa coluna muda.
  *
  * Quem chama e' a regra "[PAINEL] Etapa do card -> planilha" do Chatwoot, a
  * cada atualizacao de card do board do funil (`?evento=etapa`). As regras de
@@ -75,7 +76,9 @@ export async function espelharEtapaNaGeral(env: Env, tenantId: number, payload: 
   // A Geral e' reordenada pelo script da planilha a cada 5 min: a linha achada
   // na leitura inteira e' relida e conferida pelo telefone antes de gravar,
   // senao o Status cairia no lead que tomou aquele lugar.
-  const volta = voltaDoTitulo(t.titulo);
+  // A volta do card e' a de `retornos`, nao o " #n" do titulo: o card comum de
+  // um contato chamado "Ana #2" e' do lead de sempre.
+  const volta = await voltaDoCard(env.DB, tenantId, t.taskId);
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     const linhas = await sheets.tudo(destino.doc, destino.aba);
     const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, volta, soVazia(destino, t));
@@ -83,8 +86,9 @@ export async function espelharEtapaNaGeral(env: Env, tenantId: number, payload: 
 
     const cab = linhas[0] ?? [];
     const naHora = await sheets.linha(destino.doc, destino.aba, alvo.linha, indiceParaColuna(cab.length - 1));
-    // telefone E volta: as linhas do lead e do retorno trocam de lugar na reordenacao
-    if (linhaDoLead(cab, [naHora], telefone, volta) !== 0) continue;
+    // telefone E sufixo da linha escolhida: as linhas do lead e da volta trocam
+    // de lugar na reordenacao
+    if (linhaDoTelefone(cab, [naHora], telefone) !== 0 || voltaDaLinha(cab, naHora) !== alvo.sufixo) continue;
 
     await sheets.gravarCelulas(destino.doc, destino.aba, [{ celula: alvo.celula, valor: etapa }]);
     return {
@@ -141,9 +145,10 @@ export async function sincronizarEtapasNaGeral(
   // script da planilha a reordena a cada 5 min, e as posicoes lidas antes do
   // laco podiam ja' ser de outros leads na hora de gravar.
   const sheets = new SheetsClient(env);
+  const voltas = await voltasDosCards(env.DB, tenantId);
   const linhas = await sheets.tudo(destino.doc, destino.aba);
   for (const { t, etapa, telefone } of pendentes) {
-    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, voltaDoTitulo(t.titulo), soVazia(destino, t));
+    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, voltas.get(t.taskId) ?? 0, soVazia(destino, t));
     if ('resultado' in alvo) {
       if (alvo.resultado.status === 'erro') throw new Error(alvo.resultado.motivo);
       detalhes.push(`card ${t.taskId} (${t.nome || t.titulo}): ${alvo.resultado.motivo}`);
@@ -243,7 +248,7 @@ function celulaDoStatus(
   etapa: string,
   volta: number,
   soVazia = false,
-): { celula: string; linha: number; antes: string; coluna: string } | { resultado: Resultado } {
+): { celula: string; linha: number; antes: string; coluna: string; sufixo: number } | { resultado: Resultado } {
   const cab = linhas[0] ?? [];
   const iCol = colunaDaEtapa(cab);
   if (iCol < 0) {
@@ -263,5 +268,6 @@ function celulaDoStatus(
   if (soVazia && antes) {
     return { resultado: { status: 'ignorado', motivo: `linha ${linha} da "${aba}" ja tem ${cab[iCol]} "${antes}" (card do Organico nao sobrescreve)` } };
   }
-  return { celula: `${indiceParaColuna(iCol)}${linha}`, linha, antes, coluna: cab[iCol] ?? '' };
+  // o sufixo do NOME da linha escolhida: a releitura confere que e' ela
+  return { celula: `${indiceParaColuna(iCol)}${linha}`, linha, antes, coluna: cab[iCol] ?? '', sufixo: voltaDaLinha(cab, corpo[i]!) };
 }
