@@ -83,6 +83,44 @@ fica só como atuador, disparada por um atributo que a ferramenta grava.
 cliente: `GET` antes, mescla, `POST` depois. Perder esse passo apaga o
 `protocolo` gravado no card.
 
+### Criar card pela API (lead que volta) — AINDA NÃO SONDADO
+
+O CRM cria o card do lead que volta (`ChatwootClient.criarCard`) com:
+
+```
+POST /api/v1/accounts/{acc}/kanban/tasks
+{ task: { title, board_id, board_step_id, conversation_ids, contact_ids, custom_attributes } }
+
+PUT  /api/v1/accounts/{acc}/kanban/tasks/{t}
+{ task: { conversation_ids } }        liga/desliga conversas do card
+```
+
+`conversation_ids` são display ids. Os nomes dos campos vieram dos campos que o
+`GET` da task devolve, **não de um `POST` testado**: criar card em produção foi
+barrado na sessão de 21/11/2026. Antes de ligar `retorno_dias` em qualquer
+cliente, rodar numa conversa interna:
+
+```
+PROPRIOS='<números próprios>' node scripts/teste-segundo-card.mjs .env <conta>
+```
+
+e anotar aqui o que ele mostrar: se o Kanban aceita um segundo card na mesma
+conversa, para qual card o `kanban_task` da conversa passa a apontar, o
+envelope da resposta do `POST` e se `DELETE` funciona.
+
+Conferido em 21/11/2026, só leitura:
+
+- Nos 5.272 cards das 6 contas nenhuma conversa tinha dois cards e nenhum card
+  tinha duas conversas.
+- `GET .../steps` devolve as etapas na ordem do board, não na ordem de id
+  (Locadora: 36, 37, 38, 75, 40, 41).
+- O webhook `message_incoming` traz `conversation.kanban_task.board_step_id`,
+  `board_step.id`, `board_step.name` e `board_id`.
+- A regra "[PAINEL] Promover ao funil de Ads" reage a `funil = PROMOVER` com
+  `protocolo` presente (contas 5 e 7). A regra antiga "LeadsGoogle"
+  (`protocolo` presente e `funil != Lead`) está desligada; religada, ela
+  moveria o card de qualquer conversa que ganhasse protocolo.
+
 ### Campos da task
 
 ```

@@ -230,6 +230,41 @@ Regra de decisão:
   listar os que estão em `retornos.task_anterior`.
 - Nem desligar funciona → parar e voltar ao usuário.
 
+## Decisões tomadas na implementação (21/11)
+
+Onde diferem do texto acima, valem estas.
+
+- **Falha ao abrir a volta relança o erro** (a fila tenta de novo), inclusive
+  antes da reserva. Difere da seção 7: engolir o erro perderia a volta para
+  sempre, porque a mensagem seguinte do lead já não tem 15 dias de silêncio.
+  Só mensagem em card fechado chega a chamar o Chatwoot nesse trecho.
+- **Mensagem com o retrato do card antigo de uma volta** (volta já feita, ou
+  sendo aberta por outra mensagem) termina como `ignorado` no próprio
+  pipeline. Nunca cai na atribuição comum, que reescreveria o card antigo.
+- **Trava de 120 s** na linha de `retornos` (`trabalhando_ate`): duas entregas
+  da mesma mensagem não criam dois cards. Outra mensagem assume a volta se a
+  primeira ficar 10 minutos parada.
+- **Board do card novo:** vai para o funil só quando o card antigo está no
+  board Orgânico e a volta vem de anúncio ou do perfil do Google.
+- **Card antigo só é desligado da conversa** quando o Chatwoot recusa o card
+  novo com 400, 409 ou 422, ou quando a conversa continua apontando para o
+  antigo depois de criar. Outras conversas ligadas ao card antigo ficam.
+- **Clique achado só pelo telefone** conta como anúncio novo apenas se for mais
+  recente que o lead do ciclo anterior. Senão a volta herda a origem.
+- **Frase do anúncio com clique antigo ainda na janela:** o telefone vence, a
+  volta herda a campanha e o `gclid` do clique original.
+- **Planilha na volta:** lead de anúncio sempre ganha linha; lead sem anúncio
+  segue a regra de hoje (aba de lead direto ou perfil do Google).
+- **Volta que herda a origem não ganha etiqueta nova**; a conversa já tem as do
+  primeiro ciclo.
+- **Volta por anúncio novo tira da conversa** o `gclid` e as UTMs que o ciclo
+  novo não tem, para o vendedor não ver a origem antiga.
+- **Lead sem nome aproveitável** entra como `Sem nome #n`: é o `#n` que
+  identifica a linha da volta na Geral.
+- **Respostas do vendedor anteriores à volta** não movem o card novo;
+  conversão do Google com clique original de mais de 90 dias é ignorada com
+  motivo; o painel de órfãos não lista card antigo desligado por uma volta.
+
 ## Achados na escrita do plano (21/11)
 
 - A Geral casa a linha pelo **telefone** (`acrescentarLead`, `celulaDoStatus`):
