@@ -1,5 +1,6 @@
 /**
- * Lead que volta: quem escreve de novo ha' 15 dias ou mais, depois que o card
+ * Lead que volta: quem escreve de novo depois do prazo do cliente
+ * (`tenant_config.retorno_dias`, 15 ao ligar; NULL = desligado), depois que o card
  * chegou numa etapa final (ganho/perdido), abre um card novo em vez de reabrir
  * o antigo. O historico do atendimento fecha com o ciclo e o funil nao conta
  * duas vendas no mesmo card.
@@ -7,8 +8,6 @@
  * O card novo leva " #1", " #2"... no fim do titulo (e do nome do lead), e o
  * protocolo ganha "-R<n>": e' assim que o relatorio separa um ciclo do outro.
  */
-
-export const DIAS_PADRAO = 15;
 
 const DIA_MS = 24 * 3600 * 1000;
 

@@ -1,17 +1,14 @@
 import { describe, test, expect } from 'vitest';
 import {
-  DIAS_PADRAO, ehRetorno, voltaDoTitulo, voltaDoNome, semVolta, comVolta, protocoloDoCiclo,
+  ehRetorno, voltaDoTitulo, voltaDoNome, semVolta, comVolta, protocoloDoCiclo,
 } from '../../src/domain/retorno';
 
 const DIA = 24 * 3600 * 1000;
 const AGORA = Date.UTC(2026, 10, 21, 12);
 
 describe('ehRetorno', () => {
-  const base = { etapaFinal: true, anteriorDoLead: AGORA - 20 * DIA, naEtapaDesde: null, agora: AGORA, dias: DIAS_PADRAO };
-
-  test('o padrao e 15 dias', () => {
-    expect(DIAS_PADRAO).toBe(15);
-  });
+  // o prazo que se liga em `tenant_config.retorno_dias`
+  const base = { etapaFinal: true, anteriorDoLead: AGORA - 20 * DIA, naEtapaDesde: null, agora: AGORA, dias: 15 };
 
   test('14 dias e 23 horas ainda e a mesma conversa', () => {
     expect(ehRetorno({ ...base, anteriorDoLead: AGORA - (14 * DIA + 23 * 3600 * 1000) })).toBe(false);
