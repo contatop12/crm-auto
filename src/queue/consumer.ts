@@ -12,6 +12,7 @@ import { telefoneNoTituloDoCard } from '../pipelines/tituloCard';
 import { voltarDoPendente } from '../pipelines/pendente';
 import { atribuirEmRodizio } from '../pipelines/rodizio';
 import { alertarContatoDuplicado } from '../pipelines/contatoDuplicado';
+import { abrirRetorno } from '../pipelines/retorno';
 import {
   agendarLinkDaConversa,
   entregarLinkDaConversa,
@@ -84,7 +85,11 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
           // `tentativa`: o lead da Meta sem clique espera a Evolution uma vez
           return atribuirLead(env, msg.tenantId, payload, { tentativa });
         case 'message_incoming': {
-          const r = await atribuirLead(env, msg.tenantId, payload, { tentativa });
+          // Lead que volta depois de Ganho/Perda (prazo em `retorno_dias`): card
+          // novo e ciclo novo, ja' atribuido. Em toda entrega: a retentativa
+          // retoma a volta de onde parou.
+          const volta = await abrirRetorno(env, msg.tenantId, payload, { tentativa });
+          const r = volta ?? (await atribuirLead(env, msg.tenantId, payload, { tentativa }));
           // Alerta de contato em dois numeros: so' lead do Google Ads, entao
           // depois da atribuicao (ela grava se a conversa veio de anuncio) e do
           // rodizio (o texto traz o responsavel). Adiado = origem ainda em
