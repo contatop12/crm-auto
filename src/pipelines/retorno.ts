@@ -8,10 +8,11 @@ import { avisarLeadNoGrupo, TENTATIVAS_ESPERANDO_PROTOCOLO } from './kanbanTask'
 /**
  * O lead que volta (regra em domain/retorno.ts): card novo e ciclo novo.
  *
- * Roda antes da atribuicao em toda mensagem do lead. `null` = nao e' volta, e a
- * fila segue o caminho de sempre. Sendo volta, quem atribui e' a atribuicao de
- * sempre, em modo de volta: ela acha o lead do ciclo e pede o card por
- * `criarCard`. Daqui saem o card, o aviso no grupo e o registro em `retornos`.
+ * Roda antes da atribuicao em toda mensagem do lead. `null` = a mensagem nao
+ * tem nada com volta, e a fila segue o caminho de sempre. Sendo volta, quem
+ * atribui e' a atribuicao de sempre, em modo de volta: ela acha o lead do ciclo
+ * e pede o card por `criarCard`. Daqui saem o card, o aviso no grupo e o
+ * registro em `retornos`.
  *
  * Uma volta, um card: a linha de `retornos` e' reservada antes do card (UNIQUE
  * pelo card antigo), e a retentativa da fila retoma do ponto em que parou, sem
@@ -42,10 +43,17 @@ const MOTIVO_OCUPADA = 'outra execucao esta abrindo esta volta';
 /** Ciclo de anuncio ou do perfil do Google vai para o funil, mesmo saindo do Organico. */
 const PLATAFORMAS_DO_FUNIL = new Set(['google', 'meta', 'gmn']);
 
+/**
+ * O Kanban recusou o card (pedido invalido, conflito): pode ser a segunda
+ * ligacao na mesma conversa. 401, 408, 429 e os outros nao dizem isso.
+ */
+const RECUSA = /-> (400|409|422)\b/;
+
 interface Config {
   retorno_dias: number | null;
   cw_account_id: number | null;
   cw_board_funil_id: number | null;
+  cw_board_organico_id: number | null;
   numeros_proprios: string | null;
 }
 
@@ -72,6 +80,9 @@ interface Linha {
   idade_s: number;
 }
 
+const COLUNAS_DA_LINHA = `id, n, mensagem_id, task_novo, protocolo_anterior, desligou_antigo, status,
+  CAST((julianday('now') - julianday(created_at)) * 86400 AS INTEGER) AS idade_s`;
+
 /** O que os passos do card dividem. `linha` muda: e' o estado da volta. */
 interface Ciclo {
   env: Env;
@@ -79,6 +90,7 @@ interface Ciclo {
   acc: number;
   tenantId: number;
   funil: number | null;
+  organico: number | null;
   m: Mensagem;
   linha: Linha;
   cardAntigo(): Promise<Record<string, unknown> | null>;
@@ -95,7 +107,8 @@ export async function abrirRetorno(
 
   // Roda em toda mensagem de todo cliente: desligado, custa esta leitura e mais nada.
   const cfg = await env.DB.prepare(
-    'SELECT retorno_dias, cw_account_id, cw_board_funil_id, numeros_proprios FROM tenant_config WHERE tenant_id = ?',
+    `SELECT retorno_dias, cw_account_id, cw_board_funil_id, cw_board_organico_id, numeros_proprios
+     FROM tenant_config WHERE tenant_id = ?`,
   )
     .bind(tenantId)
     .first<Config>();
@@ -104,26 +117,36 @@ export async function abrirRetorno(
 
   const acc = cfg.cw_account_id;
   const cw = ChatwootClient.fromEnv(env);
-  if (!(await naEtapaFinal(env, cw, tenantId, acc, m))) return null;
-  if (await voltaFeita(env, tenantId, m.card)) return null;
 
   // lido uma vez so': a data da etapa (quando falta a mensagem anterior) e o molde do card novo
   let antigo: Promise<Record<string, unknown> | null> | null = null;
   const cardAntigo = () => (antigo ??= cw.tarefa(acc, m.card));
 
-  const anteriorDoLead = await cw.mensagemAnteriorDoLead(acc, m.conversa, m.id);
-  const naEtapaDesde = anteriorDoLead === null ? Date.parse(String((await cardAntigo())?.step_changed_at ?? '')) : null;
-  // a etapa final ja' foi conferida acima, antes de qualquer chamada ao Chatwoot
-  if (!ehRetorno({ etapaFinal: true, anteriorDoLead, naEtapaDesde, agora: Date.now(), dias: cfg.retorno_dias })) {
-    return null;
+  // A volta deste card ja' existe? Decide antes da etapa e do silencio, e sem
+  // chamar o Chatwoot: a mensagem com o retrato do card antigo e' da volta
+  // mesmo que o lead tenha falado ha' segundos, e nao pode cair na atribuicao
+  // comum, que gravaria o ciclo novo no card antigo.
+  const existente = await linhaDoCard(env, tenantId, m.card);
+  let reserva: Linha | Resultado;
+  if (existente) {
+    reserva = await retomar(env, m, existente);
+  } else {
+    if (!(await naEtapaFinal(env, cw, tenantId, acc, m))) return null;
+    const anteriorDoLead = await cw.mensagemAnteriorDoLead(acc, m.conversa, m.id);
+    const naEtapaDesde = anteriorDoLead === null ? Date.parse(String((await cardAntigo())?.step_changed_at ?? '')) : null;
+    // a etapa final ja' foi conferida acima, antes de qualquer chamada ao Chatwoot
+    if (!ehRetorno({ etapaFinal: true, anteriorDoLead, naEtapaDesde, agora: Date.now(), dias: cfg.retorno_dias })) {
+      return null;
+    }
+    reserva = await reservar(env, tenantId, m, m.protocolo ?? (await protocoloDaConversa(env, tenantId, m.conversa)));
   }
+  // resultado final da mensagem: volta feita, de outra mensagem, ou segura por outra execucao
+  if ('motivo' in reserva) return reserva;
+  const linha = reserva;
 
-  const linha = await reservar(env, tenantId, m, m.protocolo ?? (await protocoloDaConversa(env, tenantId, m.conversa)));
-  // a fila retenta com backoff; quando a outra terminar, a volta ja' estara' feita
-  if (linha === 'ocupada') return { status: 'erro', motivo: MOTIVO_OCUPADA };
-  if (!linha) return null;
-
-  const ciclo: Ciclo = { env, cw, acc, tenantId, funil: cfg.cw_board_funil_id, m, linha, cardAntigo };
+  const ciclo: Ciclo = {
+    env, cw, acc, tenantId, funil: cfg.cw_board_funil_id, organico: cfg.cw_board_organico_id, m, linha, cardAntigo,
+  };
   try {
     const r = await atribuirLead(env, tenantId, payload, {
       tentativa: opts.tentativa,
@@ -219,29 +242,20 @@ async function etapasDoBoard(env: Env, cw: ChatwootClient, acc: number, board: n
   return etapas;
 }
 
-async function voltaFeita(env: Env, tenantId: number, card: number): Promise<boolean> {
-  const r = await env.DB.prepare(`SELECT 1 AS sim FROM retornos WHERE tenant_id = ? AND task_anterior = ? AND status = 'feito'`)
+function linhaDoCard(env: Env, tenantId: number, card: number): Promise<Linha | null> {
+  return env.DB.prepare(`SELECT ${COLUNAS_DA_LINHA} FROM retornos WHERE tenant_id = ? AND task_anterior = ?`)
     .bind(tenantId, String(card))
-    .first();
-  return !!r;
+    .first<Linha>();
 }
 
 /**
- * Reserva a volta do card antigo, ou acha a que ja' existe, e a segura para
- * esta execucao. Devolve null quando a volta nao e' desta mensagem, e
- * 'ocupada' quando outra execucao a segura agora.
- *
- * `INSERT OR IGNORE` pela UNIQUE do card antigo: um card fechado gera uma volta
- * so', com a fila retentando ou nao. `protocolo_anterior` fica gravado aqui
- * porque a atribuicao troca o da conversa antes de terminar: a retentativa le'
- * o daqui, nao o novo.
+ * Volta nova do card antigo. `INSERT OR IGNORE` pela UNIQUE do card antigo: um
+ * card fechado gera uma volta so'. A reserva ja' nasce segura por esta
+ * execucao; se outra reservou no mesmo instante, decide como a retomada.
+ * `protocolo_anterior` fica gravado aqui porque a atribuicao troca o da
+ * conversa antes de terminar: a retentativa le' o daqui, nao o novo.
  */
-async function reservar(
-  env: Env,
-  tenantId: number,
-  m: Mensagem,
-  anterior: string | null,
-): Promise<Linha | null | 'ocupada'> {
+async function reservar(env: Env, tenantId: number, m: Mensagem, anterior: string | null): Promise<Linha | Resultado> {
   const nova = await env.DB.prepare(
     `INSERT OR IGNORE INTO retornos
        (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, trabalhando_ate)
@@ -249,20 +263,26 @@ async function reservar(
   )
     .bind(tenantId, m.conversa, String(m.id), String(m.card), anterior, tenantId, m.conversa)
     .run();
-
-  const l = await env.DB.prepare(
-    `SELECT id, n, mensagem_id, task_novo, protocolo_anterior, desligou_antigo, status,
-            CAST((julianday('now') - julianday(created_at)) * 86400 AS INTEGER) AS idade_s
-     FROM retornos WHERE tenant_id = ? AND task_anterior = ?`,
-  )
-    .bind(tenantId, String(m.card))
-    .first<Linha>();
+  const l = await linhaDoCard(env, tenantId, m.card);
   // a outra UNIQUE (conversa, n): outra volta da conversa tomou o numero agora; a fila retenta
   if (!l) throw new Error(`volta da conversa ${m.conversa}: o numero da volta foi tomado por outra execucao`);
-  if (nova.meta.changes) return l; // reserva nova: ja' nasce segura por esta execucao
-  if (l.status === 'feito') return null;
+  return nova.meta.changes ? l : retomar(env, m, l);
+}
+
+/**
+ * A volta deste card ja' existe: decide pela linha, sem perguntar ao Chatwoot e
+ * sem medir o silencio de novo (a volta foi provada quando a linha nasceu).
+ * Devolve a linha, segura por esta execucao e relida, ou o resultado final da
+ * mensagem.
+ */
+async function retomar(env: Env, m: Mensagem, l: Linha): Promise<Linha | Resultado> {
+  if (l.status === 'feito') {
+    return { status: 'ignorado', motivo: `mensagem da volta #${l.n} deste card, ja aberta no card ${l.task_novo}` };
+  }
   const desta = l.mensagem_id === String(m.id);
-  if (!desta && l.idade_s < PRAZO_DA_OUTRA_S) return null; // outra mensagem da volta: a primeira cuida
+  if (!desta && l.idade_s < PRAZO_DA_OUTRA_S) {
+    return { status: 'ignorado', motivo: `outra mensagem esta abrindo a volta #${l.n} deste card` };
+  }
 
   // Retentativa desta mensagem, ou a primeira morreu e esta assume: segura a
   // linha num UPDATE so', e so' se ninguem a segura agora.
@@ -273,11 +293,15 @@ async function reservar(
   )
     .bind(String(m.id), l.id, l.mensagem_id)
     .run();
-  if (!segurou.meta.changes) return 'ocupada';
+  // a fila retenta com backoff; quando a outra terminar, a volta ja' estara' feita
+  if (!segurou.meta.changes) return { status: 'erro', motivo: MOTIVO_OCUPADA };
   if (!desta) {
     console.log(JSON.stringify({ acao: 'volta_assumida', conversa: m.conversa, n: l.n, de: l.mensagem_id, por: m.id }));
   }
-  return { ...l, mensagem_id: String(m.id) };
+  // relida: quem segurava antes pode ter gravado o card entre a leitura e o UPDATE
+  const atual = await env.DB.prepare(`SELECT ${COLUNAS_DA_LINHA} FROM retornos WHERE id = ?`).bind(l.id).first<Linha>();
+  if (!atual) throw new Error(`volta #${l.n} da conversa ${m.conversa}: a linha sumiu depois de segurada`);
+  return atual;
 }
 
 /** Protocolos que algum ciclo desta conversa ja' usou: clique repetido deles nao e' anuncio novo. */
@@ -303,59 +327,69 @@ async function protocolosUsados(env: Env, tenantId: number, conversa: number, an
 async function cardDoCiclo(c: Ciclo, plataforma: string | null, atributos: Record<string, string>): Promise<number> {
   let novo = num(c.linha.task_novo);
   if (!novo) {
-    const criado = await postarCard(c, plataforma, atributos);
-    novo = criado.id;
+    novo = await postarCard(c, plataforma, atributos);
     c.linha.task_novo = String(novo);
-    if (criado.desligou) c.linha.desligou_antigo = 1;
     // gravado logo: se algo cair daqui em diante, a retentativa nao cria outro
-    await c.env.DB.prepare('UPDATE retornos SET task_novo = ?, desligou_antigo = ? WHERE id = ?')
-      .bind(c.linha.task_novo, c.linha.desligou_antigo, c.linha.id)
-      .run();
+    await c.env.DB.prepare('UPDATE retornos SET task_novo = ? WHERE id = ?').bind(c.linha.task_novo, c.linha.id).run();
   }
   if (!c.linha.desligou_antigo) await conferirLigacao(c, novo);
   return novo;
 }
 
-async function postarCard(
-  c: Ciclo,
-  plataforma: string | null,
-  atributos: Record<string, string>,
-): Promise<{ id: number; desligou: boolean }> {
+async function postarCard(c: Ciclo, plataforma: string | null, atributos: Record<string, string>): Promise<number> {
   const { cw, acc, m } = c;
   const antigo = await c.cardAntigo();
   const doAntigo = num(antigo?.board_id) ?? m.board;
   if (!doAntigo) throw new Error(`card ${m.card} sem board: nao ha' onde criar o card da volta`);
-  // do Organico para o funil, como a promocao faria com o lead de anuncio
-  const board = c.funil && doAntigo !== c.funil && plataforma && PLATAFORMAS_DO_FUNIL.has(plataforma) ? c.funil : doAntigo;
+  // do Organico para o funil, como a promocao faria com o lead de anuncio; qualquer outro board fica
+  const board = c.funil && doAntigo === c.organico && plataforma && PLATAFORMAS_DO_FUNIL.has(plataforma) ? c.funil : doAntigo;
   const card = {
     titulo: comVolta(str(antigo?.title) ?? `Conversa #${m.conversa}`, c.linha.n),
     boardId: board,
     stepId: await primeiraEtapa(c, board),
     conversas: [m.conversa],
-    contatos: Array.isArray(antigo?.contact_ids) ? antigo.contact_ids.map(Number).filter((x) => x > 0) : [],
+    contatos: ids(antigo?.contact_ids) ?? [],
     atributos,
   };
 
   try {
-    return { id: await cw.criarCard(acc, card), desligou: false };
+    return await cw.criarCard(acc, card);
   } catch (e) {
-    // 5xx ou rede e' instabilidade, nao recusa: o card antigo fica como esta'
-    if (!/-> 4\d\d\b/.test((e as Error).message)) throw e;
+    // limite, credencial, 5xx, rede: nao e' recusa do card, e o antigo fica como esta'
+    if (!RECUSA.test((e as Error).message)) throw e;
   }
   // Recusado: talvez o Kanban nao aceite dois cards na conversa. Solta o antigo
-  // e tenta uma vez mais; falhou de novo, a ligacao volta.
-  await cw.ligarConversasDoCard(acc, m.card, []);
+  // e tenta uma vez mais; falhou de novo, a ligacao volta como estava.
+  const ligadas = await soltarAntigo(c);
   try {
-    return { id: await cw.criarCard(acc, card), desligou: true };
+    return await cw.criarCard(acc, card);
   } catch (e) {
-    await cw.ligarConversasDoCard(acc, m.card, [m.conversa]).catch((e2: Error) => {
-      console.log(JSON.stringify({ acao: 'volta_religar_antigo_falhou', card: m.card, erro: e2.message.slice(0, 200) }));
-    });
+    try {
+      await cw.ligarConversasDoCard(acc, m.card, ligadas);
+      // so' com a ligacao de volta o registro deixa de dizer que o antigo esta' solto
+      c.linha.desligou_antigo = 0;
+      await c.env.DB.prepare('UPDATE retornos SET desligou_antigo = 0 WHERE id = ?').bind(c.linha.id).run();
+    } catch (e2) {
+      console.log(JSON.stringify({ acao: 'volta_religar_antigo_falhou', card: m.card, erro: (e2 as Error).message.slice(0, 200) }));
+    }
     throw e;
   }
 }
 
-/** A primeira etapa: a do funil vem de `funnel_stages`; a do Organico, do Chatwoot (KV). */
+/**
+ * Tira esta conversa do card antigo; as outras ligadas a ele ficam. Marca na
+ * hora: card antigo sem a conversa nunca fica sem registro. Devolve a ligacao
+ * de antes, para religar.
+ */
+async function soltarAntigo(c: Ciclo): Promise<number[]> {
+  const ligadas = ids((await c.cardAntigo())?.conversation_ids) ?? [c.m.conversa];
+  await c.cw.ligarConversasDoCard(c.acc, c.m.card, ligadas.filter((x) => x !== c.m.conversa));
+  c.linha.desligou_antigo = 1;
+  await c.env.DB.prepare('UPDATE retornos SET desligou_antigo = 1 WHERE id = ?').bind(c.linha.id).run();
+  return ligadas;
+}
+
+/** A primeira etapa: a do funil vem de `funnel_stages`; a dos outros boards, do Chatwoot (KV). */
 async function primeiraEtapa(c: Ciclo, board: number): Promise<number> {
   if (board === c.funil) {
     const s = await c.env.DB.prepare('SELECT cw_step_id FROM funnel_stages WHERE tenant_id = ? ORDER BY posicao LIMIT 1')
@@ -372,9 +406,7 @@ async function primeiraEtapa(c: Ciclo, board: number): Promise<number> {
 async function conferirLigacao(c: Ciclo, novo: number): Promise<void> {
   const aponta = num(obj((await c.cw.conversa(c.acc, c.m.conversa))?.kanban_task)?.id);
   if (aponta === novo) return;
-  await c.cw.ligarConversasDoCard(c.acc, c.m.card, []);
-  c.linha.desligou_antigo = 1;
-  await c.env.DB.prepare('UPDATE retornos SET desligou_antigo = 1 WHERE id = ?').bind(c.linha.id).run();
+  await soltarAntigo(c);
   console.log(JSON.stringify({ acao: 'volta_desligou_antigo', conversa: c.m.conversa, antigo: c.m.card, novo, apontava: aponta }));
 }
 
@@ -420,4 +452,8 @@ function str(v: unknown): string | null {
 function num(v: unknown): number | null {
   const n = typeof v === 'string' && v.trim() ? Number(v) : v;
   return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
+}
+/** Lista de ids do card (`contact_ids`, `conversation_ids`); null quando o campo nao veio. */
+function ids(v: unknown): number[] | null {
+  return Array.isArray(v) ? v.map(num).filter((x): x is number => x !== null) : null;
 }

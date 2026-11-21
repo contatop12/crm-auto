@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fakeD1 } from '../helpers/fakeD1';
 import { abrirRetorno } from '../../src/pipelines/retorno';
-import type { Env } from '../../src/env';
+import { consumir } from '../../src/queue/consumer';
+import type { Env, QueueMessage } from '../../src/env';
 
 const FONE = '+5511999990000';
 const ANTIGO = 'VITA-MVOLTA0001';
@@ -20,6 +21,13 @@ const ETAPAS_DO_ORGANICO = [
   { id: 43, board_id: ORGANICO, name: 'Entrada', completed: false, cancelled: false, tasks_count: 3, probability: '0.0' },
   { id: 44, board_id: ORGANICO, name: 'Ganho', completed: true, cancelled: false, tasks_count: 1, probability: '1.0' },
 ];
+/** Um terceiro board do cliente, que nao e' nem o funil nem o Organico. */
+const OUTRO = 12;
+const ETAPAS_DO_OUTRO = [
+  { id: 61, board_id: OUTRO, name: 'Inicio', completed: false, cancelled: false, tasks_count: 2, probability: '0.0' },
+  { id: 62, board_id: OUTRO, name: 'Fechado', completed: true, cancelled: false, tasks_count: 1, probability: '1.0' },
+];
+const ETAPAS: Record<string, unknown[]> = { [ORGANICO]: ETAPAS_DO_ORGANICO, [OUTRO]: ETAPAS_DO_OUTRO };
 
 /**
  * Cliente com a volta ligada (15 dias). O ciclo anterior: lead do Google de 40
@@ -46,9 +54,11 @@ function cenario(o: { retornoDias?: number | null } = {}) {
   exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, task_id) VALUES (1, 76, '${ANTIGO}', 1421)`);
 
   const consultas: string[] = [];
+  /** roda antes de cada consulta: e' por onde o teste age no meio de uma execucao */
+  const ganchos: Array<(sql: string) => void> = [];
   const kv = new Map<string, string>();
   const env = {
-    DB: { prepare: (sql: string) => { consultas.push(sql); return d1.prepare(sql); } },
+    DB: { prepare: (sql: string) => { consultas.push(sql); ganchos.forEach((g) => g(sql)); return d1.prepare(sql); } },
     CACHE: {
       get: async (k: string, tipo?: string) => {
         const v = kv.get(k);
@@ -59,7 +69,18 @@ function cenario(o: { retornoDias?: number | null } = {}) {
     CHATWOOT_BASE_URL: 'https://cw.teste',
     CHATWOOT_API_TOKEN: 'tok',
   } as unknown as Env;
-  return { env, exec, consultar, consultas, kv };
+  return { env, exec, consultar, consultas, ganchos, kv };
+}
+
+/** A volta #1 do card 1421 ja' aberta: card 1500, protocolo -R1, conversa apontando para ele. */
+function voltaFeita(exec: (sql: string) => void) {
+  exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_key, gclid, utm_source, origem, evento, retorno_de, clique_em, created_at)
+        VALUES (1, '${ANTIGO}-R1', 'Vital #1', '1199990000', 'Cj0volta', 'google', 'mensagem', 'retorno',
+                '${ANTIGO}', datetime('now', '-40 day'), datetime('now', '-1 day'))`);
+  exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, task_novo, protocolo_anterior,
+          protocolo_novo, origem, status, created_at)
+        VALUES (1, 76, 1, '9001', '1421', '1500', '${ANTIGO}', '${ANTIGO}-R1', 'herdada', 'feito', datetime('now', '-1 day'))`);
+  exec(`UPDATE conversations SET protocol = '${ANTIGO}-R1', task_id = 1500`);
 }
 
 /** Mensagem do lead. O retrato da conversa ainda traz o card antigo, em Ganha. */
@@ -95,6 +116,8 @@ let kb: {
   conversaAponta: 'novo' | 'antigo';
   /** quantos POST de atributos da conversa falham com 500 */
   falhasNosAtributos: number;
+  /** o PUT que devolve a conversa ao card antigo falha com 500 */
+  religarFalha: boolean;
 };
 let criado: Record<string, unknown> | null;
 let chamadas: Array<{ metodo: string; url: string; corpo: unknown }>;
@@ -113,6 +136,7 @@ beforeEach(() => {
     postsDoCard: [],
     conversaAponta: 'novo',
     falhasNosAtributos: 0,
+    religarFalha: false,
   };
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const metodo = init.method ?? 'GET';
@@ -144,9 +168,14 @@ beforeEach(() => {
       };
       return Response.json(criado);
     }
+    if (metodo === 'PUT' && caminho === `/kanban/tasks/${String(kb.antigo.id)}` && kb.religarFalha) {
+      const ligadas = (corpo as { task: { conversation_ids?: number[] } }).task.conversation_ids ?? [];
+      if (ligadas.includes(76)) return new Response('fora do ar', { status: 500 });
+    }
     if (metodo === 'GET' && caminho === `/kanban/tasks/${String(kb.antigo.id)}`) return Response.json(kb.antigo);
     if (metodo === 'GET' && criado && caminho === `/kanban/tasks/${String(criado.id)}`) return Response.json(criado);
-    if (metodo === 'GET' && caminho === `/kanban/boards/${ORGANICO}/steps`) return Response.json({ steps: ETAPAS_DO_ORGANICO });
+    const etapas = /^\/kanban\/boards\/(\d+)\/steps$/.exec(caminho);
+    if (metodo === 'GET' && etapas) return Response.json({ steps: ETAPAS[etapas[1]!] ?? [] });
     return Response.json({ ok: true });
   });
 });
@@ -200,10 +229,45 @@ describe('abrirRetorno', () => {
     await abrirRetorno(env, 1, mensagem(), { tentativa: 1 });
     const antes = chamadas.length;
 
-    expect(await abrirRetorno(env, 1, mensagem(), { tentativa: 2 })).toBeNull();
+    const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
+
+    // final, nao null: null mandaria o retrato velho para a atribuicao comum
+    expect(r).toEqual({ status: 'ignorado', motivo: expect.stringContaining('card 1500') });
     expect(postsDoCard()).toHaveLength(1);
     // volta feita responde pelo banco, sem chamar o Chatwoot
     expect(chamadas).toHaveLength(antes);
+  });
+
+  test('volta feita: mensagem com o retrato do card antigo e sem protocolo no atributo nao mexe em nada', async () => {
+    // Organico ou contato direto: sem `protocolo` na conversa, a atribuicao
+    // comum nao para cedo, e gravaria o ciclo novo no card antigo
+    const { env, exec, consultar } = cenario();
+    voltaFeita(exec);
+
+    const r = await abrirRetorno(env, 1, mensagem({ id: 9050, conv: { custom_attributes: {} } }), { tentativa: 1 });
+
+    expect(r).toEqual({ status: 'ignorado', motivo: expect.stringMatching(/volta #1.*card 1500/) });
+    expect(chamadas).toEqual([]);
+    expect(consultar('SELECT protocol, task_id FROM conversations')).toEqual([{ protocol: `${ANTIGO}-R1`, task_id: 1500 }]);
+  });
+
+  test('pela fila: a mensagem com o retrato do card antigo nao cai na atribuicao comum', async () => {
+    const { env, exec, consultar } = cenario();
+    voltaFeita(exec);
+    exec(`INSERT INTO events (id, tenant_id, source, event_type, payload)
+          VALUES (1, 1, 'chatwoot', 'message_incoming', '${mensagem({ id: 9050, conv: { custom_attributes: {} } })}')`);
+    const ack = vi.fn();
+    const retry = vi.fn();
+    const body: QueueMessage = { eventId: 1, tenantId: 1, source: 'chatwoot', eventType: 'message_incoming' };
+
+    // segunda entrega: o titulo, o Pendente e o rodizio ja' rodaram na primeira
+    await consumir({ messages: [{ body, attempts: 2, ack, retry }] } as unknown as MessageBatch<QueueMessage>, env);
+
+    expect(ack).toHaveBeenCalledTimes(1);
+    expect(retry).not.toHaveBeenCalled();
+    expect(consultar('SELECT status FROM events WHERE id = 1')).toEqual([{ status: 'ignorado' }]);
+    expect(chamadas).toEqual([]);
+    expect(consultar('SELECT protocol, task_id FROM conversations')).toEqual([{ protocol: `${ANTIGO}-R1`, task_id: 1500 }]);
   });
 
   test('falha depois do card: a volta fica com o erro, solta a reserva, e a retentativa termina sem criar outro', async () => {
@@ -258,8 +322,28 @@ describe('abrirRetorno', () => {
     const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
 
     expect(r).toEqual({ status: 'erro', motivo: 'outra execucao esta abrindo esta volta' });
-    expect(chamadas.filter((c) => c.metodo !== 'GET')).toEqual([]);
+    expect(chamadas).toEqual([]);
     expect(retornos(consultar)[0]).toMatchObject({ status: 'pendente', erro: null });
+  });
+
+  test('a linha e relida depois de segurada: o card que a execucao anterior gravou no meio nao nasce de novo', async () => {
+    const { env, exec, consultar, ganchos } = cenario();
+    exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior)
+          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}')`);
+    // entre a leitura e o UPDATE que segura a linha, a outra execucao cria o card e solta
+    criado = {
+      id: 1500, board_id: FUNIL, board_step_id: NOVO_LEAD, title: `${TITULO} #1`, custom_attributes: { protocolo: `${ANTIGO}-R1` },
+      conversation_ids: [76], conversations: [{ id: 900, display_id: 76 }], contacts: [{ id: 555, name: 'Vital', phone_number: FONE }],
+    };
+    ganchos.push((sql) => {
+      if (/SET mensagem_id = \?, trabalhando_ate/.test(sql)) exec(`UPDATE retornos SET task_novo = '1500'`);
+    });
+
+    const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
+
+    expect(r?.status).toBe('ok');
+    expect(postsDoCard()).toEqual([]);
+    expect(retornos(consultar)[0]).toMatchObject({ status: 'feito', task_novo: '1500' });
   });
 
   test('conversa sem protocolo no atributo: o anterior vem do banco, e a retentativa nao o troca pelo novo', async () => {
@@ -279,34 +363,57 @@ describe('abrirRetorno', () => {
     });
   });
 
-  test('segunda mensagem da volta, com o retrato ainda no card antigo: null e nenhum card', async () => {
+  test('segunda mensagem da volta, com o retrato ainda no card antigo: final, sem card e sem chamar o Chatwoot', async () => {
     const { env } = cenario();
     await abrirRetorno(env, 1, mensagem({ id: 9001 }), { tentativa: 1 });
+    const antes = chamadas.length;
 
-    expect(await abrirRetorno(env, 1, mensagem({ id: 9002, content: 'alo?' }), { tentativa: 1 })).toBeNull();
+    const r = await abrirRetorno(env, 1, mensagem({ id: 9002, content: 'alo?' }), { tentativa: 1 });
+
+    expect(r?.status).toBe('ignorado');
     expect(postsDoCard()).toHaveLength(1);
+    expect(chamadas).toHaveLength(antes);
   });
 
-  test('a volta pendente de outra mensagem ha menos de 10 minutos e dela: null e nenhum card', async () => {
+  test('a volta pendente de outra mensagem ha menos de 10 minutos e dela: final, nada escrito', async () => {
+    // e' a segunda mensagem durante a espera do anuncio da Meta, por exemplo
     const { env, exec, consultar } = cenario();
     exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior)
           VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}')`);
 
-    expect(await abrirRetorno(env, 1, mensagem({ id: 9002 }), { tentativa: 1 })).toBeNull();
-    expect(postsDoCard()).toEqual([]);
+    const r = await abrirRetorno(env, 1, mensagem({ id: 9002, conv: { custom_attributes: {} } }), { tentativa: 1 });
+
+    expect(r).toEqual({ status: 'ignorado', motivo: expect.stringContaining('volta #1') });
+    expect(chamadas).toEqual([]);
+    expect(consultar('SELECT protocol, task_id FROM conversations')).toEqual([{ protocol: ANTIGO, task_id: 1421 }]);
     expect(retornos(consultar)[0]).toMatchObject({ mensagem_id: '9001', status: 'pendente' });
   });
 
-  test('a volta pendente de outra mensagem ha 10 minutos ou mais: a primeira morreu, esta assume', async () => {
+  test('a volta pendente de outra mensagem ha 10 minutos ou mais: esta assume, mesmo com o lead falando ha segundos', async () => {
+    // a mensagem 2 mede o silencio a partir da 1: pela regra da volta ela nao e'
+    // volta, e era por isso que assumir nunca acontecia
     const { env, exec, consultar } = cenario();
     exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, created_at)
           VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', datetime('now', '-11 minutes'))`);
+    kb.anteriorDoLead = Date.now() - 5000;
 
     const r = await abrirRetorno(env, 1, mensagem({ id: 9002 }), { tentativa: 1 });
 
     expect(r?.status).toBe('ok');
     expect(postsDoCard()).toHaveLength(1);
     expect(retornos(consultar)).toEqual([expect.objectContaining({ n: 1, mensagem_id: '9002', status: 'feito' })]);
+  });
+
+  test('assumir a volta que outra execucao ainda segura: erro para a fila, sem chamar o Chatwoot', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, created_at, trabalhando_ate)
+          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', datetime('now', '-11 minutes'), datetime('now', '+1 minute'))`);
+
+    const r = await abrirRetorno(env, 1, mensagem({ id: 9002 }), { tentativa: 1 });
+
+    expect(r).toEqual({ status: 'erro', motivo: 'outra execucao esta abrindo esta volta' });
+    expect(chamadas).toEqual([]);
+    expect(retornos(consultar)[0]).toMatchObject({ mensagem_id: '9001', status: 'pendente' });
   });
 
   test('POST do card recusado (422): solta o card antigo, cria o novo e marca desligou_antigo', async () => {
@@ -331,6 +438,38 @@ describe('abrirRetorno', () => {
     expect(retornos(consultar)[0]).toMatchObject({
       status: 'pendente', task_novo: null, desligou_antigo: 0, erro: expect.stringContaining('422'), trabalhando_ate: null,
     });
+  });
+
+  test('422 duas vezes e a conversa nao volta ao card antigo: desligou_antigo fica 1', async () => {
+    // o card antigo ficou sem a conversa: o registro tem de dizer isso
+    const { env, consultar } = cenario();
+    kb.postsDoCard = [422, 422];
+    kb.religarFalha = true;
+
+    await expect(abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).rejects.toThrow(/422/);
+
+    expect(retornos(consultar)[0]).toMatchObject({ status: 'pendente', task_novo: null, desligou_antigo: 1 });
+  });
+
+  test('card antigo com outra conversa: so esta sai dele, e a ligacao volta inteira', async () => {
+    const { env } = cenario();
+    kb.antigo.conversation_ids = [76, 80];
+    kb.postsDoCard = [422, 422];
+
+    await expect(abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).rejects.toThrow(/422/);
+
+    expect(ligacoesDoAntigo()).toEqual([{ task: { conversation_ids: [80] } }, { task: { conversation_ids: [76, 80] } }]);
+  });
+
+  test('POST do card com 429: nao e recusa, o erro sobe sem mexer no card antigo', async () => {
+    const { env, consultar } = cenario();
+    kb.postsDoCard = [429];
+
+    await expect(abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).rejects.toThrow(/429/);
+
+    expect(postsDoCard()).toHaveLength(1);
+    expect(ligacoesDoAntigo()).toEqual([]);
+    expect(retornos(consultar)[0]).toMatchObject({ status: 'pendente', task_novo: null, desligou_antigo: 0 });
   });
 
   test('POST do card com 5xx: erro sobe sem mexer no card antigo', async () => {
@@ -436,12 +575,24 @@ describe('abrirRetorno', () => {
     const noOrganico = { task: { board_id: ORGANICO, board_step: { id: 44, name: 'Ganho' } } };
 
     await abrirRetorno(env, 1, mensagem({ id: 9001, ...noOrganico }), { tentativa: 1 });
-    // a segunda mensagem confere a etapa de novo: vem do KV
-    await abrirRetorno(env, 1, mensagem({ id: 9002, ...noOrganico }), { tentativa: 1 });
+    // outro card do Organico, fora da etapa final: a etapa sai do KV
+    const outroCard = { task: { id: 1422, board_id: ORGANICO, board_step: { id: 43, name: 'Entrada' } } };
+    expect(await abrirRetorno(env, 1, mensagem({ id: 9002, ...outroCard }), { tentativa: 1 })).toBeNull();
 
     expect(corpoDoCard()).toMatchObject({ board_id: FUNIL, board_step_id: NOVO_LEAD });
     expect(chamadas.filter((c) => /\/kanban\/boards\/8\/steps$/.test(c.url))).toHaveLength(1);
     expect(kv.has(`steps:2:${ORGANICO}`)).toBe(true);
+  });
+
+  test('card antigo num board que nao e o Organico, volta de anuncio: o card novo fica no board dele', async () => {
+    const { env } = cenario();
+    kb.antigo = { ...kb.antigo, board_id: OUTRO, board_step_id: 62 };
+
+    const r = await abrirRetorno(env, 1, mensagem({ task: { board_id: OUTRO, board_step: { id: 62, name: 'Fechado' } } }), { tentativa: 1 });
+
+    expect(r?.status).toBe('ok');
+    // o lead e' do Google, mas so' o Organico vai para o funil
+    expect(corpoDoCard()).toMatchObject({ board_id: OUTRO, board_step_id: 61 });
   });
 
   test('segunda volta meses depois: " #2", protocolo -R2 da raiz', async () => {
