@@ -97,6 +97,43 @@ describe('Tainã: Geral so com lead do Meta', () => {
   });
 });
 
+describe('lead que volta: outra linha com o mesmo telefone', () => {
+  // CAB: Link, Status, DATA, HORA, SEQUENCIA, Canal, NOME, TELEFONE
+  const original = ['', '', '', '', '1', 'Meta', 'Vital', '5511999990000'];
+
+  function comRetorno() {
+    const c = cenario();
+    c.exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_e164, utm_source, utm_medium, origem, evento)
+            VALUES (5, 'TAINA-VOLTA-1', 'Vital #1', '+5511999990000', 'instagram', 'mensagem', 'mensagem', 'ctwa')`);
+    abas.Geral!.push(original);
+    return c;
+  }
+
+  test('o retorno acrescenta a sua linha mesmo com o original na aba; rodar de novo nao duplica', async () => {
+    const { env } = comRetorno();
+    await espelharNaPlanilha(env, 5, { tipo: 'entrada', protocolo: 'TAINA-VOLTA-1', ensaio: false });
+    expect(abas.Geral!.length).toBe(3);
+    expect(abas.Geral![1]).toEqual(original);
+    expect(abas.Geral![2]![6]).toBe('Vital #1');
+
+    await espelharNaPlanilha(env, 5, { tipo: 'entrada', protocolo: 'TAINA-VOLTA-1', ensaio: false });
+    expect(abas.Geral!.length).toBe(3);
+  });
+
+  test('a linha muda de lugar na releitura: completa a do retorno e nao a do original', async () => {
+    const c = comRetorno();
+    const retornoIncompleto = ['', '', '', '', '', '', 'Vital #1', '5511999990000'];
+    abas.Geral = [CAB, retornoIncompleto, original];
+    // o script da planilha reordena depois da leitura inteira
+    geralDepoisDaLeitura = [CAB, original, retornoIncompleto];
+    await espelharNaPlanilha(c.env, 5, { tipo: 'entrada', protocolo: 'TAINA-VOLTA-1', ensaio: false });
+    expect(abas.Geral!.length).toBe(3);
+    expect(abas.Geral![1]).toEqual(original);
+    expect(abas.Geral![2]![6]).toBe('Vital #1');
+    expect(abas.Geral![2]![5]).not.toBe('');
+  });
+});
+
 describe('a linha do lead nao pode se perder numa falha passageira', () => {
   const SOBRECARGA = 'D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window';
   const naoEspera = [0, 0];

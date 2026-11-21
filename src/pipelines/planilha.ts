@@ -1,8 +1,9 @@
 import type { Env } from '../env';
+import { voltaDoNome } from '../domain/retorno';
 import { postarNaPlanilha } from '../clients/n8n';
 import { SheetsClient } from '../clients/sheets';
 import {
-  montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna, campoDaColunaLeads, jaTemTelefone,
+  montarRegistro, montarLinhaPorCabecalho, linhaDeLeads, indiceParaColuna, campoDaColunaLeads, jaTemTelefone, linhaDoLead,
   abasDoLead, lerCanaisDaGeral, telefoneEmLink, dataHoraBrasilia,
   type CanalDaGeral, type ContextoPlanilha, type LeadDaPlanilha,
 } from '../domain/planilha';
@@ -236,12 +237,17 @@ async function acrescentarLead(
    *
    * So' o que esta' em branco: o que o time escreveu na mao fica.
    */
-  const doLead = (l: string[]) => jaTemTelefone([l[iFone] ?? '', l[iLink] ?? ''], telefone);
+  // Lead que volta tem outra linha com o mesmo telefone, com " #n" no NOME: o
+  // telefone sozinho nao diz de quem e' a linha, a volta tambem tem que bater.
+  const volta = voltaDoNome(String(registro.nome ?? ''));
+  const iNome = cab.findIndex((h) => campoDaColunaLeads(h) === 'nome');
+  const doLead = (l: string[]) =>
+    jaTemTelefone([l[iFone] ?? '', l[iLink] ?? ''], telefone) && (iNome < 0 || voltaDoNome(l[iNome] ?? '') === volta);
   const completar = (atual: string[]) =>
     cab.map((_, i) => (String(atual[i] ?? '').trim() ? String(atual[i]) : (linha[i] ?? '')));
   const igual = (a: string[], atual: string[]) => a.every((v, i) => v === String(atual[i] ?? ''));
 
-  let n = telefone ? corpo.findIndex(doLead) : -1;
+  let n = telefone ? linhaDoLead(cab, corpo, telefone, volta) : -1;
   if (n < 0) {
     await sheets.acrescentar(doc, aba, linha);
     return;
@@ -263,7 +269,7 @@ async function acrescentarLead(
       if (!igual(completa, atual)) await sheets.atualizar(doc, aba, n + 2, ultima, completa);
       return;
     }
-    n = (await sheets.tudo(doc, aba)).slice(1).findIndex(doLead);
+    n = linhaDoLead(cab, (await sheets.tudo(doc, aba)).slice(1), telefone, volta);
     // apagado da aba neste meio tempo: foi o time, nao recria
     if (n < 0) return;
   }

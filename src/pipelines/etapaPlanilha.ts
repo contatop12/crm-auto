@@ -2,7 +2,8 @@ import type { Env } from '../env';
 import { SheetsClient } from '../clients/sheets';
 import { ChatwootClient } from '../clients/chatwoot';
 import { parseKanbanTask, type TaskDoKanban } from '../domain/kanbanTask';
-import { linhaDoTelefone, colunaDaEtapa, indiceParaColuna } from '../domain/planilha';
+import { voltaDoTitulo } from '../domain/retorno';
+import { linhaDoTelefone, linhaDoLead, colunaDaEtapa, indiceParaColuna } from '../domain/planilha';
 
 /**
  * A etapa do card no Kanban, espelhada na aba Geral: na coluna ETAPA quando a
@@ -76,7 +77,7 @@ export async function espelharEtapaNaGeral(env: Env, tenantId: number, payload: 
   // senao o Status cairia no lead que tomou aquele lugar.
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     const linhas = await sheets.tudo(destino.doc, destino.aba);
-    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, soVazia(destino, t));
+    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, voltaDoTitulo(t.titulo), soVazia(destino, t));
     if ('resultado' in alvo) return alvo.resultado;
 
     const cab = linhas[0] ?? [];
@@ -140,7 +141,7 @@ export async function sincronizarEtapasNaGeral(
   const sheets = new SheetsClient(env);
   const linhas = await sheets.tudo(destino.doc, destino.aba);
   for (const { t, etapa, telefone } of pendentes) {
-    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, soVazia(destino, t));
+    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, voltaDoTitulo(t.titulo), soVazia(destino, t));
     if ('resultado' in alvo) {
       if (alvo.resultado.status === 'erro') throw new Error(alvo.resultado.motivo);
       detalhes.push(`card ${t.taskId} (${t.nome || t.titulo}): ${alvo.resultado.motivo}`);
@@ -238,6 +239,7 @@ function celulaDoStatus(
   aba: string,
   telefone: string,
   etapa: string,
+  volta: number,
   soVazia = false,
 ): { celula: string; linha: number; antes: string; coluna: string } | { resultado: Resultado } {
   const cab = linhas[0] ?? [];
@@ -246,7 +248,8 @@ function celulaDoStatus(
     return { resultado: { status: 'erro', motivo: `a aba "${aba}" nao tem a coluna ETAPA nem Status`, retentar: false } };
   }
   const corpo = linhas.slice(1);
-  const i = linhaDoTelefone(cab, corpo, telefone);
+  // o card da volta N escreve na linha da volta N: o telefone e' o mesmo nas duas
+  const i = linhaDoLead(cab, corpo, telefone, volta);
   if (i < 0) {
     return { resultado: { status: 'ignorado', motivo: `telefone ${telefone} nao esta na aba "${aba}"` } };
   }

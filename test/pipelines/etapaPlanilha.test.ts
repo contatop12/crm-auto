@@ -81,6 +81,41 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+describe('lead que volta: duas linhas com o mesmo telefone', () => {
+  const VITAL = ['', 'Canal', '1', '', '', 'Vital', '5511999990000', '', ''];
+  const VITAL1 = ['', 'Canal', '2', '', '', 'Vital #1', '5511999990000', '', ''];
+
+  const cardVital = (title: string) =>
+    card({ title, custom_attributes: {}, contacts: [{ name: 'Vital', phone_number: '+5511999990000' }] });
+
+  test('card com sufixo #1 grava na linha "Vital #1", em qualquer ordem', async () => {
+    const { env } = cenario();
+    geral = [CAB, VITAL, VITAL1];
+    await espelharEtapaNaGeral(env, 3, cardVital('#1240 - 5511999990000 - Vital #1'));
+    expect(gravadas).toEqual([{ range: "'Geral'!I3", valor: 'Agendamento Realizado' }]);
+
+    gravadas = [];
+    geral = [CAB, VITAL1, VITAL];
+    await espelharEtapaNaGeral(env, 3, cardVital('#1240 - 5511999990000 - Vital #1'));
+    expect(gravadas).toEqual([{ range: "'Geral'!I2", valor: 'Agendamento Realizado' }]);
+  });
+
+  test('card sem sufixo grava na linha "Vital", em qualquer ordem', async () => {
+    const { env } = cenario();
+    geral = [CAB, VITAL1, VITAL];
+    await espelharEtapaNaGeral(env, 3, cardVital('#1100 - 5511999990000 - Vital'));
+    expect(gravadas).toEqual([{ range: "'Geral'!I3", valor: 'Agendamento Realizado' }]);
+  });
+
+  test('card de uma volta que ainda nao tem linha nao grava no original', async () => {
+    const { env } = cenario();
+    geral = [CAB, VITAL];
+    const r = await espelharEtapaNaGeral(env, 3, cardVital('#1240 - 5511999990000 - Vital #1'));
+    expect(r.status).toBe('ignorado');
+    expect(gravadas).toHaveLength(0);
+  });
+});
+
 describe('espelharEtapaNaGeral', () => {
   test('grava o nome da etapa na coluna Status da linha do telefone', async () => {
     const { env } = cenario();

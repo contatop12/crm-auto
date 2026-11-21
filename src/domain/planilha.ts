@@ -1,6 +1,7 @@
 import { montarCanal } from './canal';
 import { detectOrigin, detectPlatform } from './platform';
 import { phoneKey } from './phone';
+import { voltaDoNome } from './retorno';
 import { nomeParaExibir, nomeUtil } from './nomeLead';
 import { origemDoAnuncio } from './origemAnuncio';
 
@@ -541,6 +542,30 @@ export function linhaDoTelefone(cabecalho: string[], corpo: string[][], telefone
     .filter((c) => c.campo === 'telefone' || c.campo === 'link_whatsapp')
     .map((c) => c.i);
   return corpo.findIndex((l) => colunas.some((i) => phoneKey(l[i] ?? '') === alvo));
+}
+
+/**
+ * A linha do lead com este telefone NESTA volta, ou -1.
+ *
+ * O lead que volta (cartao novo, ciclo novo) tem outra linha com o mesmo
+ * telefone: o NOME termina em " #n". A planilha e' reordenada por outro processo,
+ * entao "a primeira" nao e' "a mais antiga": a volta 0 pula as linhas com sufixo
+ * e a volta n so' casa com o sufixo exato. Sem coluna NOME nao ha como distinguir:
+ * vale a primeira do telefone, como sempre foi.
+ */
+export function linhaDoLead(cabecalho: string[], corpo: string[][], telefone: string, volta: number): number {
+  const alvo = phoneKey(telefone);
+  if (!alvo) return -1;
+  const colunas = cabecalho
+    .map((h, i) => ({ campo: campoDaColunaLeads(h), i }))
+    .filter((c) => c.campo === 'telefone' || c.campo === 'link_whatsapp')
+    .map((c) => c.i);
+  const iNome = cabecalho.findIndex((h) => campoDaColunaLeads(h) === 'nome');
+  return corpo.findIndex(
+    (l) =>
+      colunas.some((i) => phoneKey(l[i] ?? '') === alvo) &&
+      (iNome < 0 || voltaDoNome(l[iNome] ?? '') === volta),
+  );
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral, linhaDoTelefone, colunaDaEtapa } from '../../src/domain/planilha';
+import { CAMPOS_PLANILHA, montarRegistro, dataHoraBrasilia, urlDoWebhook, montarLinhaPorCabecalho, campoDaColunaLeads, linhaDeLeads, idDaPlanilha, indiceParaColuna, jaTemTelefone, abasDoLead, telefoneEmLink, lerCanaisDaGeral, gravarCanaisDaGeral, linhaDoTelefone, linhaDoLead, colunaDaEtapa } from '../../src/domain/planilha';
 
 const lead = {
   nome: 'Amanda Constantino',
@@ -392,6 +392,35 @@ describe('etapa do card na coluna Status da Geral', () => {
   test('-1 quando o telefone nao esta na aba ou e vazio', () => {
     expect(linhaDoTelefone(cab, corpo, '+5511999999999')).toBe(-1);
     expect(linhaDoTelefone(cab, corpo, '')).toBe(-1);
+  });
+
+  describe('linhaDoLead: lead que volta tem outra linha com o mesmo telefone', () => {
+    const cabN = ['TELEFONE', 'NOME'];
+    const original = ['5511999990000', 'Vital'];
+    const volta1 = ['5511999990000', 'Vital #1'];
+
+    test.each([
+      ['original primeiro', [original, volta1], 0, 1],
+      ['original depois (a planilha reordena)', [volta1, original], 1, 0],
+    ])('%s', (_, corpo, linhaVolta0, linhaVolta1) => {
+      expect(linhaDoLead(cabN, corpo, '5511999990000', 0)).toBe(linhaVolta0);
+      expect(linhaDoLead(cabN, corpo, '5511999990000', 1)).toBe(linhaVolta1);
+      expect(linhaDoLead(cabN, corpo, '5511999990000', 2)).toBe(-1);
+    });
+
+    test('so o original na aba: a volta 1 nao casa com ele', () => {
+      expect(linhaDoLead(cabN, [original], '5511999990000', 1)).toBe(-1);
+    });
+
+    test('telefone que nao esta na aba: -1', () => {
+      expect(linhaDoLead(cabN, [original], '5511888880000', 0)).toBe(-1);
+    });
+
+    test('sem coluna NOME: a primeira do telefone, qualquer volta', () => {
+      const corpo = [['5511999990000'], ['5511999990000']];
+      expect(linhaDoLead(['TELEFONE'], corpo, '5511999990000', 0)).toBe(0);
+      expect(linhaDoLead(['TELEFONE'], corpo, '5511999990000', 1)).toBe(0);
+    });
   });
 
   test('coluna Status pelo nome, sem caixa nem acento', () => {
