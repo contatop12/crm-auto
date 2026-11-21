@@ -733,5 +733,107 @@ describe('atribuirLead', () => {
       await expect(atribuirLead(env, 1, mensagem('Oi'), { retorno })).rejects.toThrow('kanban recusou');
       expect(escritasNoChatwoot()).toEqual([]);
     });
+
+    test('frase de entrada com o clique antigo na janela do telefone: vale a copia', async () => {
+      // a mesma ordem do fluxo normal (telefone antes da frase): a copia guarda
+      // o gclid, e lead so' da frase nao tem identificador de clique
+      const { env, consultar, exec, retorno, criarCard } = volta();
+      exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+            VALUES (1, 'Olá, vim pelo anúncio do Google!', 'mensagem', 'google')`);
+
+      await atribuirLead(env, 1, mensagem('Olá, vim pelo anúncio do Google! Quero mais um'), { retorno });
+
+      const ciclo = lead(consultar, `${ANTIGO}-R1`)!;
+      expect(ciclo.evento).toBe('retorno');
+      expect(ciclo.gclid).toBe('Cj0volta');
+      expect(lead(consultar, 'VITA-MSG-76-R1')).toBeUndefined();
+      expect(criarCard.mock.calls[0]![0].protocolo).toBe(`${ANTIGO}-R1`);
+    });
+
+    describe('planilha de entrada', () => {
+      const PLANILHA = 'https://planilha.teste/n8n';
+      const entradas = () =>
+        chamadas.filter((c) => c.url === PLANILHA).map((c) => c.corpo as { tipo: string }).filter((r) => r.tipo === 'entrada');
+
+      /** Ciclo anterior sem anuncio: clique do site sem gclid nem UTM. */
+      function voltaSemAnuncio(abaDireto: string | null) {
+        const ctx = volta();
+        ctx.exec(`UPDATE leads SET gclid = NULL, utm_source = NULL, utm_medium = NULL, utm_campaign = NULL,
+                  utm_campaign_nome = NULL, utm_id = NULL, utm_term = NULL WHERE protocol = '${ANTIGO}'`);
+        ctx.exec(`UPDATE tenant_config SET sheets_ativo = 1, planilha_modo = 'n8n', planilha_webhook_url = '${PLANILHA}',
+                  sheets_aba_direto = ${abaDireto ? `'${abaDireto}'` : 'NULL'} WHERE tenant_id = 1`);
+        return ctx;
+      }
+
+      test('volta de lead sem anuncio, cliente sem aba de lead direto: nao entra', async () => {
+        // a regra de hoje para esse tipo de lead: sem conversao, sem aba direta, fora da Geral
+        const { env, retorno, criarCard } = voltaSemAnuncio(null);
+        const r = await atribuirLead(env, 1, mensagem('Voltei'), { retorno });
+        expect(r.status).toBe('ok');
+        expect(criarCard).toHaveBeenCalledTimes(1);
+        expect(entradas()).toEqual([]);
+      });
+
+      test('volta de lead sem anuncio, cliente com aba de lead direto: entra', async () => {
+        const { env, retorno } = voltaSemAnuncio('Direto');
+        await atribuirLead(env, 1, mensagem('Voltei'), { retorno });
+        expect(entradas()).toHaveLength(1);
+        expect(JSON.stringify(entradas()[0])).toContain(`${ANTIGO}-R1`);
+      });
+
+      test('volta de lead de anuncio: entra, mesmo sem aba de lead direto', async () => {
+        const { env, exec, retorno } = volta();
+        exec(`UPDATE tenant_config SET sheets_ativo = 1, planilha_modo = 'n8n', planilha_webhook_url = '${PLANILHA}'
+              WHERE tenant_id = 1`);
+        await atribuirLead(env, 1, mensagem('Voltei'), { retorno });
+        expect(entradas()).toHaveLength(1);
+      });
+    });
+
+    test('a atribuicao do ciclo antigo que o novo nao tem sai da conversa', async () => {
+      // um ciclo novo do anuncio da Meta nao pode mostrar o gclid do Google antigo
+      const { env, exec, retorno } = volta();
+      exec(`INSERT INTO leads (tenant_id, protocol, utm_source, utm_medium, fbc, origem, evento, created_at)
+            VALUES (1, 'VITA-MNOVO00003', 'facebook', 'paid', 'fb.1.2.3', 'clique', 'whatsapp_click', datetime('now', '-5 minutes'))`);
+      atributosAtuais = {
+        protocolo: ANTIGO, gclid: 'Cj0volta', utm_source: 'google', utm_medium: 'cpc', utm_term: 'aparelho auditivo',
+        funil: 'Lead', conversa_enviada: 'true',
+      };
+
+      await atribuirLead(env, 1, mensagem('Oi [Protocolo: VITA-MNOVO00003]', {
+        custom_attributes: { protocolo: ANTIGO, funil: 'Lead' },
+      }), { retorno });
+
+      const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+      expect(attrs).toEqual({
+        protocolo: 'VITA-MNOVO00003', utm_source: 'facebook', utm_medium: 'paid',
+        funil: 'Lead', conversa_enviada: 'true',
+      });
+    });
+
+    test('copia nao recebe etiqueta de origem; a conversa ja tem as do primeiro ciclo', async () => {
+      // recalcular pela `evento = 'retorno'` acrescentaria um `msg-site` errado
+      const { env, exec, retorno } = volta();
+      exec(`UPDATE tenant_config SET evo_instancia = 'vita' WHERE tenant_id = 1`);
+      etiquetasAtuais = [];
+
+      const r = await atribuirLead(env, 1, mensagem('Voltei'), { retorno });
+
+      expect(r.status).toBe('ok');
+      expect(chamadas.filter((c) => /labels/.test(c.url))).toEqual([]);
+      expect(chamadas.filter((c) => /evo\.teste/.test(c.url))).toEqual([]);
+    });
+
+    test('anuncio novo recebe as etiquetas como hoje', async () => {
+      const { env, exec, retorno } = volta();
+      exec(`INSERT INTO leads (tenant_id, protocol, gclid, utm_source, utm_medium, utm_campaign, origem, evento, created_at)
+            VALUES (1, 'VITA-MNOVO00002', 'Cj0novo', 'google', 'cpc', 'Vita - Search - Novo', 'clique', 'whatsapp_click',
+                    datetime('now', '-5 minutes'))`);
+      etiquetasAtuais = [];
+
+      await atribuirLead(env, 1, mensagem('Oi! [Protocolo: VITA-MNOVO00002]'), { retorno });
+
+      expect(corpoDe<{ labels: string[] }>(/\/labels$/).labels).toEqual(expect.arrayContaining(['google']));
+    });
   });
 });

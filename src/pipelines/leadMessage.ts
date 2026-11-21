@@ -48,6 +48,11 @@ export const MOTIVO_VOLTA_SEM_LEAD = 'volta sem lead';
 /** Nome do lead do ciclo quando o contato nao tem nome que preste. */
 const SEM_NOME_NO_CICLO = 'Sem nome';
 
+/** As chaves de atribuicao que `utmsDoCard` grava na conversa e no card. */
+const CHAVES_DE_ATRIBUICAO = [
+  'protocolo', 'gclid', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_id', 'utm_term', 'utm_content',
+];
+
 /**
  * O lead que voltou (ver domain/retorno.ts): a atribuicao roda de novo na
  * mesma conversa, para um ciclo novo com protocolo proprio. Planilha, aviso e
@@ -206,8 +211,10 @@ export async function atribuirLead(
   // (o clique antigo achado pelo telefone, ou a mensagem antiga repetida). Sem
   // anuncio novo, o ciclo herda a origem do anterior: as conversoes voltam para
   // a mesma campanha.
+  let herdado = false;
   if (retorno && (!lead || retorno.usados.includes(lead.protocol))) {
     lead = await leadHerdado(env, tenantId, retorno);
+    herdado = !!lead;
   }
 
   if (!lead) {
@@ -372,18 +379,23 @@ export async function atribuirLead(
   // (a plataforma decide o board), e antes da conversa ganhar o protocolo
   // novo. Falhou: sobe para a fila retentar, sem conversa apontando para um
   // ciclo sem card.
+  const atributos = utmsDoCard(atribuicao);
   const cardDoCiclo = retorno
-    ? await retorno.criarCard({ protocolo: lead.protocol, plataforma, atributos: utmsDoCard(atribuicao) })
+    ? await retorno.criarCard({ protocolo: lead.protocol, plataforma, atributos })
     : null;
 
+  // Na volta, a atribuicao do ciclo antigo que o novo nao tem sai da conversa:
+  // o ciclo do anuncio da Meta nao pode mostrar o gclid do Google antigo.
+  const doCicloAntigo = retorno ? CHAVES_DE_ATRIBUICAO.filter((k) => !(k in atributos)) : [];
+
   await cw.mesclarAtributosDaConversa(acc, conversaId, {
-    ...utmsDoCard(atribuicao),
+    ...atributos,
     // gravado por ultimo, junto com o resto: a regra atuadora reage ao update
     // da conversa, entao quando ela rodar os atributos ja estao todos la'.
     // Na volta, nunca o PROMOVER: a regra transferiria o card ANTIGO da
     // conversa. O card novo ja' nasceu no board certo; falta so' o `Lead`.
     ...(promover ? { funil: retorno ? 'Lead' : SENTINELA_PROMOVER } : {}),
-  });
+  }, doCicloAntigo);
 
   // A promocao e' feita por uma regra do Chatwoot, e o Chatwoot NAO dispara
   // automacao a partir de automacao: o `transfer_to_board` dela nao emite
@@ -399,9 +411,11 @@ export async function atribuirLead(
   // nao sobe conversao, entao nada levava ele a planilha. No cliente que tem a
   // aba de lead direto ele entra na Geral e nela; o Banco recebe o clique.
   // O do perfil tambem: sem conversao, e' daqui que ele chega a Geral.
-  // A volta entra sempre: o ciclo e' lead novo em tudo (linha e sequencia
-  // novas na Geral), e nao depende de conversao subir para chegar la'.
-  if (retorno || (!daAds && (cfg.sheets_aba_direto || (doPerfil && promover)))) {
+  // A volta de lead de anuncio entra aqui, antes da conversao: a do Google ia
+  // a Geral pela conversao, e clique antigo pode nao subir conversao nenhuma.
+  // A de lead sem anuncio segue a regra de cima, sem depender da promocao (a
+  // conversa da volta ja' estava no funil).
+  if ((retorno && daAds) || (!daAds && (cfg.sheets_aba_direto || (doPerfil && (promover || retorno))))) {
     await espelharNaPlanilha(env, tenantId, { tipo: 'entrada', protocolo: lead.protocol, ensaio: false })
       .catch((e: Error) => {
         console.log(JSON.stringify({ acao: 'planilha_falhou', tipo: 'entrada', protocolo: lead.protocol, erro: e.message }));
@@ -428,7 +442,9 @@ export async function atribuirLead(
   // O lead que nasceu so' da frase nao tem clique, e ai' nao ha' como cravar.
   const veioDoSite = !!lead.page_url;
   const vocab = await vocabulario(env, tenantId);
-  const etiquetas = buildLabels(
+  // A copia herda a origem do primeiro ciclo, cujas etiquetas a conversa ja'
+  // tem: recalcular pelo `evento = 'retorno'` acrescentaria um `msg-site` errado.
+  const etiquetas = herdado ? { slugs: [], chatwoot: [], whatsapp: [] } : buildLabels(
     {
       origem,
       plataforma,
