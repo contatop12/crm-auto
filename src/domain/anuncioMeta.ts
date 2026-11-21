@@ -44,8 +44,12 @@ export function anuncioDoMeta(texto: string | null | undefined): AnuncioMeta | n
   };
 }
 
-/** Derivado da conversa, como o da frase: a segunda mensagem cai no mesmo lead. */
-export function protocoloDoAnuncio(prefixo: string, conversaId: number): string {
+/**
+ * Derivado da conversa, como o da frase: a segunda mensagem cai no mesmo lead.
+ * `ciclo` > 0 e' o lead que voltou por um anuncio novo (`-R<ciclo>`), como na frase.
+ */
+export function protocoloDoAnuncio(prefixo: string, conversaId: number, ciclo = 0): string {
   const p = (prefixo ?? '').trim().toUpperCase();
-  return p ? `${p}-CTWA-${conversaId}` : `CTWA-${conversaId}`;
+  const base = p ? `${p}-CTWA-${conversaId}` : `CTWA-${conversaId}`;
+  return ciclo > 0 ? `${base}-R${ciclo}` : base;
 }

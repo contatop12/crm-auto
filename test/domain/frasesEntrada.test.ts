@@ -80,6 +80,14 @@ describe('protocoloDaFrase', () => {
   test('prefixo vazio ainda produz chave utilizavel', () => {
     expect(protocoloDaFrase('', 78)).toBe('MSG-78');
   });
+
+  test('o lead que volta pela frase ganha o protocolo do ciclo', () => {
+    // dois ciclos na mesma conversa dariam o mesmo protocolo, e a volta cairia
+    // na linha, no aviso e na conversao do ciclo antigo
+    expect(protocoloDaFrase('VITA', 78, 1)).toBe('VITA-MSG-78-R1');
+    expect(protocoloDaFrase('', 78, 2)).toBe('MSG-78-R2');
+    expect(protocoloDaFrase('VITA', 78, 0)).toBe('VITA-MSG-78');
+  });
 });
 
 describe('frase padrao do Google', () => {

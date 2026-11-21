@@ -92,10 +92,14 @@ export function casarFraseDeEntrada(
  *
  * O `MSG` no meio é deliberado. Protocolo de clique é `VITA-<base36>`; quem ler
  * este saberá de cara que não há gclid para procurar.
+ *
+ * `ciclo` > 0 é o lead que voltou (`-R<ciclo>`): a volta cai na mesma conversa,
+ * e sem o ciclo ela herdaria a linha, o aviso e a conversão do ciclo antigo.
  */
-export function protocoloDaFrase(prefixo: string, conversaId: number): string {
+export function protocoloDaFrase(prefixo: string, conversaId: number, ciclo = 0): string {
   const p = (prefixo ?? '').trim().toUpperCase();
-  return p ? `${p}-MSG-${conversaId}` : `MSG-${conversaId}`;
+  const base = p ? `${p}-MSG-${conversaId}` : `MSG-${conversaId}`;
+  return ciclo > 0 ? `${base}-R${ciclo}` : base;
 }
 
 /** O erro a mostrar no cadastro, ou `null` quando a frase serve. */

@@ -42,4 +42,10 @@ describe('protocoloDoAnuncio', () => {
     expect(protocoloDoAnuncio('TAINA', 628)).toBe('TAINA-CTWA-628');
     expect(protocoloDoAnuncio('', 628)).toBe('CTWA-628');
   });
+
+  test('o lead que volta por um anuncio novo ganha o protocolo do ciclo', () => {
+    expect(protocoloDoAnuncio('TAINA', 628, 1)).toBe('TAINA-CTWA-628-R1');
+    expect(protocoloDoAnuncio('', 628, 3)).toBe('CTWA-628-R3');
+    expect(protocoloDoAnuncio('TAINA', 628, 0)).toBe('TAINA-CTWA-628');
+  });
 });
