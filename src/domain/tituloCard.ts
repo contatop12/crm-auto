@@ -45,7 +45,9 @@ export function tituloDoCard(
   // O nome do contato quando presta ("*~", emoji e o proprio telefone nao
   // prestam). Senao, o que o titulo ja' tinha depois do telefone.
   const doTitulo = (m[2] ?? '').replace(/^\+?\d{10,}\s*(?:-\s*)?/, '');
-  const quem = nomeUtil(nome, { telefone }) ?? nomeUtil(doTitulo, { telefone });
+  // O nome do lead tambem leva " #n" (retorno.ts); o sufixo do titulo e' um so',
+  // entao o do nome sai, e nome que sobra vazio vira "sem nome"
+  const quem = semVolta(nomeUtil(nome, { telefone }) ?? nomeUtil(doTitulo, { telefone }) ?? '').trim() || null;
 
   const base = quem ? `#${m[1]} - ${digitos} - ${quem}` : `#${m[1]} - ${digitos}`;
   const novo = volta ? `${base} #${volta}` : base;

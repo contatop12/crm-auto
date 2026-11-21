@@ -82,4 +82,10 @@ describe('tituloDoCard', () => {
   test('Instagram (sem telefone) com sufixo continua null', () => {
     expect(tituloDoCard('#1240 - Vital #1', null, 'Vital')).toBeNull();
   });
+
+  test('nome do contato que ja traz o " #n" nao dobra o sufixo', () => {
+    expect(tituloDoCard('#1240 - 5511999990000 - Vital #1', '+5511999990000', 'Vital #1')).toBeNull();
+    expect(tituloDoCard('#1240 - 5511999990000 - Antigo #1', '+5511999990000', 'Vital #1'))
+      .toBe('#1240 - 5511999990000 - Vital #1');
+  });
 });
