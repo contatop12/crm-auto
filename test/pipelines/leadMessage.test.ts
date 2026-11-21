@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fakeD1 } from '../helpers/fakeD1';
-import { atribuirLead } from '../../src/pipelines/leadMessage';
+import { atribuirLead, MOTIVO_VOLTA_SEM_LEAD, type ModoRetorno } from '../../src/pipelines/leadMessage';
 import type { Env } from '../../src/env';
 
 function cenario() {
@@ -515,6 +515,223 @@ describe('atribuirLead', () => {
       exec(`INSERT INTO group_notifications (tenant_id, chave, protocolo, status) VALUES (1, 'VITA-MRIAP9IN8WNQ', 'VITA-MRIAP9IN8WNQ', 'enviado')`);
       await atribuirLead(env, 1, webhook());
       expect(avisos(consultar)[0]!.status).toBe('enviado');
+    });
+  });
+
+  describe('modo de volta: o lead que volta abre um ciclo novo', () => {
+    const FONE = '+5511999990000';
+    const ANTIGO = 'VITA-MVOLTA0001';
+
+    interface LinhaDoCiclo {
+      protocol: string; nome: string | null; origem: string; evento: string; gclid: string | null;
+      utm_campaign_nome: string | null; page_url: string | null; phone_key: string | null;
+      quiz_version: string | null; quiz_valor: number | null; quiz_form_id: string | null;
+      valor_proposta: number | null; retorno_de: string | null; clique_em: string | null; created_at: string;
+    }
+
+    /**
+     * Ciclo anterior: lead do Google que chegou pelo formulario, ja' com valor
+     * fechado no card. A conversa ainda carrega o protocolo dele.
+     */
+    function volta(o: { diasDoClique?: number; retorno?: Partial<ModoRetorno> } = {}) {
+      const ctx = cenario();
+      // "Vita" esta' dentro de "Vital": o nome do lead passaria por perfil da
+      // propria empresa e viraria "Sem nome"
+      ctx.exec(`UPDATE tenants SET nome = 'Clinica Teste' WHERE id = 1`);
+      ctx.exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_raw, phone_e164, phone_key, gclid, utm_source, utm_medium,
+                  utm_campaign, utm_campaign_nome, utm_id, utm_term, page_url, origem, evento, quiz_version, quiz_valor,
+                  quiz_form_id, valor_proposta, created_at)
+                VALUES (1, '${ANTIGO}', 'Vital', '${FONE}', '${FONE}', '1199990000', 'Cj0volta', 'google', 'cpc',
+                  'Vita - Search - Aparelhos', 'Vita - Search - Aparelhos', '23920679510', 'aparelho auditivo',
+                  'https://audicao.exemplo/whatsapp', 'formulario', 'form_submit', 'q2', 30, 'form-1', 4500,
+                  datetime('now', '-${o.diasDoClique ?? 40} day'))`);
+      atributosAtuais = { protocolo: ANTIGO };
+      const criarCard = vi.fn(async (_lead: Parameters<ModoRetorno['criarCard']>[0]) => 1500);
+      const retorno: ModoRetorno = { n: 1, usados: [ANTIGO], anterior: ANTIGO, criarCard, ...o.retorno };
+      return { ...ctx, retorno, criarCard };
+    }
+
+    function mensagem(content: string, conv: Record<string, unknown> = {}) {
+      return webhook({ content }, {
+        custom_attributes: { protocolo: ANTIGO },
+        meta: { sender: { name: 'Vital', phone_number: FONE } },
+        ...conv,
+      });
+    }
+
+    const lead = (consultar: ReturnType<typeof cenario>['consultar'], protocolo: string) =>
+      consultar<LinhaDoCiclo>(`SELECT * FROM leads WHERE tenant_id = 1 AND protocol = '${protocolo}'`)[0];
+    const escritasNoChatwoot = () => chamadas.filter((c) => c.metodo !== 'GET' && /cw\.teste/.test(c.url));
+
+    test('sem anuncio novo: o lead do ciclo e a copia do anterior, com protocolo -R1', async () => {
+      const { env, consultar, retorno, criarCard } = volta();
+      const original = lead(consultar, ANTIGO)!;
+      // o card nasce antes de a conversa ser gravada: a conversa nao pode
+      // apontar para o protocolo novo com o card antigo
+      let escritasAntesDoCard = -1;
+      criarCard.mockImplementation(async () => { escritasAntesDoCard = escritasNoChatwoot().length; return 1500; });
+
+      const r = await atribuirLead(env, 1, mensagem('Oi, quero fazer outro orcamento'), { retorno });
+
+      expect(r.status).toBe('ok');
+      const ciclo = lead(consultar, `${ANTIGO}-R1`)!;
+      expect(ciclo).toBeDefined();
+      expect(ciclo.evento).toBe('retorno');
+      expect(ciclo.origem).toBe('mensagem');
+      expect(ciclo.retorno_de).toBe(ANTIGO);
+      expect(ciclo.clique_em).toBe(original.created_at);
+      expect(ciclo.nome).toBe('Vital #1');
+      // identidade e atribuicao herdadas: a conversao volta para a mesma campanha
+      expect(ciclo.gclid).toBe('Cj0volta');
+      expect(ciclo.utm_campaign_nome).toBe('Vita - Search - Aparelhos');
+      expect(ciclo.page_url).toBe('https://audicao.exemplo/whatsapp');
+      expect(ciclo.phone_key).toBe('1199990000');
+      // o que era do ciclo antigo fica nele
+      expect(ciclo.quiz_version).toBeNull();
+      expect(ciclo.quiz_valor).toBeNull();
+      expect(ciclo.quiz_form_id).toBeNull();
+      expect(ciclo.valor_proposta).toBeNull();
+      expect(ciclo.created_at).not.toBe(original.created_at);
+      // o anterior nao muda
+      expect(lead(consultar, ANTIGO)!.nome).toBe('Vital');
+
+      expect(criarCard).toHaveBeenCalledTimes(1);
+      expect(criarCard).toHaveBeenCalledWith({
+        protocolo: `${ANTIGO}-R1`,
+        plataforma: 'google',
+        atributos: expect.objectContaining({ protocolo: `${ANTIGO}-R1`, gclid: 'Cj0volta', utm_source: 'google' }),
+      });
+      expect(escritasAntesDoCard).toBe(0);
+
+      const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+      expect(attrs.protocolo).toBe(`${ANTIGO}-R1`);
+      // o PROMOVER faria a regra do Chatwoot transferir o card ANTIGO
+      expect(attrs.funil).toBe('Lead');
+      expect(JSON.stringify(chamadas.map((c) => c.corpo))).not.toContain('PROMOVER');
+      // o card antigo nao e' tocado: o novo ja' nasce com os atributos
+      expect(chamadas.filter((c) => /kanban\/tasks/.test(c.url))).toEqual([]);
+
+      const [conversa] = consultar<{ protocol: string; task_id: number }>(
+        'SELECT protocol, task_id FROM conversations WHERE cw_conversation_id = 76',
+      );
+      expect(conversa).toEqual({ protocol: `${ANTIGO}-R1`, task_id: 1500 });
+      expect(r.motivo).toContain(`${ANTIGO}-R1`);
+    });
+
+    test('a mensagem antiga repetida, com o protocolo do ciclo anterior, tambem e copia', async () => {
+      const { env, consultar, retorno, criarCard } = volta();
+      await atribuirLead(env, 1, mensagem(`Ola [Protocolo: ${ANTIGO}]`), { retorno });
+      expect(lead(consultar, `${ANTIGO}-R1`)?.evento).toBe('retorno');
+      expect(criarCard.mock.calls[0]![0].protocolo).toBe(`${ANTIGO}-R1`);
+    });
+
+    test('segunda volta copia da raiz: -R2, sem encadear, com a data do clique original', async () => {
+      const { env, consultar, exec, criarCard } = volta();
+      exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_key, gclid, utm_source, origem, evento, retorno_de, clique_em, created_at)
+            VALUES (1, '${ANTIGO}-R1', 'Vital #1', '1199990000', 'Cj0volta', 'google', 'mensagem', 'retorno',
+                    '${ANTIGO}', '2026-09-01 10:00:00', datetime('now', '-20 day'))`);
+      const retorno: ModoRetorno = { n: 2, usados: [ANTIGO, `${ANTIGO}-R1`], anterior: `${ANTIGO}-R1`, criarCard };
+
+      await atribuirLead(env, 1, mensagem('Oi de novo'), { retorno });
+
+      const ciclo = lead(consultar, `${ANTIGO}-R2`)!;
+      expect(ciclo.retorno_de).toBe(ANTIGO);
+      expect(ciclo.clique_em).toBe('2026-09-01 10:00:00');
+      expect(ciclo.nome).toBe('Vital #2');
+      expect(lead(consultar, `${ANTIGO}-R1-R1`)).toBeUndefined();
+    });
+
+    test('protocolo novo na mensagem, de um clique que existe: anuncio novo, sem copia', async () => {
+      const { env, consultar, exec, retorno, criarCard } = volta();
+      exec(`INSERT INTO leads (tenant_id, protocol, phone_key, gclid, utm_source, utm_medium, utm_campaign, origem, evento, created_at)
+            VALUES (1, 'VITA-MNOVO00002', NULL, 'Cj0novo', 'google', 'cpc', 'Vita - Search - Novo', 'clique', 'whatsapp_click',
+                    datetime('now', '-5 minutes'))`);
+
+      const r = await atribuirLead(env, 1, mensagem('Oi! [Protocolo: VITA-MNOVO00002]'), { retorno });
+
+      expect(r.status).toBe('ok');
+      expect(lead(consultar, `${ANTIGO}-R1`)).toBeUndefined();
+      const novo = lead(consultar, 'VITA-MNOVO00002')!;
+      expect(novo.nome).toBe('Vital #1');
+      // so' a copia leva a ligacao com o ciclo anterior
+      expect(novo.retorno_de).toBeNull();
+      expect(novo.clique_em).toBeNull();
+      expect(criarCard).toHaveBeenCalledWith(expect.objectContaining({ protocolo: 'VITA-MNOVO00002', plataforma: 'google' }));
+      const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+      expect(attrs.protocolo).toBe('VITA-MNOVO00002');
+      expect(attrs.gclid).toBe('Cj0novo');
+    });
+
+    test('frase de entrada: o protocolo da conversa ganha o ciclo', async () => {
+      // clique anterior fora da janela do telefone (90 dias): a frase e' a fonte
+      const { env, consultar, exec, retorno, criarCard } = volta({ diasDoClique: 120 });
+      exec(`INSERT INTO lead_entry_phrases (tenant_id, frase, origem, plataforma)
+            VALUES (1, 'Olá, vim pelo anúncio do Google!', 'mensagem', 'google')`);
+
+      await atribuirLead(env, 1, mensagem('Olá, vim pelo anúncio do Google! Quero mais um'), { retorno });
+
+      const ciclo = lead(consultar, 'VITA-MSG-76-R1')!;
+      expect(ciclo.evento).toBe('frase_entrada');
+      expect(ciclo.nome).toBe('Vital #1');
+      expect(lead(consultar, 'VITA-MSG-76')).toBeUndefined();
+      expect(criarCard).toHaveBeenCalledWith(expect.objectContaining({ protocolo: 'VITA-MSG-76-R1' }));
+    });
+
+    test('sem lead anterior e sem fonte nova: volta sem lead, sem card', async () => {
+      const { env } = cenario();
+      const criarCard = vi.fn(async () => 1500);
+
+      const semAnterior = await atribuirLead(env, 1, mensagem('Oi, tudo bem?'), {
+        retorno: { n: 1, usados: [], anterior: null, criarCard },
+      });
+      // protocolo anterior que nao tem linha em `leads`: nada para copiar
+      const semLinha = await atribuirLead(env, 1, mensagem('Oi, tudo bem?'), {
+        retorno: { n: 1, usados: ['VITA-MSUMIU00001'], anterior: 'VITA-MSUMIU00001', criarCard },
+      });
+
+      for (const r of [semAnterior, semLinha]) {
+        expect(r.status).toBe('ignorado');
+        expect(r.motivo).toBe(MOTIVO_VOLTA_SEM_LEAD);
+      }
+      expect(criarCard).not.toHaveBeenCalled();
+      expect(escritasNoChatwoot()).toEqual([]);
+    });
+
+    test('sem nome aproveitavel: "Sem nome #1", para a Geral ainda achar a linha da volta', async () => {
+      const { env, consultar, exec, retorno } = volta();
+      exec(`UPDATE leads SET nome = NULL WHERE protocol = '${ANTIGO}'`);
+      await atribuirLead(env, 1, mensagem('Oi', { meta: { sender: { name: '😊', phone_number: FONE } } }), { retorno });
+      expect(lead(consultar, `${ANTIGO}-R1`)!.nome).toBe('Sem nome #1');
+    });
+
+    test('planilha e conversao de entrada sobem mesmo com a conversa ja no funil', async () => {
+      // fora da volta, conversa com `funil = Lead` nao sobe nada: o lead ja'
+      // tinha entrado. Na volta o ciclo e' lead novo em tudo.
+      const { env, consultar, exec, retorno } = volta();
+      exec(`UPDATE tenant_config SET sheets_ativo = 1, planilha_modo = 'n8n', planilha_webhook_url = 'https://planilha.teste/n8n'
+            WHERE tenant_id = 1`);
+      atributosAtuais = { protocolo: ANTIGO, funil: 'Lead' };
+
+      await atribuirLead(env, 1, mensagem('Voltei', { custom_attributes: { protocolo: ANTIGO, funil: 'Lead' } }), { retorno });
+
+      // a entrada vai antes da conversao, e nao depende dela subir
+      const planilha = chamadas.filter((c) => c.url === 'https://planilha.teste/n8n').map((c) => c.corpo as { tipo: string });
+      expect(planilha[0]?.tipo).toBe('entrada');
+      expect(JSON.stringify(planilha[0])).toContain(`${ANTIGO}-R1`);
+      expect(JSON.stringify(planilha[0])).toContain('Vital #1');
+      const cs = consultar<{ dedupe_key: string }>('SELECT dedupe_key FROM conversions');
+      expect(cs.map((c) => c.dedupe_key)).toEqual([`${ANTIGO}-R1-conversa`]);
+      // ja' estava no funil: o `Lead` fica, e o PROMOVER nao aparece
+      const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+      expect(attrs.funil).toBe('Lead');
+      expect(JSON.stringify(chamadas.map((c) => c.corpo))).not.toContain('PROMOVER');
+    });
+
+    test('falha ao criar o card sobe para a fila, sem gravar a conversa', async () => {
+      const { env, retorno, criarCard } = volta();
+      criarCard.mockRejectedValue(new Error('kanban recusou'));
+      await expect(atribuirLead(env, 1, mensagem('Oi'), { retorno })).rejects.toThrow('kanban recusou');
+      expect(escritasNoChatwoot()).toEqual([]);
     });
   });
 });

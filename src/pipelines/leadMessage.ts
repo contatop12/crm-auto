@@ -17,6 +17,7 @@ import type { LabelVocabulary, LeadCandidate } from '../domain/types';
 import { destinoDoLead, type SinaisDoLead } from '../domain/plataformaLead';
 import { clidRecente, type AtribuicaoMeta } from '../db/metaAtribuicoes';
 import { atrasoDaMensagem } from '../domain/mensagemAtrasada';
+import { comVolta, protocoloDoCiclo } from '../domain/retorno';
 
 /**
  * Mensagem do lead: e' aqui que a atribuicao acontece.
@@ -40,6 +41,28 @@ import { atrasoDaMensagem } from '../domain/mensagemAtrasada';
 
 /** Valor sentinela que a regra atuadora do Chatwoot espera. */
 export const SENTINELA_PROMOVER = 'PROMOVER';
+
+/** A volta nao achou lead (nem anuncio novo, nem ciclo anterior para copiar). */
+export const MOTIVO_VOLTA_SEM_LEAD = 'volta sem lead';
+
+/** Nome do lead do ciclo quando o contato nao tem nome que preste. */
+const SEM_NOME_NO_CICLO = 'Sem nome';
+
+/**
+ * O lead que voltou (ver domain/retorno.ts): a atribuicao roda de novo na
+ * mesma conversa, para um ciclo novo com protocolo proprio. Planilha, aviso e
+ * conversao andam pelo protocolo, entao e' ele que faz a volta contar como
+ * lead novo em tudo.
+ */
+export interface ModoRetorno {
+  n: number;
+  /** protocolos que os ciclos desta conversa ja' usaram */
+  usados: string[];
+  /** protocolo do ciclo anterior; null = nao havia lead */
+  anterior: string | null;
+  /** cria (ou devolve, na retentativa) o card do ciclo; chamado ja' com o lead resolvido */
+  criarCard(lead: { protocolo: string; plataforma: string; atributos: Record<string, string> }): Promise<number>;
+}
 
 interface Resultado {
   status: 'ok' | 'ignorado' | 'erro';
@@ -87,8 +110,9 @@ export async function atribuirLead(
   env: Env,
   tenantId: number,
   payload: string,
-  opts: { tentativa?: number } = {},
+  opts: { tentativa?: number; retorno?: ModoRetorno } = {},
 ): Promise<Resultado> {
+  const retorno = opts.retorno;
   let p: Record<string, unknown>;
   try {
     p = JSON.parse(payload) as Record<string, unknown>;
@@ -114,7 +138,8 @@ export async function atribuirLead(
   const attrs = obj(conv?.custom_attributes) ?? {};
   // Ja atribuida: reprocessar toda mensagem gastaria chamada e reescreveria o
   // mesmo dado. O vendedor pode corrigir a mao sem a ferramenta desfazer.
-  if (str(attrs.protocolo)) {
+  // Na volta o protocolo e' o do ciclo antigo: e' justamente o que se troca.
+  if (!retorno && str(attrs.protocolo)) {
     return { status: 'ignorado', motivo: `conversa ${conversaId} ja tem protocolo` };
   }
 
@@ -152,7 +177,7 @@ export async function atribuirLead(
   const leadDoClique = protocoloDito
     ? await porProtocolo(env, tenantId, protocoloDito)
     : anuncio || clid
-      ? await leadDoAnuncio(env, tenantId, { anuncio, clid }, { telefone, chave, conversaId, prefixo: cfg.gtm_prefixo })
+      ? await leadDoAnuncio(env, tenantId, { anuncio, clid }, { telefone, chave, conversaId, prefixo: cfg.gtm_prefixo, ciclo: retorno?.n ?? 0 })
       : await porTelefone(env, tenantId, chave, cfg.janela_match_dias ?? 90);
 
   /**
@@ -173,8 +198,16 @@ export async function atribuirLead(
       return adiar(conversaId);
     }
     lead = frase
-      ? await leadDaFrase(env, tenantId, frase, { telefone, chave, conversaId, prefixo: cfg.gtm_prefixo })
+      ? await leadDaFrase(env, tenantId, frase, { telefone, chave, conversaId, prefixo: cfg.gtm_prefixo, ciclo: retorno?.n ?? 0 })
       : null;
+  }
+
+  // Volta: protocolo que um ciclo desta conversa ja' usou nao e' anuncio novo
+  // (o clique antigo achado pelo telefone, ou a mensagem antiga repetida). Sem
+  // anuncio novo, o ciclo herda a origem do anterior: as conversoes voltam para
+  // a mesma campanha.
+  if (retorno && (!lead || retorno.usados.includes(lead.protocol))) {
+    lead = await leadHerdado(env, tenantId, retorno);
   }
 
   if (!lead) {
@@ -193,7 +226,7 @@ export async function atribuirLead(
     // numero salvo) nao entra na planilha nem avisa o grupo: o "lead direto"
     // de 21/09 pegou paciente antigo como lead novo (o Chatwoot so' cria o
     // contato na primeira mensagem depois da integracao).
-    return { status: 'ignorado', motivo: semLead };
+    return { status: 'ignorado', motivo: retorno ? MOTIVO_VOLTA_SEM_LEAD : semLead };
   }
 
   const sinais = {
@@ -242,13 +275,17 @@ export async function atribuirLead(
     telefone,
     chave,
   });
+  if (retorno) {
+    await nomearLeadDoCiclo(env, tenantId, lead, retorno.n, { nome: str(sender.name), telefone, cliente: cfg.cliente });
+  }
 
   // Protocolo dito na mensagem e clique antigo: a entrega atrasou (Evolution ->
   // Chatwoot). So' registra no log para diagnostico. O lead e' real e o grupo
   // e' avisado com a hora do clique (data_evento, em avisarLeadNoGrupo), entao
   // nao passa por lead novo. Ate' 09/11/2026 isto marcava o aviso como
   // 'ignorado' e a Martinelli perdeu 11 avisos de leads reais em 07 e 08/11.
-  if (protocoloDito && leadDoClique) {
+  // Volta com o protocolo antigo repetido nao e' entrega atrasada: o lead e' a copia.
+  if (protocoloDito && leadDoClique && lead === leadDoClique) {
     const atraso = atrasoDaMensagem(leadDoClique.created_at, Date.now());
     if (atraso.atrasada) {
       console.log(JSON.stringify({ acao: 'mensagem_atrasada', protocolo: lead.protocol, conversa: conversaId, horas: atraso.horas }));
@@ -331,11 +368,21 @@ export async function atribuirLead(
     utmContent: lead.utm_content,
   };
 
+  // Volta: o card do ciclo nasce agora, com o lead e a plataforma resolvidos
+  // (a plataforma decide o board), e antes da conversa ganhar o protocolo
+  // novo. Falhou: sobe para a fila retentar, sem conversa apontando para um
+  // ciclo sem card.
+  const cardDoCiclo = retorno
+    ? await retorno.criarCard({ protocolo: lead.protocol, plataforma, atributos: utmsDoCard(atribuicao) })
+    : null;
+
   await cw.mesclarAtributosDaConversa(acc, conversaId, {
     ...utmsDoCard(atribuicao),
     // gravado por ultimo, junto com o resto: a regra atuadora reage ao update
-    // da conversa, entao quando ela rodar os atributos ja estao todos la'
-    ...(promover ? { funil: SENTINELA_PROMOVER } : {}),
+    // da conversa, entao quando ela rodar os atributos ja estao todos la'.
+    // Na volta, nunca o PROMOVER: a regra transferiria o card ANTIGO da
+    // conversa. O card novo ja' nasceu no board certo; falta so' o `Lead`.
+    ...(promover ? { funil: retorno ? 'Lead' : SENTINELA_PROMOVER } : {}),
   });
 
   // A promocao e' feita por uma regra do Chatwoot, e o Chatwoot NAO dispara
@@ -352,21 +399,25 @@ export async function atribuirLead(
   // nao sobe conversao, entao nada levava ele a planilha. No cliente que tem a
   // aba de lead direto ele entra na Geral e nela; o Banco recebe o clique.
   // O do perfil tambem: sem conversao, e' daqui que ele chega a Geral.
-  if (!daAds && (cfg.sheets_aba_direto || (doPerfil && promover))) {
+  // A volta entra sempre: o ciclo e' lead novo em tudo (linha e sequencia
+  // novas na Geral), e nao depende de conversao subir para chegar la'.
+  if (retorno || (!daAds && (cfg.sheets_aba_direto || (doPerfil && promover)))) {
     await espelharNaPlanilha(env, tenantId, { tipo: 'entrada', protocolo: lead.protocol, ensaio: false })
       .catch((e: Error) => {
         console.log(JSON.stringify({ acao: 'planilha_falhou', tipo: 'entrada', protocolo: lead.protocol, erro: e.message }));
       });
   }
 
-  if (promover && daAds) {
+  // Na volta a conversa costuma ja' estar no funil (`promover` falso), e o
+  // ciclo tem conversao de entrada propria: sobe sempre que o lead e' de anuncio.
+  if ((promover || retorno) && daAds) {
     await dispararConversaoDeEntrada(env, tenantId, lead.protocol, conversaId);
   }
 
   // O lead do Meta nao tem conversao do Google para leva-lo ate' as planilhas
   // (e' a conversao de entrada que grava a linha do Google). Entra aqui, na
-  // Geral e na aba do Meta.
-  if (promover && plataforma === 'meta' && cfg.rastrear_meta_mensagem === 1) {
+  // Geral e na aba do Meta. A volta ja' entrou acima.
+  if (!retorno && promover && plataforma === 'meta' && cfg.rastrear_meta_mensagem === 1) {
     await espelharNaPlanilha(env, tenantId, { tipo: 'entrada', protocolo: lead.protocol, ensaio: false })
       .catch((e: Error) => {
         console.log(JSON.stringify({ acao: 'planilha_falhou', tipo: 'entrada', protocolo: lead.protocol, erro: e.message }));
@@ -403,8 +454,9 @@ export async function atribuirLead(
   const aplicadas = await cw.acrescentarEtiquetas(acc, conversaId, etiquetas.chatwoot);
 
   // O card carrega a origem da negociacao. Falhar aqui nao desfaz a conversa.
-  const taskId = num(obj(conv?.kanban_task)?.id);
-  if (taskId) {
+  // Na volta o card e' o do ciclo, que ja' nasceu com ela; o antigo nao muda.
+  const taskId = cardDoCiclo ?? num(obj(conv?.kanban_task)?.id);
+  if (taskId && !cardDoCiclo) {
     try {
       await cw.mesclarAtributosDoCard(acc, taskId, utmsDoCard(atribuicao));
     } catch (e) {
@@ -449,7 +501,8 @@ export async function atribuirLead(
     motivo:
       `conversa ${conversaId} atribuida a ${lead.protocol} (${plataforma}/${campanha.slug || 'sem campanha'})` +
       (aplicadas.length ? ` · etiquetas: ${aplicadas.join(', ')}` : ' · etiquetas ja estavam') +
-      (promover && doPerfil ? ' · Google Meu Negocio: marcada para promover ao funil, sem conversao'
+      (retorno ? ` · volta #${retorno.n}, card ${taskId}`
+        : promover && doPerfil ? ' · Google Meu Negocio: marcada para promover ao funil, sem conversao'
         : promover ? ' · marcada para promover ao funil de Ads'
         : jaNoFunil ? ' · ja estava no funil'
         : ' · sem plataforma de anuncio, fica no Organico'),
@@ -519,6 +572,73 @@ async function porTelefone(env: Env, tenantId: number, chave: string, janelaDias
   return escolhido ? (results.find((r) => r.protocol === escolhido.protocol) ?? null) : null;
 }
 
+/**
+ * O que o lead do ciclo herda do anterior: quem ele e' e de onde veio (os
+ * sinais do clique, que fazem a conversao voltar para a mesma campanha).
+ *
+ * Fica de fora o que era do ciclo antigo: o quiz/formulario (a volta chegou
+ * pelo WhatsApp, e lead de formulario herdado nao teria fluxo de formulario
+ * para avisar o grupo) e o valor da proposta. `origem`, `evento`, datas e a
+ * ligacao com a raiz sao escritos a parte.
+ */
+const HERDADAS = `nome, email, phone_raw, phone_e164, phone_key,
+                  gclid, gbraid, wbraid, utm_source, utm_medium, utm_campaign, utm_campaign_nome,
+                  utm_id, utm_term, utm_content, fbp, fbc, client_id, ctwa_clid,
+                  page_url, whatsapp_url, referrer, user_agent, ip_address`;
+
+/**
+ * Volta sem anuncio novo: o lead do ciclo e' uma copia do anterior.
+ *
+ * O protocolo sai sempre da raiz (o do primeiro ciclo): `X-R2`, nunca
+ * `X-R1-R1`. `clique_em` guarda a data do clique original, que e' a que o
+ * Google olha; `created_at` e' agora, a hora da volta na Geral e no aviso.
+ * `DO NOTHING`: a retentativa da fila acha a copia feita e segue.
+ */
+async function leadHerdado(env: Env, tenantId: number, r: ModoRetorno): Promise<LinhaLead | null> {
+  if (!r.anterior) return null;
+  const ant = await env.DB.prepare('SELECT protocol, retorno_de FROM leads WHERE tenant_id = ? AND protocol = ?')
+    .bind(tenantId, r.anterior)
+    .first<{ protocol: string; retorno_de: string | null }>();
+  if (!ant) return null;
+
+  const raiz = ant.retorno_de ?? ant.protocol;
+  const protocolo = protocoloDoCiclo(raiz, r.n);
+  await env.DB.prepare(
+    `INSERT INTO leads (tenant_id, protocol, ${HERDADAS}, origem, evento, retorno_de, clique_em)
+     SELECT tenant_id, ?, ${HERDADAS}, 'mensagem', 'retorno', ?, COALESCE(clique_em, created_at)
+     FROM leads WHERE tenant_id = ? AND protocol = ?
+     ON CONFLICT (tenant_id, protocol) DO NOTHING`,
+  )
+    .bind(protocolo, raiz, tenantId, ant.protocol)
+    .run();
+
+  console.log(JSON.stringify({ acao: 'lead_do_ciclo_herdado', protocolo, anterior: ant.protocol }));
+  return porProtocolo(env, tenantId, protocolo);
+}
+
+/**
+ * O nome do lead do ciclo termina em " #n": a Geral acha a linha da volta pelo
+ * telefone E pelo #n (so' o telefone cairia na linha do ciclo antigo), e o
+ * aviso do grupo mostra que e' volta. Vale para a copia e para o anuncio novo.
+ *
+ * O nome e' o que `gravarContatoNoLead` deixaria (o do lead, senao o do
+ * contato), pela mesma regra de nome util. Sem nome que preste, "Sem nome #n":
+ * nome vazio perderia o #n.
+ */
+async function nomearLeadDoCiclo(
+  env: Env,
+  tenantId: number,
+  lead: LinhaLead,
+  n: number,
+  c: { nome: string | null; telefone: string | null; cliente: string | null },
+): Promise<void> {
+  const ctx = { telefone: c.telefone, nomesProprios: [c.cliente] };
+  const nome = comVolta(nomeUtil(lead.nome, ctx) ?? nomeUtil(c.nome, ctx) ?? SEM_NOME_NO_CICLO, n);
+  await env.DB.prepare(`UPDATE leads SET nome = ?, updated_at = datetime('now') WHERE tenant_id = ? AND protocol = ?`)
+    .bind(nome, tenantId, lead.protocol)
+    .run();
+}
+
 async function vocabulario(env: Env, tenantId: number): Promise<LabelVocabulary[]> {
   const { results } = await env.DB.prepare(
     'SELECT slug, label_chatwoot, label_whatsapp FROM label_vocabulary WHERE tenant_id = ?',
@@ -550,7 +670,7 @@ function num(v: unknown): number | null {
  * evento — duplicar isso aqui seria repetir o erro do n8n, que tinha a mesma
  * decisao escrita em tres lugares que precisavam concordar.
  */
-async function dispararConversaoDeEntrada(
+export async function dispararConversaoDeEntrada(
   env: Env,
   tenantId: number,
   protocolo: string,
@@ -615,9 +735,11 @@ async function leadDaFrase(
     chave: string | null;
     conversaId: number;
     prefixo: string | null;
+    /** volta da conversa; 0 = primeiro ciclo */
+    ciclo: number;
   },
 ): Promise<LinhaLead> {
-  const protocolo = protocoloDaFrase(ctx.prefixo ?? '', ctx.conversaId);
+  const protocolo = protocoloDaFrase(ctx.prefixo ?? '', ctx.conversaId, ctx.ciclo);
   const fone = normFone(ctx.telefone);
 
   // `COALESCE` para a segunda mensagem nao apagar o que a primeira gravou
@@ -660,9 +782,9 @@ async function leadDoAnuncio(
   env: Env,
   tenantId: number,
   fonte: { anuncio: AnuncioMeta | null; clid: AtribuicaoMeta | null },
-  ctx: { telefone: string | null; chave: string | null; conversaId: number; prefixo: string | null },
+  ctx: { telefone: string | null; chave: string | null; conversaId: number; prefixo: string | null; ciclo: number },
 ): Promise<LinhaLead> {
-  const protocolo = protocoloDoAnuncio(ctx.prefixo ?? '', ctx.conversaId);
+  const protocolo = protocoloDoAnuncio(ctx.prefixo ?? '', ctx.conversaId, ctx.ciclo);
   const link = fonte.anuncio?.link ?? fonte.clid?.source_url ?? null;
   const rede = fonte.anuncio?.rede ?? redeDoLink(link);
   const titulo = fonte.anuncio?.titulo ?? fonte.clid?.titulo ?? null;
