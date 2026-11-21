@@ -66,6 +66,33 @@ describe('criarCard', () => {
   });
 });
 
+describe('mesclarAtributosDaConversa', () => {
+  const ATRIBUTOS = 'https://cw.exemplo.test/api/v1/accounts/7/conversations/55/custom_attributes';
+
+  test('remover tira as chaves do objeto mesclado e mantem as outras', async () => {
+    // o POST substitui o objeto inteiro: tirar a chave e' nao manda-la
+    respostas = [{ custom_attributes: { protocolo: 'X', gclid: 'Cj0velho', funil: 'Lead', conversa_enviada: 'true' } }];
+    await cliente().mesclarAtributosDaConversa(7, 55, { protocolo: 'X-R1' }, ['gclid']);
+    expect(chamadas[1]).toEqual({
+      metodo: 'POST',
+      url: ATRIBUTOS,
+      corpo: { custom_attributes: { protocolo: 'X-R1', funil: 'Lead', conversa_enviada: 'true' } },
+    });
+  });
+
+  test('so remover, sem nada novo, ainda grava', async () => {
+    respostas = [{ custom_attributes: { gclid: 'Cj0velho', funil: 'Lead' } }];
+    await cliente().mesclarAtributosDaConversa(7, 55, {}, ['gclid']);
+    expect(chamadas.map((c) => c.metodo)).toEqual(['GET', 'POST']);
+    expect(chamadas[1]?.corpo).toEqual({ custom_attributes: { funil: 'Lead' } });
+  });
+
+  test('nada novo e nada a remover: nem chama a API', async () => {
+    await cliente().mesclarAtributosDaConversa(7, 55, {});
+    expect(chamadas).toEqual([]);
+  });
+});
+
 describe('ligarConversasDoCard', () => {
   test('manda PUT so com as conversas', async () => {
     await cliente().ligarConversasDoCard(7, 88, [55, 56]);

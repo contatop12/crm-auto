@@ -337,19 +337,25 @@ export class ChatwootClient {
    *
    * O POST substitui o objeto inteiro, entao o merge e' aqui: sem ele, gravar
    * a UTM apagaria o `funil` e o `conversa_enviada` que ja estavam la'.
+   *
+   * `remover`: chaves que saem do objeto. Pelo mesmo motivo, tirar e' nao
+   * mandar; valor vazio nao foi conferido no Chatwoot de verdade.
    */
   async mesclarAtributosDaConversa(
     acc: number,
     conversaId: number,
     novos: Record<string, string>,
+    remover: string[] = [],
   ): Promise<void> {
-    if (!Object.keys(novos).length) return;
+    if (!Object.keys(novos).length && !remover.length) return;
     const atual = await this.req<{ custom_attributes?: Record<string, unknown> }>(
       'GET',
       `/api/v1/accounts/${acc}/conversations/${conversaId}`,
     );
+    const juntos: Record<string, unknown> = { ...(atual.custom_attributes ?? {}), ...novos };
+    for (const chave of remover) delete juntos[chave];
     await this.req('POST', `/api/v1/accounts/${acc}/conversations/${conversaId}/custom_attributes`, {
-      custom_attributes: { ...(atual.custom_attributes ?? {}), ...novos },
+      custom_attributes: juntos,
     });
   }
 
