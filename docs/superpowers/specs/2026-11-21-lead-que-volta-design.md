@@ -230,6 +230,18 @@ Regra de decisão:
   listar os que estão em `retornos.task_anterior`.
 - Nem desligar funciona → parar e voltar ao usuário.
 
+## Achados na escrita do plano (21/11)
+
+- A Geral casa a linha pelo **telefone** (`acrescentarLead`, `celulaDoStatus`):
+  sem mudança, a volta não ganharia linha e a etapa do card novo cairia na
+  linha antiga. A linha da volta passa a ser identificada pelo `#n` no fim do
+  NOME, junto com o telefone. O `#n` no nome deixa de ser opcional.
+- O teste da seção 8 foi barrado pela permissão da sessão. O código confere em
+  tempo de execução para onde a conversa aponta depois de criar o card e só
+  desliga o card antigo se precisar. O teste continua obrigatório antes de
+  ligar em produção, rodado pelo usuário (`scripts/teste-segundo-card.mjs`).
+- Só `message_incoming` chega à fila para a mensagem do lead.
+
 ## Fora de escopo
 
 - Tela no painel para ligar/desligar ou mudar o prazo (a coluna no banco basta).
