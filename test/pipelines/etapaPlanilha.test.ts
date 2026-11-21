@@ -107,6 +107,17 @@ describe('lead que volta: duas linhas com o mesmo telefone', () => {
     expect(gravadas).toEqual([{ range: "'Geral'!I3", valor: 'Agendamento Realizado' }]);
   });
 
+  test('as duas linhas trocam de lugar antes da releitura: a etapa nao cai na linha do irmao', async () => {
+    const { env } = cenario();
+    geral = [CAB, VITAL, VITAL1];
+    // o script da planilha reordena depois da leitura inteira
+    depoisDaLeitura = [CAB, VITAL1, VITAL];
+    const r = await espelharEtapaNaGeral(env, 3, cardVital('#1240 - 5511999990000 - Vital #1'));
+    expect(r.status).toBe('ok');
+    // achou "Vital #1" de novo na nova posicao (linha 2); a linha 3 e' a "Vital"
+    expect(gravadas).toEqual([{ range: "'Geral'!I2", valor: 'Agendamento Realizado' }]);
+  });
+
   test('card de uma volta que ainda nao tem linha nao grava no original', async () => {
     const { env } = cenario();
     geral = [CAB, VITAL];

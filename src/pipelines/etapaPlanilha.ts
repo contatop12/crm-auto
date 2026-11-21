@@ -3,7 +3,7 @@ import { SheetsClient } from '../clients/sheets';
 import { ChatwootClient } from '../clients/chatwoot';
 import { parseKanbanTask, type TaskDoKanban } from '../domain/kanbanTask';
 import { voltaDoTitulo } from '../domain/retorno';
-import { linhaDoTelefone, linhaDoLead, colunaDaEtapa, indiceParaColuna } from '../domain/planilha';
+import { linhaDoLead, colunaDaEtapa, indiceParaColuna } from '../domain/planilha';
 
 /**
  * A etapa do card no Kanban, espelhada na aba Geral: na coluna ETAPA quando a
@@ -75,14 +75,16 @@ export async function espelharEtapaNaGeral(env: Env, tenantId: number, payload: 
   // A Geral e' reordenada pelo script da planilha a cada 5 min: a linha achada
   // na leitura inteira e' relida e conferida pelo telefone antes de gravar,
   // senao o Status cairia no lead que tomou aquele lugar.
+  const volta = voltaDoTitulo(t.titulo);
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     const linhas = await sheets.tudo(destino.doc, destino.aba);
-    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, voltaDoTitulo(t.titulo), soVazia(destino, t));
+    const alvo = celulaDoStatus(linhas, destino.aba, telefone, etapa, volta, soVazia(destino, t));
     if ('resultado' in alvo) return alvo.resultado;
 
     const cab = linhas[0] ?? [];
     const naHora = await sheets.linha(destino.doc, destino.aba, alvo.linha, indiceParaColuna(cab.length - 1));
-    if (linhaDoTelefone(cab, [naHora], telefone) !== 0) continue;
+    // telefone E volta: as linhas do lead e do retorno trocam de lugar na reordenacao
+    if (linhaDoLead(cab, [naHora], telefone, volta) !== 0) continue;
 
     await sheets.gravarCelulas(destino.doc, destino.aba, [{ celula: alvo.celula, valor: etapa }]);
     return {
