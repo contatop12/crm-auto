@@ -2,11 +2,13 @@
 -- etapa final abre um card novo (titulo com " #1", " #2"...), em vez de
 -- reabrir o antigo.
 --
--- `retorno_dias`: prazo do cliente; NULL = o padrao do codigo (15 dias).
+-- `retorno_dias`: prazo do cliente em dias; NULL = volta desligada (nasce assim
+-- para todos). Para ligar, 15.
 ALTER TABLE tenant_config ADD COLUMN retorno_dias INTEGER;
 
--- `retorno_de`: o card de onde o lead voltou; `clique_em`: quando clicou no
--- anuncio, para dizer se a volta veio de um clique novo.
+-- So' no lead copiado do ciclo anterior: `retorno_de` = protocolo raiz (o do
+-- primeiro ciclo); `clique_em` = data do clique original, que e' a que o
+-- Google olha.
 ALTER TABLE leads ADD COLUMN retorno_de TEXT;
 ALTER TABLE leads ADD COLUMN clique_em TEXT;
 
@@ -14,6 +16,9 @@ ALTER TABLE leads ADD COLUMN clique_em TEXT;
 -- so' gera um card novo, e a mesma conversa so' tem uma volta de cada numero,
 -- mesmo que o webhook chegue duas vezes. `desligou_antigo` marca que o card
 -- velho ja' foi tirado do caminho, para o reprocesso nao repetir.
+-- `trabalhando_ate`: quem abre a volta segura a linha ate' esta hora (UTC);
+-- NULL = ninguem. Duas entregas da mesma mensagem ao mesmo tempo nao criam dois
+-- cards: a segunda acha a linha segura e volta para a fila.
 CREATE TABLE IF NOT EXISTS retornos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL,
@@ -28,6 +33,7 @@ CREATE TABLE IF NOT EXISTS retornos (
   desligou_antigo INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pendente',
   erro TEXT,
+  trabalhando_ate TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (tenant_id, task_anterior),
   UNIQUE (tenant_id, cw_conversation_id, n)

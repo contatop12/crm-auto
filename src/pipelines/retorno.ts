@@ -30,6 +30,15 @@ const TTL_ETAPAS_S = 3600;
  */
 const PRAZO_DA_OUTRA_S = 10 * 60;
 
+/**
+ * Quem abre a volta segura a linha ate' aqui (`trabalhando_ate`): duas entregas
+ * da mesma mensagem ao mesmo tempo nao criam dois cards. Cobre com folga a
+ * atribuicao ate' o POST do card; quem morre no meio perde a vez sozinho.
+ */
+const SEGURAR = `datetime('now', '+120 seconds')`;
+
+const MOTIVO_OCUPADA = 'outra execucao esta abrindo esta volta';
+
 /** Ciclo de anuncio ou do perfil do Google vai para o funil, mesmo saindo do Organico. */
 const PLATAFORMAS_DO_FUNIL = new Set(['google', 'meta', 'gmn']);
 
@@ -110,6 +119,8 @@ export async function abrirRetorno(
   }
 
   const linha = await reservar(env, tenantId, m, m.protocolo ?? (await protocoloDaConversa(env, tenantId, m.conversa)));
+  // a fila retenta com backoff; quando a outra terminar, a volta ja' estara' feita
+  if (linha === 'ocupada') return { status: 'erro', motivo: MOTIVO_OCUPADA };
   if (!linha) return null;
 
   const ciclo: Ciclo = { env, cw, acc, tenantId, funil: cfg.cw_board_funil_id, m, linha, cardAntigo };
@@ -124,8 +135,12 @@ export async function abrirRetorno(
       },
     });
     // Anuncio da Meta esperando o clique da Evolution: a fila devolve a mesma
-    // mensagem em ~20 s, e ela retoma esta reserva. Ainda nao ha' card.
-    if (r.adiar) return r;
+    // mensagem em ~20 s, e ela retoma esta reserva. Ainda nao ha' card. Solta
+    // ja', senao a volta da fila esbarraria no proprio prazo.
+    if (r.adiar) {
+      await env.DB.prepare('UPDATE retornos SET trabalhando_ate = NULL WHERE id = ?').bind(linha.id).run();
+      return r;
+    }
 
     // sem lead, nasce so' o card: planilha, aviso e conversao seguem a regra do card sem protocolo
     const semLead = r.motivo === MOTIVO_VOLTA_SEM_LEAD;
@@ -136,7 +151,9 @@ export async function abrirRetorno(
 
     const protocoloNovo = semLead ? null : await protocoloDaConversa(env, tenantId, m.conversa);
     const origem = semLead ? 'sem_lead' : (await copiaDoAnterior(env, tenantId, protocoloNovo)) ? 'herdada' : 'anuncio_novo';
-    await env.DB.prepare(`UPDATE retornos SET protocolo_novo = ?, origem = ?, status = 'feito', erro = NULL WHERE id = ?`)
+    await env.DB.prepare(
+      `UPDATE retornos SET protocolo_novo = ?, origem = ?, status = 'feito', erro = NULL, trabalhando_ate = NULL WHERE id = ?`,
+    )
       .bind(protocoloNovo, origem, linha.id)
       .run();
     console.log(JSON.stringify({
@@ -145,8 +162,8 @@ export async function abrirRetorno(
     }));
     return semLead ? { status: 'ok', motivo: `volta #${linha.n} sem lead: card ${novo} criado, sem protocolo` } : r;
   } catch (e) {
-    // a linha fica pendente com o motivo; a fila retenta e retoma pelo `task_novo`
-    await env.DB.prepare('UPDATE retornos SET erro = ? WHERE id = ?')
+    // a linha fica pendente com o motivo, e solta: a fila retenta e retoma pelo `task_novo`
+    await env.DB.prepare('UPDATE retornos SET erro = ?, trabalhando_ate = NULL WHERE id = ?')
       .bind((e as Error).message.slice(0, 500), linha.id)
       .run()
       .catch(() => undefined);
@@ -210,18 +227,25 @@ async function voltaFeita(env: Env, tenantId: number, card: number): Promise<boo
 }
 
 /**
- * Reserva a volta do card antigo, ou acha a que ja' existe. Devolve null quando
- * a volta nao e' desta mensagem.
+ * Reserva a volta do card antigo, ou acha a que ja' existe, e a segura para
+ * esta execucao. Devolve null quando a volta nao e' desta mensagem, e
+ * 'ocupada' quando outra execucao a segura agora.
  *
  * `INSERT OR IGNORE` pela UNIQUE do card antigo: um card fechado gera uma volta
  * so', com a fila retentando ou nao. `protocolo_anterior` fica gravado aqui
  * porque a atribuicao troca o da conversa antes de terminar: a retentativa le'
  * o daqui, nao o novo.
  */
-async function reservar(env: Env, tenantId: number, m: Mensagem, anterior: string | null): Promise<Linha | null> {
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior)
-     SELECT ?, ?, COALESCE(MAX(n), 0) + 1, ?, ?, ? FROM retornos WHERE tenant_id = ? AND cw_conversation_id = ?`,
+async function reservar(
+  env: Env,
+  tenantId: number,
+  m: Mensagem,
+  anterior: string | null,
+): Promise<Linha | null | 'ocupada'> {
+  const nova = await env.DB.prepare(
+    `INSERT OR IGNORE INTO retornos
+       (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, trabalhando_ate)
+     SELECT ?, ?, COALESCE(MAX(n), 0) + 1, ?, ?, ?, ${SEGURAR} FROM retornos WHERE tenant_id = ? AND cw_conversation_id = ?`,
   )
     .bind(tenantId, m.conversa, String(m.id), String(m.card), anterior, tenantId, m.conversa)
     .run();
@@ -235,16 +259,24 @@ async function reservar(env: Env, tenantId: number, m: Mensagem, anterior: strin
     .first<Linha>();
   // a outra UNIQUE (conversa, n): outra volta da conversa tomou o numero agora; a fila retenta
   if (!l) throw new Error(`volta da conversa ${m.conversa}: o numero da volta foi tomado por outra execucao`);
+  if (nova.meta.changes) return l; // reserva nova: ja' nasce segura por esta execucao
   if (l.status === 'feito') return null;
-  if (l.mensagem_id === String(m.id)) return l; // retentativa desta mensagem: retoma
-  if (l.idade_s < PRAZO_DA_OUTRA_S) return null; // outra mensagem da volta: a primeira cuida
+  const desta = l.mensagem_id === String(m.id);
+  if (!desta && l.idade_s < PRAZO_DA_OUTRA_S) return null; // outra mensagem da volta: a primeira cuida
 
-  // a primeira morreu: esta assume, se outra mensagem nao assumiu antes
-  const assumiu = await env.DB.prepare('UPDATE retornos SET mensagem_id = ? WHERE id = ? AND mensagem_id IS ?')
+  // Retentativa desta mensagem, ou a primeira morreu e esta assume: segura a
+  // linha num UPDATE so', e so' se ninguem a segura agora.
+  const segurou = await env.DB.prepare(
+    `UPDATE retornos SET mensagem_id = ?, trabalhando_ate = ${SEGURAR}
+     WHERE id = ? AND status = 'pendente' AND mensagem_id IS ?
+       AND (trabalhando_ate IS NULL OR trabalhando_ate < datetime('now'))`,
+  )
     .bind(String(m.id), l.id, l.mensagem_id)
     .run();
-  if (!assumiu.meta.changes) return null;
-  console.log(JSON.stringify({ acao: 'volta_assumida', conversa: m.conversa, n: l.n, de: l.mensagem_id, por: m.id }));
+  if (!segurou.meta.changes) return 'ocupada';
+  if (!desta) {
+    console.log(JSON.stringify({ acao: 'volta_assumida', conversa: m.conversa, n: l.n, de: l.mensagem_id, por: m.id }));
+  }
   return { ...l, mensagem_id: String(m.id) };
 }
 

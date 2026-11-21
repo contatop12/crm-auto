@@ -160,7 +160,7 @@ const ligacoesDoAntigo = () =>
 interface LinhaRetorno {
   n: number; mensagem_id: string; task_anterior: string; task_novo: string | null;
   protocolo_anterior: string | null; protocolo_novo: string | null; origem: string | null;
-  desligou_antigo: number; status: string; erro: string | null;
+  desligou_antigo: number; status: string; erro: string | null; trabalhando_ate: string | null;
 }
 const retornos = (consultar: ReturnType<typeof cenario>['consultar']) =>
   consultar<LinhaRetorno>('SELECT * FROM retornos ORDER BY n');
@@ -187,7 +187,7 @@ describe('abrirRetorno', () => {
     expect(retornos(consultar)).toEqual([expect.objectContaining({
       n: 1, mensagem_id: '9001', task_anterior: '1421', task_novo: '1500',
       protocolo_anterior: ANTIGO, protocolo_novo: `${ANTIGO}-R1`, origem: 'herdada',
-      desligou_antigo: 0, status: 'feito', erro: null,
+      desligou_antigo: 0, status: 'feito', erro: null, trabalhando_ate: null,
     })]);
     // o grupo soube pelo card novo, com o protocolo do ciclo
     expect(consultar('SELECT chave, task_id FROM group_notifications')).toEqual([{ chave: `${ANTIGO}-R1`, task_id: 1500 }]);
@@ -206,18 +206,60 @@ describe('abrirRetorno', () => {
     expect(chamadas).toHaveLength(antes);
   });
 
-  test('falha depois do card: a volta fica com o erro e a retentativa termina sem criar outro', async () => {
+  test('falha depois do card: a volta fica com o erro, solta a reserva, e a retentativa termina sem criar outro', async () => {
     const { env, consultar } = cenario();
     kb.falhasNosAtributos = 1;
 
     await expect(abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).rejects.toThrow(/500/);
-    expect(retornos(consultar)[0]).toMatchObject({ status: 'pendente', task_novo: '1500', erro: expect.stringContaining('500') });
+    expect(retornos(consultar)[0]).toMatchObject({
+      status: 'pendente', task_novo: '1500', erro: expect.stringContaining('500'), trabalhando_ate: null,
+    });
 
     const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
 
     expect(r?.status).toBe('ok');
     expect(postsDoCard()).toHaveLength(1);
     expect(retornos(consultar)[0]).toMatchObject({ status: 'feito', task_novo: '1500', erro: null, protocolo_novo: `${ANTIGO}-R1` });
+  });
+
+  test('duas entregas da mesma mensagem ao mesmo tempo: um card so, e a outra devolve erro para a fila tentar depois', async () => {
+    // o Chatwoot reentrega o webhook e a ingestao nao deduplica: dois eventos da
+    // mesma mensagem podem rodar juntos
+    const { env, consultar } = cenario();
+
+    const [a, b] = await Promise.all([
+      abrirRetorno(env, 1, mensagem(), { tentativa: 1 }),
+      abrirRetorno(env, 1, mensagem(), { tentativa: 1 }),
+    ]);
+
+    expect(postsDoCard()).toHaveLength(1);
+    expect([a?.status, b?.status].sort()).toEqual(['erro', 'ok']);
+    expect([a, b].find((r) => r?.status === 'erro')?.motivo).toBe('outra execucao esta abrindo esta volta');
+    expect(retornos(consultar)).toEqual([expect.objectContaining({ status: 'feito', trabalhando_ate: null })]);
+  });
+
+  test('reserva com o prazo de trabalho vencido: a execucao que a tinha morreu, a retentativa retoma', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, trabalhando_ate)
+          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', datetime('now', '-1 minute'))`);
+
+    const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
+
+    expect(r?.status).toBe('ok');
+    expect(postsDoCard()).toHaveLength(1);
+    expect(retornos(consultar)[0]).toMatchObject({ status: 'feito', trabalhando_ate: null });
+  });
+
+  test('reserva com o prazo de trabalho valendo: erro para a fila, sem escrever no Chatwoot', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, trabalhando_ate)
+          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', datetime('now', '+1 minute'))`);
+
+    const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
+
+    expect(r).toEqual({ status: 'erro', motivo: 'outra execucao esta abrindo esta volta' });
+    expect(chamadas.filter((c) => c.metodo !== 'GET')).toEqual([]);
+    expect(retornos(consultar)[0]).toMatchObject({ status: 'pendente', erro: null });
   });
 
   test('conversa sem protocolo no atributo: o anterior vem do banco, e a retentativa nao o troca pelo novo', async () => {
@@ -287,7 +329,7 @@ describe('abrirRetorno', () => {
 
     expect(ligacoesDoAntigo()).toEqual([{ task: { conversation_ids: [] } }, { task: { conversation_ids: [76] } }]);
     expect(retornos(consultar)[0]).toMatchObject({
-      status: 'pendente', task_novo: null, desligou_antigo: 0, erro: expect.stringContaining('422'),
+      status: 'pendente', task_novo: null, desligou_antigo: 0, erro: expect.stringContaining('422'), trabalhando_ate: null,
     });
   });
 
@@ -428,7 +470,7 @@ describe('abrirRetorno', () => {
     });
   });
 
-  test('anuncio da Meta esperando o clique: adia sem card, e a mesma mensagem na volta da fila abre o ciclo', async () => {
+  test('anuncio da Meta esperando o clique: adia sem card e solta a reserva; a mesma mensagem na volta da fila abre o ciclo', async () => {
     const { env, exec, consultar } = cenario();
     exec(`UPDATE tenant_config SET rastrear_meta_mensagem = 1 WHERE tenant_id = 1`);
     exec(`INSERT INTO ingest_keys (tenant_id, canal, chave) VALUES (1, 'evolution', 'k-evo')`);
@@ -438,7 +480,10 @@ describe('abrirRetorno', () => {
 
     expect(adiada?.adiar).toBe(true);
     expect(postsDoCard()).toEqual([]);
-    expect(retornos(consultar)).toEqual([expect.objectContaining({ mensagem_id: '9001', status: 'pendente', erro: null })]);
+    // solta ja': a volta da fila em ~20 s retoma sem esperar o prazo de trabalho vencer
+    expect(retornos(consultar)).toEqual([expect.objectContaining({
+      mensagem_id: '9001', status: 'pendente', erro: null, trabalhando_ate: null,
+    })]);
 
     const r = await abrirRetorno(env, 1, doAnuncio, { tentativa: 2 });
 
