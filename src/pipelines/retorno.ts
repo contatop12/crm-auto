@@ -40,6 +40,14 @@ const SEGURAR = `datetime('now', '+120 seconds')`;
 
 const MOTIVO_OCUPADA = 'outra execucao esta abrindo esta volta';
 
+/**
+ * Mensagem mais velha que isto nunca abre volta nova. O reprocesso
+ * (`POST /tenants/:id/reprocessar`) devolve a fila `message_incoming` de meses
+ * atras: com a volta ligada, cada um abriria um card para uma conversa que ja'
+ * andou. 72 h cobrem com folga a fila e a Evolution atrasada (47 h em 11/2026).
+ */
+const IDADE_MAXIMA_MS = 72 * 3600 * 1000;
+
 /** Ciclo de anuncio ou do perfil do Google vai para o funil, mesmo saindo do Organico. */
 const PLATAFORMAS_DO_FUNIL = new Set(['google', 'meta', 'gmn']);
 
@@ -67,6 +75,8 @@ interface Mensagem {
   etapa: number;
   telefone: string | null;
   protocolo: string | null;
+  /** hora da mensagem (ms); null = o webhook nao trouxe ou nao deu para ler */
+  quando: number | null;
 }
 
 interface Linha {
@@ -131,11 +141,17 @@ export async function abrirRetorno(
   if (existente) {
     reserva = await retomar(env, m, existente);
   } else {
+    // O silencio se mede ate' a hora da MENSAGEM: reprocessada dias depois, ela
+    // daria outra resposta contando ate' agora. E mensagem velha nao abre volta
+    // nova (ver IDADE_MAXIMA_MS); a volta ja' aberta, acima, responde por qualquer idade.
+    const agora = Date.now();
+    const quando = m.quando ?? agora;
+    if (agora - quando > IDADE_MAXIMA_MS) return null;
     if (!(await naEtapaFinal(env, cw, tenantId, acc, m))) return null;
     const anteriorDoLead = await cw.mensagemAnteriorDoLead(acc, m.conversa, m.id);
     const naEtapaDesde = anteriorDoLead === null ? Date.parse(String((await cardAntigo())?.step_changed_at ?? '')) : null;
     // a etapa final ja' foi conferida acima, antes de qualquer chamada ao Chatwoot
-    if (!ehRetorno({ etapaFinal: true, anteriorDoLead, naEtapaDesde, agora: Date.now(), dias: cfg.retorno_dias })) {
+    if (!ehRetorno({ etapaFinal: true, anteriorDoLead, naEtapaDesde, agora: quando, dias: cfg.retorno_dias })) {
       return null;
     }
     reserva = await reservar(env, tenantId, m, m.protocolo ?? (await protocoloDaConversa(env, tenantId, m.conversa)));
@@ -216,7 +232,14 @@ function lerMensagem(payload: string): Mensagem | null {
     board: num(task?.board_id) ?? num(obj(task?.board)?.id),
     telefone: str(obj(obj(conv?.meta)?.sender)?.phone_number) ?? str(attrs.phone_lead),
     protocolo: str(attrs.protocolo),
+    quando: horaDaMensagem(p?.created_at),
   };
+}
+
+/** O webhook manda a hora em ISO; segundos (numero) tambem servem. Ilegivel = null. */
+function horaDaMensagem(v: unknown): number | null {
+  const ms = typeof v === 'number' ? v * 1000 : typeof v === 'string' ? Date.parse(v) : NaN;
+  return Number.isFinite(ms) ? ms : null;
 }
 
 /**

@@ -84,13 +84,18 @@ function voltaFeita(exec: (sql: string) => void) {
 }
 
 /** Mensagem do lead. O retrato da conversa ainda traz o card antigo, em Ganha. */
-function mensagem(o: { id?: number; content?: string; task?: Record<string, unknown>; conv?: Record<string, unknown> } = {}) {
+function mensagem(o: {
+  id?: number; content?: string; task?: Record<string, unknown>; conv?: Record<string, unknown>;
+  /** hora da mensagem como o webhook manda (ISO, ou segundos); ausente = nao veio */
+  created_at?: string | number;
+} = {}) {
   return JSON.stringify({
     event: 'message_created',
     id: o.id ?? 9001,
     message_type: 'incoming',
     private: false,
     content: o.content ?? 'Oi, quero fazer outro orcamento',
+    ...(o.created_at === undefined ? {} : { created_at: o.created_at }),
     conversation: {
       id: 76,
       custom_attributes: { protocolo: ANTIGO, funil: 'Lead' },
@@ -512,6 +517,60 @@ describe('abrirRetorno', () => {
     expect(await abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).toBeNull();
     expect(postsDoCard()).toEqual([]);
     expect(retornos(consultar)).toEqual([]);
+  });
+
+  test('os 15 dias contam ate a hora da mensagem, nao ate agora', async () => {
+    // reprocessada 2 dias depois: ate' agora seriam 16 dias, ate' a mensagem sao 14
+    const { env, consultar } = cenario();
+    const quando = Date.now() - 2 * DIA;
+    kb.anteriorDoLead = quando - 14 * DIA;
+
+    expect(await abrirRetorno(env, 1, mensagem({ created_at: new Date(quando).toISOString() }), { tentativa: 1 })).toBeNull();
+    expect(postsDoCard()).toEqual([]);
+    expect(retornos(consultar)).toEqual([]);
+  });
+
+  test('mensagem com mais de 72 horas nunca abre volta: null sem chamar o Chatwoot', async () => {
+    // o reprocesso de eventos antigos abriria voltas em lote para mensagens de meses atras
+    const { env, consultar } = cenario();
+    const quando = Date.now() - 73 * 3600 * 1000;
+    kb.anteriorDoLead = quando - 20 * DIA;
+
+    expect(await abrirRetorno(env, 1, mensagem({ created_at: new Date(quando).toISOString() }), { tentativa: 1 })).toBeNull();
+    expect(chamadas).toEqual([]);
+    expect(retornos(consultar)).toEqual([]);
+  });
+
+  test('a hora da mensagem tambem vale quando vem em segundos', async () => {
+    const { env } = cenario();
+    const quando = Date.now() - 73 * 3600 * 1000;
+    kb.anteriorDoLead = quando - 20 * DIA;
+
+    expect(await abrirRetorno(env, 1, mensagem({ created_at: Math.floor(quando / 1000) }), { tentativa: 1 })).toBeNull();
+    expect(chamadas).toEqual([]);
+  });
+
+  test('mensagem de 47 horas ainda abre a volta', async () => {
+    const { env } = cenario();
+    const quando = Date.now() - 47 * 3600 * 1000;
+    kb.anteriorDoLead = quando - 20 * DIA;
+
+    const r = await abrirRetorno(env, 1, mensagem({ created_at: new Date(quando).toISOString() }), { tentativa: 1 });
+
+    expect(r?.status).toBe('ok');
+    expect(postsDoCard()).toHaveLength(1);
+  });
+
+  test('volta feita: mensagem antiga com o retrato do card antigo continua final, de qualquer idade', async () => {
+    // a idade so' barra abrir volta nova; a mensagem da volta ja' aberta nao cai na atribuicao comum
+    const { env, exec } = cenario();
+    voltaFeita(exec);
+    const quando = new Date(Date.now() - 30 * DIA).toISOString();
+
+    const r = await abrirRetorno(env, 1, mensagem({ id: 9050, created_at: quando, conv: { custom_attributes: {} } }), { tentativa: 1 });
+
+    expect(r).toEqual({ status: 'ignorado', motivo: expect.stringMatching(/volta #1.*card 1500/) });
+    expect(chamadas).toEqual([]);
   });
 
   test('sem mensagem anterior do lead vale a data em que o card entrou na etapa final', async () => {
