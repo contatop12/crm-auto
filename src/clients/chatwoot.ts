@@ -273,6 +273,54 @@ export class ChatwootClient {
   }
 
   /**
+   * Cria um card no Kanban, ja' ligado a conversa e ao contato.
+   *
+   * E' o que abre o novo ciclo do lead que volta: o card antigo fica no
+   * historico (ganho/perdido) e este nasce na etapa inicial. `conversas` sao
+   * display ids, que e' o que o Kanban guarda em `conversation_ids`. Os nomes
+   * dos campos e o envelope da resposta ainda nao foram sondados na instancia
+   * real: `scripts/teste-segundo-card.mjs` confirma. Por isso a resposta e'
+   * aceita solta ou embrulhada em `payload`/`task`, e sem id numerico falha alto.
+   */
+  async criarCard(
+    acc: number,
+    c: {
+      titulo: string;
+      boardId: number;
+      stepId: number;
+      conversas: number[];
+      contatos: number[];
+      atributos: Record<string, string>;
+    },
+  ): Promise<number> {
+    const r = await this.req<Record<string, unknown>>('POST', `/api/v1/accounts/${acc}/kanban/tasks`, {
+      task: {
+        title: c.titulo,
+        board_id: c.boardId,
+        board_step_id: c.stepId,
+        conversation_ids: c.conversas,
+        contact_ids: c.contatos,
+        custom_attributes: c.atributos,
+      },
+    });
+    const t = (r.payload ?? r.task ?? r) as Record<string, unknown>;
+    if (!t || typeof t.id !== 'number') {
+      throw new Error(`Chatwoot criou o card sem id na resposta: ${JSON.stringify(r).slice(0, 200)}`);
+    }
+    return t.id;
+  }
+
+  /**
+   * Troca as conversas ligadas ao card. Lista vazia desliga o card da conversa:
+   * o card antigo solta a conversa para o card novo ficar com ela.
+   */
+  async ligarConversasDoCard(acc: number, taskId: number, conversas: number[]): Promise<void> {
+    await this.req('PUT', `/api/v1/accounts/${acc}/kanban/tasks/${taskId}`, {
+      task: { conversation_ids: conversas },
+    });
+  }
+
+  /**
    * Move o card para outra etapa DO MESMO board.
    *
    * Entre boards a API recusa (ver docs/api-reference.md); aqui e' sempre
@@ -483,6 +531,35 @@ export class ChatwootClient {
   }
 
   /**
+   * Quando o lead falou antes da mensagem `antesDe` (ms), ou null se nao havia.
+   *
+   * Serve para medir o silencio que antecedeu a mensagem que reabriu a conversa.
+   * `before` devolve ids menores, entao a propria `antesDe` nunca entra. Mensagem
+   * do lead e' `message_type` 0 e nao privada; pagina para tras pelo menor id.
+   */
+  async mensagemAnteriorDoLead(
+    acc: number,
+    conversaId: number,
+    antesDe: number,
+    tetoPaginas = 5,
+  ): Promise<number | null> {
+    type Msg = { id: number; message_type: number; private?: boolean; created_at: number };
+    let antes = antesDe;
+    for (let i = 0; i < tetoPaginas; i++) {
+      const r: { payload?: Msg[] } = await this.req(
+        'GET',
+        `/api/v1/accounts/${acc}/conversations/${conversaId}/messages?before=${antes}`,
+      );
+      const lote = r.payload ?? [];
+      if (!lote.length) break;
+      const doLead = lote.filter((m) => m.message_type === 0 && !m.private).map((m) => m.created_at);
+      if (doLead.length) return Math.max(...doLead) * 1000;
+      antes = Math.min(...lote.map((m) => m.id));
+    }
+    return null;
+  }
+
+  /**
    * As 20 mensagens da conversa até `msgId`, inclusive.
    *
    * `before` devolve as de id menor; o +1 inclui a própria mensagem, que traz o
@@ -503,8 +580,12 @@ export class ChatwootClient {
    * A rota devolve as 20 ultimas; `before` pagina para tras. Nota interna
    * (`private`) fica de fora, pelo mesmo motivo da resposta ao vivo: e' bilhete
    * para o time, nao fala com o lead.
+   *
+   * `desde` (ms) deixa so' o que veio a partir dele: o lead que volta nao deve
+   * herdar as falas do ciclo anterior. Como as paginas vao do novo para o
+   * antigo, para de paginar quando a pagina inteira e' mais velha que `desde`.
    */
-  async textosDoVendedor(acc: number, conversaId: number, tetoPaginas = 10): Promise<string[]> {
+  async textosDoVendedor(acc: number, conversaId: number, tetoPaginas = 10, desde?: number): Promise<string[]> {
     type Msg = { id: number; message_type: number; private?: boolean; content?: string | null; created_at: number };
     const todas: Msg[] = [];
     let antes: number | null = null;
@@ -516,9 +597,11 @@ export class ChatwootClient {
       const lote = r.payload ?? [];
       if (!lote.length) break;
       todas.push(...lote);
+      if (desde !== undefined && lote.every((m) => m.created_at * 1000 < desde)) break;
       antes = Math.min(...lote.map((m) => m.id));
     }
     return todas
+      .filter((m) => desde === undefined || m.created_at * 1000 >= desde)
       .filter((m) => m.message_type === 1 && !m.private && typeof m.content === 'string' && m.content.trim())
       .sort((a, b) => a.created_at - b.created_at || a.id - b.id)
       .map((m) => (m.content as string).trim());
