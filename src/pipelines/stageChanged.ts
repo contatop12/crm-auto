@@ -49,6 +49,8 @@ interface Etapa {
   conversion_value: number | null;
   /** Evento da Meta desta etapa; NULL = nao manda nada para a Meta. */
   meta_evento: EventoMeta | null;
+  /** Janela de clique da meta no Google Ads, em dias (`domain/metas.ts`); NULL = nao gravada. */
+  ca_janela_clique: number | null;
 }
 
 interface Lead {
@@ -71,7 +73,9 @@ interface Lead {
   clique_em: string | null;
 }
 
-const LIMITE_CLIQUE_GOOGLE_MS = 90 * 86400000;
+/** Teto do Google para clique de conversao offline, quando a etapa nao diz a janela da meta. */
+const LIMITE_CLIQUE_GOOGLE_DIAS = 90;
+const DIA_MS = 86400000;
 
 export async function enviarConversao(
   env: Env,
@@ -94,7 +98,7 @@ export async function enviarConversao(
   if (stepId === null) return { status: 'ignorado', motivo: `card ${taskId}: payload sem etapa` };
 
   const etapa = await env.DB.prepare(
-    `SELECT nome, conversion_event, conversion_action_id, conversion_value, meta_evento
+    `SELECT nome, conversion_event, conversion_action_id, conversion_value, meta_evento, ca_janela_clique
      FROM funnel_stages WHERE tenant_id = ? AND cw_step_id = ?`,
   )
     .bind(tenantId, stepId)
@@ -161,16 +165,19 @@ export async function enviarConversao(
   }
 
   /**
-   * O Google recusa conversao de clique com mais de 90 dias, e o lead que voltou
-   * leva o clique do primeiro ciclo. Fica de fora antes do INSERT: a linha em
-   * `conversions` e' o dedupe, e gravar uma conversao que nunca sobe a deixaria
-   * como erro eterno na fila. `clique_em` ilegivel nao barra (parseDataBR = 0).
+   * O Google so' aceita a conversao dentro da janela de clique da meta (as que
+   * este sistema gera tem 30 dias; a de compra, 90), e o lead que voltou leva o
+   * clique do primeiro ciclo. Sem a janela gravada na etapa, o teto de 90 dias
+   * do Google. Fica de fora antes do INSERT: a linha em `conversions` e' o
+   * dedupe, e gravar uma conversao que nunca sobe a deixaria como erro eterno
+   * na fila. `clique_em` ilegivel nao barra (parseDataBR = 0).
    */
   const clique = parseDataBR(lead.clique_em);
-  if (clique && quando - clique > LIMITE_CLIQUE_GOOGLE_MS) {
+  const janela = Number(etapa.ca_janela_clique) > 0 ? Number(etapa.ca_janela_clique) : LIMITE_CLIQUE_GOOGLE_DIAS;
+  if (clique && quando - clique > janela * DIA_MS) {
     return {
       status: 'ignorado',
-      motivo: `${protocolo}: clique original com mais de 90 dias, o Google nao aceita a conversao`,
+      motivo: `${protocolo}: clique original com mais de ${janela} dias, o Google nao aceita a conversao`,
     };
   }
 

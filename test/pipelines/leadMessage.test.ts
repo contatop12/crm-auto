@@ -724,7 +724,9 @@ describe('atribuirLead', () => {
     test('planilha e conversao de entrada sobem mesmo com a conversa ja no funil', async () => {
       // fora da volta, conversa com `funil = Lead` nao sobe nada: o lead ja'
       // tinha entrado. Na volta o ciclo e' lead novo em tudo.
-      const { env, consultar, exec, retorno } = volta();
+      // Clique de 20 dias: dentro da janela de 30 dias da meta de entrada (a
+      // copia leva o clique original, e o Google recusa o de fora da janela).
+      const { env, consultar, exec, retorno } = volta({ diasDoClique: 20 });
       exec(`UPDATE tenant_config SET sheets_ativo = 1, planilha_modo = 'n8n', planilha_webhook_url = 'https://planilha.teste/n8n'
             WHERE tenant_id = 1`);
       atributosAtuais = { protocolo: ANTIGO, funil: 'Lead' };

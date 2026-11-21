@@ -172,12 +172,37 @@ describe('enviarConversao', () => {
     expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
   });
 
-  describe('lead que voltou: o Google so aceita clique de ate 90 dias', () => {
+  describe('lead que voltou: o Google so aceita clique dentro da janela da meta', () => {
     const QUANDO = Date.parse('2026-09-03T22:08:49.303Z');
     const cliqueHaDias = (dias: number, extraMs = 0) => new Date(QUANDO - dias * 86400000 - extraMs).toISOString();
+    /** Etapa sem janela de clique gravada: vale o teto de 90 dias de sempre. */
+    const semJanela = (exec: (sql: string) => void) => exec(`UPDATE funnel_stages SET ca_janela_clique = NULL`);
+
+    test('janela de 30 dias na etapa, clique de 31: ignora com a janela no motivo e sem linha em conversions', async () => {
+      const { env, exec, consultar } = cenario();
+      exec(`UPDATE funnel_stages SET ca_janela_clique = 30 WHERE cw_step_id = 29`);
+      exec(`UPDATE leads SET clique_em = '${cliqueHaDias(31)}' WHERE protocol = 'VITA-123'`);
+
+      const r = await enviarConversao(env, 1, card());
+      expect(r).toEqual({
+        status: 'ignorado',
+        motivo: 'VITA-123: clique original com mais de 30 dias, o Google nao aceita a conversao',
+      });
+      expect(chamadas).toHaveLength(0);
+      expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
+    });
+
+    test('janela de 30 dias na etapa, clique de 29: sobe', async () => {
+      const { env, exec } = cenario();
+      exec(`UPDATE funnel_stages SET ca_janela_clique = 30 WHERE cw_step_id = 29`);
+      exec(`UPDATE leads SET clique_em = '${cliqueHaDias(29)}' WHERE protocol = 'VITA-123'`);
+      expect((await enviarConversao(env, 1, card())).status).toBe('ok');
+      expect(chamadas).toHaveLength(1);
+    });
 
     test('clique de 91 dias: ignora e nao cria linha em conversions', async () => {
       const { env, exec, consultar } = cenario();
+      semJanela(exec);
       exec(`UPDATE leads SET clique_em = '${cliqueHaDias(91)}' WHERE protocol = 'VITA-123'`);
 
       const r = await enviarConversao(env, 1, card());
@@ -192,6 +217,7 @@ describe('enviarConversao', () => {
 
     test('clique de 89 dias segue e sobe', async () => {
       const { env, exec } = cenario();
+      semJanela(exec);
       exec(`UPDATE leads SET clique_em = '${cliqueHaDias(89)}' WHERE protocol = 'VITA-123'`);
       expect((await enviarConversao(env, 1, card())).status).toBe('ok');
       expect(chamadas).toHaveLength(1);
@@ -199,6 +225,7 @@ describe('enviarConversao', () => {
 
     test('exatamente 90 dias ainda sobe', async () => {
       const { env, exec } = cenario();
+      semJanela(exec);
       exec(`UPDATE leads SET clique_em = '${cliqueHaDias(90)}' WHERE protocol = 'VITA-123'`);
       expect((await enviarConversao(env, 1, card())).status).toBe('ok');
     });
