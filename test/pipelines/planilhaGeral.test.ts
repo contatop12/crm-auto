@@ -36,10 +36,14 @@ function cenario() {
 let abas: Record<string, string[][]>;
 /** A Geral como fica depois da proxima leitura inteira: o script da planilha reordenando. */
 let geralDepoisDaLeitura: string[][] | null;
+/** Corpos entregues ao webhook do n8n (cliente no modo `n8n`). */
+let noWebhook: Array<Record<string, unknown>>;
+const WEBHOOK = 'https://planilha.teste/n8n';
 
 beforeEach(() => {
   abas = { Geral: [CAB], 'Google Mensagem': [CAB], 'Meta Mensagem': [CAB] };
   geralDepoisDaLeitura = null;
+  noWebhook = [];
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const u = decodeURIComponent(String(url));
     if (/oauth2\.googleapis\.com/.test(u)) return Response.json({ access_token: 'tok' });
@@ -62,6 +66,7 @@ beforeEach(() => {
       if (aba === 'Geral' && /!A:ZZ/.test(u) && geralDepoisDaLeitura) [abas.Geral, geralDepoisDaLeitura] = [geralDepoisDaLeitura, null];
       return r;
     }
+    if (u === WEBHOOK) noWebhook.push(JSON.parse(String(init.body)) as Record<string, unknown>);
     return Response.json({ ok: true });
   });
 });
@@ -132,6 +137,24 @@ describe('lead que volta: outra linha com o mesmo telefone', () => {
     expect(abas.Geral![1]).toEqual(original);
     expect(abas.Geral![2]![6]).toBe('Vital #1');
     expect(abas.Geral![2]![5]).not.toBe('');
+  });
+});
+
+describe('modo n8n: a volta nao vai no corpo do webhook', () => {
+  // Um no' do Google Sheets que mapeia a entrada sozinho criaria a coluna "volta"
+  // na planilha do cliente. A volta e' dado interno: so' o caminho `sistema` a usa.
+  test('nem no lead comum, nem na volta (que segue com o " #n" no nome, como hoje)', async () => {
+    const { env, exec } = cenario();
+    exec(`UPDATE tenant_config SET planilha_modo = 'n8n', planilha_webhook_url = '${WEBHOOK}' WHERE tenant_id = 5`);
+    exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_e164, utm_source, utm_medium, origem, evento, volta)
+          VALUES (5, 'TAINA-VOLTA-1', 'Vital #1', '+5511999990000', 'instagram', 'mensagem', 'mensagem', 'ctwa', 1)`);
+
+    await espelharNaPlanilha(env, 5, { tipo: 'entrada', protocolo: 'TAINA-CTWA-9', ensaio: false });
+    await espelharNaPlanilha(env, 5, { tipo: 'entrada', protocolo: 'TAINA-VOLTA-1', ensaio: false });
+
+    expect(noWebhook).toHaveLength(2);
+    for (const corpo of noWebhook) expect(corpo).not.toHaveProperty('volta');
+    expect(noWebhook[1]!.nome).toBe('Vital #1');
   });
 });
 

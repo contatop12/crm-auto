@@ -120,6 +120,9 @@ async function gravarNaPlanilha(
     .first<LeadDaPlanilha>();
 
   const registro = montarRegistro({ ...ctx, cliente: cfg.cliente }, lead);
+  // A volta vai ao lado do registro, nunca dentro: o registro e' o corpo do
+  // webhook do n8n, e uma chave a mais viraria coluna na planilha do cliente.
+  const volta = Number(lead?.volta) > 0 ? Number(lead?.volta) : 0;
 
   if (cfg.planilha_modo === 'sistema') {
     const gravado = await escreverNasPlanilhas(env, {
@@ -134,7 +137,7 @@ async function gravarNaPlanilha(
         direto: cfg.sheets_aba_direto,
       },
       geral_canais: lerCanaisDaGeral(cfg.sheets_geral_canais),
-    }, registro);
+    }, registro, volta);
     console.log(JSON.stringify({ acao: 'planilha_ok', modo: 'sistema', tipo: ctx.tipo, protocolo: ctx.protocolo, abas: gravado }));
     return;
   }
@@ -150,12 +153,14 @@ async function gravarNaPlanilha(
  * - Cliques: atualiza a linha do protocolo, ou acrescenta se nao houver.
  * - Conversoes: idem, pela chave protocolo + evento.
  * - Planilha de leads: acrescenta, so' na conversao de entrada — uma linha
- *   por lead, como sempre foi.
+ *   por lead, como sempre foi. `volta` (`leads.volta`, 0 = lead comum) diz
+ *   qual linha do telefone e' a deste lead.
  */
 export async function escreverNasPlanilhas(
   env: Env,
   destino: DestinoPlanilha,
   registro: ReturnType<typeof montarRegistro>,
+  volta = 0,
 ): Promise<string[]> {
   const sheets = new SheetsClient(env);
   const feitas: string[] = [];
@@ -189,7 +194,7 @@ export async function escreverNasPlanilhas(
     for (const aba of abasDoLead(
       destino.leads_abas, String(registro.plataforma ?? ''), registro.cliques.origem, destino.geral_canais ?? null,
     )) {
-      await tentar(aba, () => acrescentarLead(sheets, doc, aba, registro));
+      await tentar(aba, () => acrescentarLead(sheets, doc, aba, registro, volta));
     }
   }
 
@@ -215,6 +220,8 @@ async function acrescentarLead(
   doc: string,
   aba: string,
   registro: Record<string, unknown>,
+  /** `leads.volta` do lead (0 = lead comum): vem a parte, nunca no registro */
+  volta: number,
 ): Promise<void> {
   const linhas = await sheets.tudo(doc, aba);
   const cab = linhas[0] ?? [];
@@ -241,7 +248,6 @@ async function acrescentarLead(
   // telefone sozinho nao diz de quem e' a linha, a volta tambem tem que bater.
   // A volta e' o dado da linha do lead (`leads.volta`), nunca o nome: o perfil
   // "Ana #2" de um lead comum nao pode ganhar uma segunda linha.
-  const volta = Number(registro.volta) > 0 ? Number(registro.volta) : 0;
   // a linha relida tem de ter o telefone e o sufixo da que foi escolhida
   const doLead = (l: string[], sufixo: number) =>
     jaTemTelefone([l[iFone] ?? '', l[iLink] ?? ''], telefone) && voltaDaLinha(cab, l) === sufixo;

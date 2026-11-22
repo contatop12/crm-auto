@@ -77,11 +77,17 @@ describe('montarRegistro — planilha de leads', () => {
     for (const { campo } of CAMPOS_PLANILHA) expect(r).toHaveProperty(campo);
   });
 
-  test('a volta vem da linha do lead (`leads.volta`), nao do nome', () => {
-    expect(montarRegistro(conversao, { ...lead, nome: 'Vital #1', volta: 1 }).volta).toBe(1);
-    // o perfil "Ana #2" de um lead comum nao e' volta
-    expect(montarRegistro(conversao, { ...lead, nome: 'Ana #2', volta: null }).volta).toBe(0);
-    expect(montarRegistro(conversao, null).volta).toBe(0);
+  test('a volta e dado interno, nunca campo: o registro nao a leva, nem na volta', () => {
+    // o registro e' o corpo do webhook do n8n: uma chave a mais vira coluna nova na planilha do cliente
+    expect(montarRegistro(conversao, { ...lead, nome: 'Vital #1', volta: 1 })).not.toHaveProperty('volta');
+    expect(montarRegistro(conversao, { ...lead, nome: 'Ana #2', volta: null })).not.toHaveProperty('volta');
+    expect(montarRegistro(conversao, null)).not.toHaveProperty('volta');
+  });
+
+  test('a lista de campos da tela e a de antes da volta existir', () => {
+    expect(CAMPOS_PLANILHA.map((c) => c.campo)).not.toContain('volta');
+    // 32 = os campos de 1830c17
+    expect(CAMPOS_PLANILHA).toHaveLength(32);
   });
 
   test('data e hora sao as do clique, quando o lead chegou', () => {
