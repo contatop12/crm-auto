@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { ChatwootClient, type CwStep } from '../clients/chatwoot';
+import { ChatwootClient, CardSemId, type CwStep } from '../clients/chatwoot';
 import { comVolta, ehRetorno } from '../domain/retorno';
 import { ehNumeroProprio, lerNumerosProprios } from '../domain/nomeLead';
 import { atribuirLead, MOTIVO_VOLTA_SEM_LEAD } from './leadMessage';
@@ -19,7 +19,8 @@ import { avisarLeadNoGrupo, TENTATIVAS_ESPERANDO_PROTOCOLO } from './kanbanTask'
  * criar o card de novo.
  */
 
-type Resultado = Awaited<ReturnType<typeof atribuirLead>>;
+/** `retentar: false` = erro que a fila nao deve repetir (o card pode ter nascido). */
+type Resultado = Awaited<ReturnType<typeof atribuirLead>> & { retentar?: boolean };
 
 /** Etapas de um board guardadas no KV: o Organico nao esta' em `funnel_stages`. */
 const TTL_ETAPAS_S = 3600;
@@ -86,11 +87,13 @@ interface Linha {
   task_novo: string | null;
   protocolo_anterior: string | null;
   desligou_antigo: number;
+  /** pendente | feito | erro (final: o card pode ter nascido sem o id chegar) */
   status: string;
+  erro: string | null;
   idade_s: number;
 }
 
-const COLUNAS_DA_LINHA = `id, n, mensagem_id, task_novo, protocolo_anterior, desligou_antigo, status,
+const COLUNAS_DA_LINHA = `id, n, mensagem_id, task_novo, protocolo_anterior, desligou_antigo, status, erro,
   CAST((julianday('now') - julianday(created_at)) * 86400 AS INTEGER) AS idade_s`;
 
 /** O que os passos do card dividem. `linha` muda: e' o estado da volta. */
@@ -201,9 +204,21 @@ export async function abrirRetorno(
     }));
     return semLead ? { status: 'ok', motivo: `volta #${linha.n} sem lead: card ${novo} criado, sem protocolo` } : r;
   } catch (e) {
+    const motivo = (e as Error).message.slice(0, 500);
+    // 2xx sem id: o card pode ter nascido, e a retentativa criaria o segundo.
+    // Final: a linha fica em erro (a mensagem seguinte com o card antigo para
+    // nela, como na feita) e a fila nao repete. Alguem confere o Kanban.
+    if (e instanceof CardSemId) {
+      await env.DB.prepare(`UPDATE retornos SET erro = ?, status = 'erro', trabalhando_ate = NULL WHERE id = ?`)
+        .bind(motivo, linha.id)
+        .run()
+        .catch(() => undefined);
+      console.log(JSON.stringify({ acao: 'volta_card_sem_id', tenant: tenantId, conversa: m.conversa, n: linha.n, erro: motivo }));
+      return { status: 'erro', retentar: false, motivo: `volta #${linha.n}: ${motivo}` };
+    }
     // a linha fica pendente com o motivo, e solta: a fila retenta e retoma pelo `task_novo`
     await env.DB.prepare('UPDATE retornos SET erro = ?, trabalhando_ate = NULL WHERE id = ?')
-      .bind((e as Error).message.slice(0, 500), linha.id)
+      .bind(motivo, linha.id)
       .run()
       .catch(() => undefined);
     throw e;
@@ -302,6 +317,10 @@ async function retomar(env: Env, m: Mensagem, l: Linha): Promise<Linha | Resulta
   if (l.status === 'feito') {
     return { status: 'ignorado', motivo: `mensagem da volta #${l.n} deste card, ja aberta no card ${l.task_novo}` };
   }
+  // Em erro e' final como a feita: tentar de novo poderia criar o segundo card
+  if (l.status === 'erro') {
+    return { status: 'ignorado', motivo: `mensagem da volta #${l.n} deste card, que parou em erro: ${l.erro ?? 'sem motivo'}` };
+  }
   const desta = l.mensagem_id === String(m.id);
   if (!desta && l.idade_s < PRAZO_DA_OUTRA_S) {
     return { status: 'ignorado', motivo: `outra mensagem esta abrindo a volta #${l.n} deste card` };
@@ -350,13 +369,34 @@ async function protocolosUsados(env: Env, tenantId: number, conversa: number, an
 async function cardDoCiclo(c: Ciclo, plataforma: string | null, atributos: Record<string, string>): Promise<number> {
   let novo = num(c.linha.task_novo);
   if (!novo) {
-    novo = await postarCard(c, plataforma, atributos);
+    // Sem `task_novo` nao quer dizer sem card: a execucao anterior pode te-lo
+    // criado e caido antes de gravar. Confere antes de qualquer POST.
+    novo = (await cardJaCriado(c)) ?? (await postarCard(c, plataforma, atributos));
     c.linha.task_novo = String(novo);
     // gravado logo: se algo cair daqui em diante, a retentativa nao cria outro
     await c.env.DB.prepare('UPDATE retornos SET task_novo = ? WHERE id = ?').bind(c.linha.task_novo, c.linha.id).run();
   }
   if (!c.linha.desligou_antigo) await conferirLigacao(c, novo);
   return novo;
+}
+
+/** O titulo do card do ciclo: o do card antigo, sem sufixo de volta anterior, mais " #n". */
+async function tituloDoCiclo(c: Ciclo): Promise<string> {
+  return comVolta(str((await c.cardAntigo())?.title) ?? `Conversa #${c.m.conversa}`, c.linha.n);
+}
+
+/**
+ * O card desta volta que uma execucao anterior criou sem chegar a gravar em
+ * `retornos` (o banco falhou depois do POST, a execucao morreu). A conversa
+ * aponta para um card que nao e' o antigo, com o titulo deste ciclo: e' ele, e
+ * outro POST faria o segundo " #n". Titulo diferente e' outro card: cria.
+ */
+async function cardJaCriado(c: Ciclo): Promise<number | null> {
+  const aponta = num(obj((await c.cw.conversa(c.acc, c.m.conversa))?.kanban_task)?.id);
+  if (!aponta || aponta === c.m.card) return null;
+  if (str((await c.cw.tarefa(c.acc, aponta))?.title) !== (await tituloDoCiclo(c))) return null;
+  console.log(JSON.stringify({ acao: 'volta_card_adotado', conversa: c.m.conversa, n: c.linha.n, card: aponta }));
+  return aponta;
 }
 
 async function postarCard(c: Ciclo, plataforma: string | null, atributos: Record<string, string>): Promise<number> {
@@ -367,7 +407,7 @@ async function postarCard(c: Ciclo, plataforma: string | null, atributos: Record
   // do Organico para o funil, como a promocao faria com o lead de anuncio; qualquer outro board fica
   const board = c.funil && doAntigo === c.organico && plataforma && PLATAFORMAS_DO_FUNIL.has(plataforma) ? c.funil : doAntigo;
   const card = {
-    titulo: comVolta(str(antigo?.title) ?? `Conversa #${m.conversa}`, c.linha.n),
+    titulo: await tituloDoCiclo(c),
     boardId: board,
     stepId: await primeiraEtapa(c, board),
     conversas: [m.conversa],

@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ChatwootClient } from '../../src/clients/chatwoot';
+import { ChatwootClient, CardSemId } from '../../src/clients/chatwoot';
 
 type Chamada = { metodo: string; url: string; corpo: unknown };
 let chamadas: Chamada[];
@@ -63,6 +63,18 @@ describe('criarCard', () => {
   test('sem id numerico na resposta, falha com erro claro', async () => {
     respostas = [{ ok: true }];
     await expect(cliente().criarCard(7, dados)).rejects.toThrow(/sem id/);
+  });
+
+  test('id que vem como texto numerico serve', async () => {
+    respostas = [{ id: '88' }, { payload: { id: '91' } }];
+    expect(await cliente().criarCard(7, dados)).toBe(88);
+    expect(await cliente().criarCard(7, dados)).toBe(91);
+  });
+
+  test('2xx sem id que preste: erro proprio (CardSemId), que quem chama distingue', async () => {
+    // o card pode ter nascido: tentar de novo criaria o segundo
+    respostas = [{ ok: true }, { id: 'abc' }, { id: 0 }];
+    for (let i = 0; i < 3; i++) await expect(cliente().criarCard(7, dados)).rejects.toBeInstanceOf(CardSemId);
   });
 });
 

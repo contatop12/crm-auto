@@ -53,6 +53,18 @@ export interface CwTask {
   value: string | null;
 }
 
+/**
+ * O Kanban respondeu 2xx ao criar o card, mas sem um id que preste. O card pode
+ * ter nascido: quem chama nao pode tentar de novo as cegas (seria o segundo
+ * card), entao este erro se distingue dos outros.
+ */
+export class CardSemId extends Error {
+  constructor(resposta: unknown) {
+    super(`Chatwoot criou o card sem id na resposta: ${JSON.stringify(resposta).slice(0, 200)}`);
+    this.name = 'CardSemId';
+  }
+}
+
 interface RegraCw {
   name?: unknown;
   active?: unknown;
@@ -280,7 +292,8 @@ export class ChatwootClient {
    * display ids, que e' o que o Kanban guarda em `conversation_ids`. Os nomes
    * dos campos e o envelope da resposta ainda nao foram sondados na instancia
    * real: `scripts/teste-segundo-card.mjs` confirma. Por isso a resposta e'
-   * aceita solta ou embrulhada em `payload`/`task`, e sem id numerico falha alto.
+   * aceita solta ou embrulhada em `payload`/`task`, com o id em numero ou em
+   * texto numerico; sem id que preste falha alto, com `CardSemId`.
    */
   async criarCard(
     acc: number,
@@ -303,11 +316,11 @@ export class ChatwootClient {
         custom_attributes: c.atributos,
       },
     });
-    const t = (r.payload ?? r.task ?? r) as Record<string, unknown>;
-    if (!t || typeof t.id !== 'number') {
-      throw new Error(`Chatwoot criou o card sem id na resposta: ${JSON.stringify(r).slice(0, 200)}`);
-    }
-    return t.id;
+    const t = (r.payload ?? r.task ?? r) as Record<string, unknown> | null;
+    const bruto = t && typeof t === 'object' ? t.id : undefined;
+    const id = typeof bruto === 'string' && /^\d+$/.test(bruto.trim()) ? Number(bruto) : bruto;
+    if (typeof id !== 'number' || !Number.isInteger(id) || id <= 0) throw new CardSemId(r);
+    return id;
   }
 
   /**

@@ -123,6 +123,8 @@ let kb: {
   falhasNosAtributos: number;
   /** o PUT que devolve a conversa ao card antigo falha com 500 */
   religarFalha: boolean;
+  /** o POST do card responde 200 sem id (o card pode ter nascido) */
+  postSemId: boolean;
 };
 let criado: Record<string, unknown> | null;
 let chamadas: Array<{ metodo: string; url: string; corpo: unknown }>;
@@ -142,6 +144,7 @@ beforeEach(() => {
     conversaAponta: 'novo',
     falhasNosAtributos: 0,
     religarFalha: false,
+    postSemId: false,
   };
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const metodo = init.method ?? 'GET';
@@ -166,6 +169,7 @@ beforeEach(() => {
     if (metodo === 'POST' && caminho === '/kanban/tasks') {
       const status = kb.postsDoCard.shift() ?? 200;
       if (status >= 400) return new Response('{"errors":["recusado"]}', { status });
+      if (kb.postSemId) return Response.json({ ok: true });
       const task = (corpo as { task: Record<string, unknown> }).task;
       criado = {
         ...task, id: kb.idNovo, conversations: [{ id: 900, display_id: 76 }],
@@ -486,6 +490,103 @@ describe('abrirRetorno', () => {
     expect(postsDoCard()).toHaveLength(1);
     expect(ligacoesDoAntigo()).toEqual([]);
     expect(retornos(consultar)[0]).toMatchObject({ status: 'pendente', task_novo: null });
+  });
+
+  describe('o card da volta nasce uma vez so', () => {
+    const cardDaVolta = (over: Record<string, unknown> = {}) => ({
+      id: 1500, board_id: FUNIL, board_step_id: NOVO_LEAD, title: `${TITULO} #1`, custom_attributes: { protocolo: `${ANTIGO}-R1` },
+      conversation_ids: [76], conversations: [{ id: 900, display_id: 76 }], contacts: [{ id: 555, name: 'Vital', phone_number: FONE }],
+      ...over,
+    });
+
+    test('POST do card com 200 e sem id: erro final, fora da fila, e a linha fica em erro', async () => {
+      // o card pode ter nascido: tentar de novo criaria o segundo " #1"
+      const { env, consultar } = cenario();
+      kb.postSemId = true;
+
+      const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 1 });
+
+      expect(r).toEqual({ status: 'erro', retentar: false, motivo: expect.stringContaining('sem id') });
+      expect(postsDoCard()).toHaveLength(1);
+      expect(retornos(consultar)[0]).toMatchObject({
+        status: 'erro', task_novo: null, erro: expect.stringContaining('sem id'), trabalhando_ate: null,
+      });
+    });
+
+    test('volta em erro: a mesma mensagem e as seguintes com o card antigo terminam ignoradas, sem chamar o Chatwoot', async () => {
+      const { env } = cenario();
+      kb.postSemId = true;
+      await abrirRetorno(env, 1, mensagem(), { tentativa: 1 });
+      const antes = chamadas.length;
+
+      const mesma = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
+      const outra = await abrirRetorno(env, 1, mensagem({ id: 9002, content: 'alo?' }), { tentativa: 1 });
+
+      for (const r of [mesma, outra]) expect(r).toEqual({ status: 'ignorado', motivo: expect.stringContaining('volta #1') });
+      expect(chamadas).toHaveLength(antes);
+    });
+
+    test('pela fila: o 200 sem id sai da fila sem retry', async () => {
+      const { env, exec, consultar } = cenario();
+      kb.postSemId = true;
+      exec(`INSERT INTO events (id, tenant_id, source, event_type, payload)
+            VALUES (1, 1, 'chatwoot', 'message_incoming', '${mensagem()}')`);
+      const ack = vi.fn();
+      const retry = vi.fn();
+      const body: QueueMessage = { eventId: 1, tenantId: 1, source: 'chatwoot', eventType: 'message_incoming' };
+
+      await consumir({ messages: [{ body, attempts: 2, ack, retry }] } as unknown as MessageBatch<QueueMessage>, env);
+
+      expect(retry).not.toHaveBeenCalled();
+      expect(ack).toHaveBeenCalledTimes(1);
+      expect(consultar('SELECT status FROM events WHERE id = 1')).toEqual([{ status: 'erro' }]);
+      expect(postsDoCard()).toHaveLength(1);
+    });
+
+    test('card ja criado por uma execucao que morreu antes de gravar o task_novo: adota, sem POST', async () => {
+      const { env, exec, consultar } = cenario();
+      exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior)
+            VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}')`);
+      // a conversa ja' aponta para ele, e o titulo e' o da volta #1
+      criado = cardDaVolta();
+
+      const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
+
+      expect(r?.status).toBe('ok');
+      expect(postsDoCard()).toEqual([]);
+      expect(retornos(consultar)[0]).toMatchObject({ status: 'feito', task_novo: '1500' });
+    });
+
+    test('a conversa aponta para outro card, de titulo diferente: nao adota, cria o da volta', async () => {
+      const { env, consultar } = cenario();
+      criado = cardDaVolta({ id: 1450, title: '#76 - 5511999990000 - Vital - outro assunto' });
+
+      const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 1 });
+
+      expect(r?.status).toBe('ok');
+      expect(postsDoCard()).toHaveLength(1);
+      expect(retornos(consultar)[0]).toMatchObject({ status: 'feito', task_novo: '1500' });
+    });
+
+    test('falha ao gravar o task_novo depois do POST: a retentativa adota o card, sem segundo POST', async () => {
+      const { env, consultar, ganchos } = cenario();
+      let falhou = false;
+      ganchos.push((sql) => {
+        if (!falhou && /SET task_novo = \?/.test(sql)) {
+          falhou = true;
+          throw new Error('D1_ERROR: D1 DB is overloaded');
+        }
+      });
+
+      await expect(abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).rejects.toThrow(/overloaded/);
+      expect(retornos(consultar)[0]).toMatchObject({ status: 'pendente', task_novo: null, trabalhando_ate: null });
+
+      const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
+
+      expect(r?.status).toBe('ok');
+      expect(postsDoCard()).toHaveLength(1);
+      expect(retornos(consultar)[0]).toMatchObject({ status: 'feito', task_novo: '1500' });
+    });
   });
 
   test('a conversa ainda aponta para o card antigo depois de criar: o antigo solta a conversa', async () => {
