@@ -7,6 +7,7 @@ import { criarEventoMeta } from './metaCapi';
 import { destinoDoLead } from '../domain/plataformaLead';
 import { ehDoPerfilGoogle } from '../domain/platform';
 import { parseDataBR } from '../domain/matching';
+import { cicloDoCardAntigo } from '../db/retornos';
 import type { EventoMeta } from '../domain/eventoMeta';
 
 /**
@@ -385,6 +386,14 @@ async function acharProtocolo(
 ): Promise<string | null> {
   const doCard = str(obj(p.custom_attributes)?.protocolo);
   if (doCard) return doCard;
+
+  // Card antigo de uma volta: a conversa ja' e' do ciclo novo, e o resgate por
+  // ela daria ao card antigo o protocolo novo (a conversao subiria pelo ciclo
+  // errado). Vale o do ciclo dele, ou nenhum.
+  if (taskId !== null) {
+    const antigo = await cicloDoCardAntigo(env.DB, tenantId, taskId);
+    if (antigo) return antigo.protocolo;
+  }
 
   /**
    * O card traz os dois números da conversa, e eles NÃO são o mesmo:

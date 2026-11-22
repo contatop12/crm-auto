@@ -550,6 +550,47 @@ describe('card que entra no funil sem os atributos do lead', () => {
     expect(r.status).toBe('ok');
     expect(pulseboard).toHaveLength(1);
   });
+
+  describe('card antigo de uma volta: nunca herda o ciclo novo pela conversa', () => {
+    // A volta #1 do card 719 abriu o card 800 com PERSI-MUYIE0GC6DMJ-R1, e a
+    // conversa 28 ja' e' do ciclo novo, no banco e nos atributos. O card 719
+    // perdeu o atributo `protocolo` e alguem o mexe depois da volta.
+    const NOVO = 'PERSI-MUYIE0GC6DMJ-R1';
+
+    function comVolta(protocoloAnterior: string | null) {
+      stub({ protocolo: NOVO, gclid: 'Cj0KC', utm_source: 'google' });
+      const c = comChatwoot();
+      c.exec(`UPDATE conversations SET protocol = '${NOVO}', task_id = 800 WHERE cw_conversation_id = 28`);
+      c.exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, task_anterior, task_novo, protocolo_anterior, protocolo_novo, status)
+              VALUES (1, 28, 1, '719', '800', ${protocoloAnterior ? `'${protocoloAnterior}'` : 'NULL'}, '${NOVO}', 'feito')`);
+      // o grupo ja' soube do ciclo antigo por este card
+      c.exec(`INSERT INTO group_notifications (tenant_id, chave, task_id, protocolo, status)
+              VALUES (1, 'PERSI-MUYIE0GC6DMJ', 719, 'PERSI-MUYIE0GC6DMJ', 'enviado')`);
+      return c;
+    }
+
+    test('sem o atributo, vale o protocolo do ciclo dele, e nada e gravado no card', async () => {
+      const { env } = comVolta('PERSI-MUYIE0GC6DMJ');
+
+      const r = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+
+      expect(r).toEqual({ status: 'ignorado', motivo: 'grupo ja avisado sobre PERSI-MUYIE0GC6DMJ' });
+      expect(gravacoesNoCard()).toEqual([]);
+      expect(JSON.stringify(chamadas.map((c) => c.corpo))).not.toContain(NOVO);
+    });
+
+    test('o ciclo dele nao tinha protocolo: sem protocolo, sem esperar e sem gravar no card', async () => {
+      const { env, consultar } = comVolta(null);
+
+      const r = await avisarLeadNoGrupo(env, 1, task({ custom_attributes: {} }), { tentativa: 1 });
+
+      expect(r.adiar).toBeUndefined();
+      expect(gravacoesNoCard()).toEqual([]);
+      expect(JSON.stringify(chamadas.map((c) => c.corpo))).not.toContain(NOVO);
+      expect(consultar<{ chave: string }>('SELECT chave FROM group_notifications ORDER BY chave')
+        .map((g) => g.chave)).not.toContain(NOVO);
+    });
+  });
 });
 
 describe('nome no aviso', () => {

@@ -172,6 +172,42 @@ describe('enviarConversao', () => {
     expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
   });
 
+  describe('card antigo de uma volta, sem o atributo protocolo: nunca converte pelo ciclo novo', () => {
+    // a volta #1 do card 1526 abriu o card 1600 com VITA-123-R1, e a conversa 78
+    // ja' aponta para o ciclo novo (`conversations`)
+    function comVolta(protocoloAnterior: string | null) {
+      const c = cenario();
+      c.exec(`INSERT INTO leads (tenant_id, protocol, nome, phone_e164, gclid, origem, evento, retorno_de, created_at)
+              VALUES (1, 'VITA-123-R1', 'Vital #1', '+5511999990000', 'CjwKCAjwGCLID', 'mensagem', 'retorno', 'VITA-123',
+                      '2026-09-02T10:00:00Z')`);
+      c.exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, task_id) VALUES (1, 78, 'VITA-123-R1', 1600)`);
+      c.exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, task_anterior, task_novo, protocolo_anterior, protocolo_novo, status)
+              VALUES (1, 78, 1, '1526', '1600', ${protocoloAnterior ? `'${protocoloAnterior}'` : 'NULL'}, 'VITA-123-R1', 'feito')`);
+      return c;
+    }
+
+    test('vale o protocolo do ciclo dele (`protocolo_anterior`), nao o da conversa', async () => {
+      const { env, consultar } = comVolta('VITA-123');
+      const r = await enviarConversao(env, 1, card({ custom_attributes: {} }));
+      expect(r.status).toBe('ok');
+      expect(consultar<{ dedupe_key: string }>('SELECT dedupe_key FROM conversions')).toEqual([{ dedupe_key: 'VITA-123-qualificado_1' }]);
+    });
+
+    test('o ciclo dele nao tinha protocolo: sem protocolo, nada sobe', async () => {
+      const { env, consultar } = comVolta(null);
+      const r = await enviarConversao(env, 1, card({ custom_attributes: {} }));
+      expect(r).toEqual({ status: 'ignorado', motivo: 'card 1526: sem protocolo, nao ha clique para atribuir' });
+      expect(chamadas).toHaveLength(0);
+      expect(consultar('SELECT * FROM conversions')).toHaveLength(0);
+    });
+
+    test('o card novo da volta continua achando o protocolo pela conversa', async () => {
+      const { env, consultar } = comVolta('VITA-123');
+      await enviarConversao(env, 1, card({ id: 1600, custom_attributes: {} }));
+      expect(consultar<{ dedupe_key: string }>('SELECT dedupe_key FROM conversions')).toEqual([{ dedupe_key: 'VITA-123-R1-qualificado_1' }]);
+    });
+  });
+
   describe('lead que voltou: o Google so aceita clique dentro da janela da meta', () => {
     const QUANDO = Date.parse('2026-09-03T22:08:49.303Z');
     const cliqueHaDias = (dias: number, extraMs = 0) => new Date(QUANDO - dias * 86400000 - extraMs).toISOString();

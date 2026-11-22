@@ -389,9 +389,12 @@ export async function atribuirLead(
   };
 
   // Volta: o card do ciclo nasce agora, com o lead e a plataforma resolvidos
-  // (a plataforma decide o board), e antes da conversa ganhar o protocolo
-  // novo. Falhou: sobe para a fila retentar, sem conversa apontando para um
-  // ciclo sem card.
+  // (a plataforma decide o board), e antes de qualquer escrita no Chatwoot: os
+  // atributos da conversa so' ganham o protocolo novo depois do card. Em
+  // `conversations` o protocolo novo ja' foi gravado acima, entao se o card
+  // falhar o banco aponta para um ciclo ainda sem card ate' a fila retentar. O
+  // card antigo nao o herda: card antigo de volta nunca le' o protocolo pela
+  // conversa (`acharProtocolo`, `avisarLeadNoGrupo`).
   const atributos = utmsDoCard(atribuicao);
   const cardDoCiclo = retorno
     ? await retorno.criarCard({ protocolo: lead.protocol, plataforma, atributos })

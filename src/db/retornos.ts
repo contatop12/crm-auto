@@ -16,6 +16,27 @@ export async function voltaDoCard(db: D1Database, tenantId: number, taskId: numb
   return r?.n ?? 0;
 }
 
+/**
+ * O card e' o antigo de uma volta? Entao devolve o protocolo do ciclo dele
+ * (`protocolo_anterior`; null = o ciclo nao tinha). null = card que nao e'
+ * antigo de volta nenhuma.
+ *
+ * Depois da volta a conversa e' do ciclo novo (`conversations.protocol`, os
+ * atributos). O card antigo que ficou sem o proprio atributo `protocolo` nao
+ * pode achar o dele pela conversa: herdaria o ciclo novo e converteria por ele.
+ */
+export async function cicloDoCardAntigo(
+  db: D1Database,
+  tenantId: number,
+  taskId: number,
+): Promise<{ protocolo: string | null } | null> {
+  const r = await db
+    .prepare('SELECT protocolo_anterior FROM retornos WHERE tenant_id = ? AND task_anterior = ?')
+    .bind(tenantId, String(taskId))
+    .first<{ protocolo_anterior: string | null }>();
+  return r ? { protocolo: r.protocolo_anterior ?? null } : null;
+}
+
 /** A volta de cada card novo do cliente, de uma vez: o lote de cards nao paga uma consulta por card. */
 export async function voltasDosCards(db: D1Database, tenantId: number): Promise<Map<number, number>> {
   const { results } = await db

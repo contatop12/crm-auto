@@ -8,6 +8,7 @@ import { PulseboardClient, ErroPulseboard, type ResultadoAviso } from '../client
 import { nomeParaExibir, lerNumerosProprios, ehNumeroProprio } from '../domain/nomeLead';
 import { ChatwootClient } from '../clients/chatwoot';
 import { utmsDoCard } from '../domain/padroes';
+import { cicloDoCardAntigo } from '../db/retornos';
 
 /**
  * Quantas entregas do webhook do card esperam o protocolo antes de avisar sem
@@ -127,7 +128,13 @@ export async function avisarLeadNoGrupo(
    * atribuicao algumas vezes antes de avisar como direto.
    */
   let protocolo = t.protocolo;
-  if (!protocolo) {
+  // Card antigo de uma volta sem o proprio atributo: a conversa ja' e' do ciclo
+  // novo, entao nem o protocolo nem os atributos dela servem para ele. Vale o
+  // do ciclo dele (ou nenhum), sem esperar a atribuicao, que foi ha' muito.
+  const antigo = protocolo ? null : await cicloDoCardAntigo(env.DB, tenantId, t.taskId);
+  if (antigo) {
+    protocolo = antigo.protocolo ?? '';
+  } else if (!protocolo) {
     protocolo = (await protocoloDaConversa(env, tenantId, t.conversaDisplay, t.taskId)) ?? '';
     if (!protocolo && (opcoes.tentativa ?? 1) < TENTATIVAS_ESPERANDO_PROTOCOLO) {
       return {
@@ -140,8 +147,9 @@ export async function avisarLeadNoGrupo(
   const chaveDedupe = protocolo || `task:${t.taskId}`;
 
   // Antes de qualquer saida por duplicata: o card precisa do protocolo mesmo
-  // quando o grupo ja' soube do lead.
-  if (!t.protocolo && protocolo && cfg.cw_account_id) {
+  // quando o grupo ja' soube do lead. O card antigo de uma volta nao: o que
+  // `completarCard` copia vem da conversa, que ja' e' do ciclo novo.
+  if (!t.protocolo && protocolo && cfg.cw_account_id && !antigo) {
     await completarCard(env, cfg.cw_account_id, t.taskId, t.conversaDisplay, protocolo);
   }
 
