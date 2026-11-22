@@ -185,7 +185,8 @@ seguinte apagaria o sufixo.
 ### 6. Banco (migration 0044)
 
 - `tenant_config.retorno_dias INTEGER` (NULL = desligado).
-- `leads.retorno_de TEXT`, `leads.clique_em TEXT`.
+- `leads.retorno_de TEXT`, `leads.clique_em TEXT`, `leads.volta INTEGER`
+  (número da volta do lead do ciclo; NULL ou 0 = não é volta).
 - Tabela `retornos`: `tenant_id`, `cw_conversation_id`, `n`, `mensagem_id`,
   `task_anterior`, `task_novo`, `protocolo_anterior`, `protocolo_novo`,
   `origem` (`anuncio_novo` | `herdada` | `sem_lead`), `status`, `erro`,
@@ -241,9 +242,10 @@ Onde diferem do texto acima, valem estas.
 - **Mensagem com o retrato do card antigo de uma volta** (volta já feita, ou
   sendo aberta por outra mensagem) termina como `ignorado` no próprio
   pipeline. Nunca cai na atribuição comum, que reescreveria o card antigo.
-- **Trava de 120 s** na linha de `retornos` (`trabalhando_ate`): duas entregas
-  da mesma mensagem não criam dois cards. Outra mensagem assume a volta se a
-  primeira ficar 10 minutos parada.
+- **Trava de 45 s** na linha de `retornos` (`trabalhando_ate`): duas entregas
+  da mesma mensagem não criam dois cards. Fica abaixo das retentativas da fila
+  (5 × ~20 s): quem morre segurando não prende a volta. Outra mensagem assume a
+  volta se a primeira ficar 10 minutos parada.
 - **Board do card novo:** vai para o funil só quando o card antigo está no
   board Orgânico e a volta vem de anúncio ou do perfil do Google.
 - **Card antigo só é desligado da conversa** quando o Chatwoot recusa o card
@@ -262,8 +264,26 @@ Onde diferem do texto acima, valem estas.
 - **Lead sem nome aproveitável** entra como `Sem nome #n`: é o `#n` que
   identifica a linha da volta na Geral.
 - **Respostas do vendedor anteriores à volta** não movem o card novo;
-  conversão do Google com clique original de mais de 90 dias é ignorada com
-  motivo; o painel de órfãos não lista card antigo desligado por uma volta.
+  conversão do Google com clique original fora da janela de clique da meta da
+  etapa (`funnel_stages.ca_janela_clique`, 30 dias nas metas geradas; sem
+  janela, 90) é ignorada com motivo; o painel de órfãos não lista card antigo
+  desligado por uma volta.
+- **Hora da mensagem:** o silêncio de `retorno_dias` é medido até o
+  `created_at` da mensagem, não até agora, e mensagem com mais de 72 h nunca
+  abre volta nova (o reprocesso devolve à fila eventos de meses). A volta já
+  registrada responde por mensagem de qualquer idade. `retorno_dias` 0 ou
+  negativo é desligado, como NULL.
+- **A volta é dado, não texto:** `leads.volta` diz qual linha da Geral é a do
+  ciclo, e `retornos.task_novo` diz a volta do card (título e espelho da
+  etapa). O ` #n` do NOME só distingue a linha na aba. Lead comum cujo perfil
+  termina em ` #2` segue exatamente como antes da volta existir.
+- **Card criado uma vez só:** 2xx sem id no `POST` do card é erro final
+  (`retornos.status = 'erro'`, fora da fila; mensagens seguintes com o card
+  antigo param nela). Antes de qualquer `POST` sem `task_novo`, o card para o
+  qual a conversa já aponta, com o título deste ciclo, é adotado.
+- **Card antigo sem o atributo `protocolo`** nunca acha protocolo pela conversa
+  (que já é do ciclo novo): vale `retornos.protocolo_anterior`, ou nenhum, e o
+  aviso do grupo não o completa.
 
 ## Achados na escrita do plano (21/11)
 
