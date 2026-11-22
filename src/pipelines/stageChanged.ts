@@ -315,7 +315,8 @@ export async function enviarConversao(
   // lead fora dela e sem SEQUENCIA (Locadora, 10/11/2026: conta sem conversoes
   // otimizadas para leads recusando a conversa que sobe so' com o telefone).
   // `entrada` grava a planilha de leads e o clique, nao a aba de conversoes:
-  // a conversao nao subiu. A planilha nao duplica — acha o lead pelo telefone.
+  // a conversao nao subiu. A planilha nao duplica — acha o lead pelo telefone
+  // e pela volta (`leads.volta`), entao o lead que volta ganha a linha dele.
   const entrarNaPlanilhaMesmoAssim = async () => {
     if (etapa.conversion_event !== 'conversa') return;
     await espelharNaPlanilha(env, tenantId, { tipo: 'entrada', protocolo, ensaio: sombra }).catch((e: Error) => {

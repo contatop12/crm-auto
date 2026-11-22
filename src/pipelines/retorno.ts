@@ -33,11 +33,14 @@ const TTL_ETAPAS_S = 3600;
 const PRAZO_DA_OUTRA_S = 10 * 60;
 
 /**
- * Quem abre a volta segura a linha ate' aqui (`trabalhando_ate`): duas entregas
- * da mesma mensagem ao mesmo tempo nao criam dois cards. Cobre com folga a
- * atribuicao ate' o POST do card; quem morre no meio perde a vez sozinho.
+ * Quem abre a volta segura a linha por isto (`trabalhando_ate`): duas entregas
+ * da mesma mensagem ao mesmo tempo nao criam dois cards. Cobre a atribuicao ate'
+ * o POST do card e tem de ser MENOR que as retentativas da fila (5 x ~20 s =
+ * ~100 s): se quem segura morrer, a ultima retentativa ainda acha a trava
+ * vencida e termina a volta, em vez de esgotar as tentativas esbarrando nela.
  */
-const SEGURAR = `datetime('now', '+120 seconds')`;
+const TRAVA_S = 45;
+const SEGURAR = `datetime('now', '+${TRAVA_S} seconds')`;
 
 const MOTIVO_OCUPADA = 'outra execucao esta abrindo esta volta';
 
@@ -125,7 +128,8 @@ export async function abrirRetorno(
   )
     .bind(tenantId)
     .first<Config>();
-  if (cfg?.retorno_dias == null || !cfg.cw_account_id) return null;
+  // 0 ou negativo e' desligado como NULL: com 0, toda mensagem em card fechado seria volta
+  if (cfg?.retorno_dias == null || cfg.retorno_dias <= 0 || !cfg.cw_account_id) return null;
   if (ehNumeroProprio(m.telefone, lerNumerosProprios(cfg.numeros_proprios))) return null;
 
   const acc = cfg.cw_account_id;
@@ -442,10 +446,13 @@ async function postarCard(c: Ciclo, plataforma: string | null, atributos: Record
 /**
  * Tira esta conversa do card antigo; as outras ligadas a ele ficam. Marca na
  * hora: card antigo sem a conversa nunca fica sem registro. Devolve a ligacao
- * de antes, para religar.
+ * de antes, para religar, sempre com esta conversa: na retentativa depois de
+ * cair entre soltar e o segundo POST, o card antigo ja' e' lido sem ela, e
+ * religar so' o que ele tem a deixaria solta.
  */
 async function soltarAntigo(c: Ciclo): Promise<number[]> {
-  const ligadas = ids((await c.cardAntigo())?.conversation_ids) ?? [c.m.conversa];
+  const doCard = ids((await c.cardAntigo())?.conversation_ids) ?? [];
+  const ligadas = doCard.includes(c.m.conversa) ? doCard : [...doCard, c.m.conversa];
   await c.cw.ligarConversasDoCard(c.acc, c.m.card, ligadas.filter((x) => x !== c.m.conversa));
   c.linha.desligou_antigo = 1;
   await c.env.DB.prepare('UPDATE retornos SET desligou_antigo = 1 WHERE id = ?').bind(c.linha.id).run();

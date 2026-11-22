@@ -323,10 +323,28 @@ describe('abrirRetorno', () => {
     expect(retornos(consultar)[0]).toMatchObject({ status: 'feito', trabalhando_ate: null });
   });
 
+  test('a reserva segura a linha por 45 s: menos que as 5 tentativas da fila (~100 s)', async () => {
+    // trava mais longa que as retentativas deixaria a volta presa se quem a segura morrer
+    const { env, consultar, ganchos } = cenario();
+    let segundos: number | null = null;
+    ganchos.push((sql) => {
+      if (segundos === null && /SET task_novo = \?/.test(sql)) {
+        segundos = consultar<{ s: number }>(
+          `SELECT CAST(ROUND((julianday(trabalhando_ate) - julianday('now')) * 86400) AS INTEGER) AS s FROM retornos`,
+        )[0]!.s;
+      }
+    });
+
+    await abrirRetorno(env, 1, mensagem(), { tentativa: 1 });
+
+    expect(segundos).toBeGreaterThanOrEqual(40);
+    expect(segundos).toBeLessThanOrEqual(45);
+  });
+
   test('reserva com o prazo de trabalho valendo: erro para a fila, sem escrever no Chatwoot', async () => {
     const { env, exec, consultar } = cenario();
     exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, trabalhando_ate)
-          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', datetime('now', '+1 minute'))`);
+          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', datetime('now', '+30 seconds'))`);
 
     const r = await abrirRetorno(env, 1, mensagem(), { tentativa: 2 });
 
@@ -416,7 +434,7 @@ describe('abrirRetorno', () => {
   test('assumir a volta que outra execucao ainda segura: erro para a fila, sem chamar o Chatwoot', async () => {
     const { env, exec, consultar } = cenario();
     exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, created_at, trabalhando_ate)
-          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', datetime('now', '-11 minutes'), datetime('now', '+1 minute'))`);
+          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', datetime('now', '-11 minutes'), datetime('now', '+30 seconds'))`);
 
     const r = await abrirRetorno(env, 1, mensagem({ id: 9002 }), { tentativa: 1 });
 
@@ -468,6 +486,19 @@ describe('abrirRetorno', () => {
     await expect(abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).rejects.toThrow(/422/);
 
     expect(ligacoesDoAntigo()).toEqual([{ task: { conversation_ids: [80] } }, { task: { conversation_ids: [76, 80] } }]);
+  });
+
+  test('retentativa depois de cair entre soltar o antigo e o segundo POST: a ligacao devolvida inclui esta conversa', async () => {
+    // o card antigo ja' foi lido sem a conversa 76: religar so' o que ele tem a deixaria solta
+    const { env, exec } = cenario();
+    exec(`INSERT INTO retornos (tenant_id, cw_conversation_id, n, mensagem_id, task_anterior, protocolo_anterior, desligou_antigo)
+          VALUES (1, 76, 1, '9001', '1421', '${ANTIGO}', 1)`);
+    kb.antigo.conversation_ids = [];
+    kb.postsDoCard = [422, 422];
+
+    await expect(abrirRetorno(env, 1, mensagem(), { tentativa: 2 })).rejects.toThrow(/422/);
+
+    expect(ligacoesDoAntigo()).toEqual([{ task: { conversation_ids: [] } }, { task: { conversation_ids: [76] } }]);
   });
 
   test('POST do card com 429: nao e recusa, o erro sobe sem mexer no card antigo', async () => {
@@ -603,6 +634,17 @@ describe('abrirRetorno', () => {
 
   test('retorno_dias NULL: null com uma leitura so do banco e nenhuma chamada ao Chatwoot', async () => {
     const { env, consultas, consultar } = cenario({ retornoDias: null });
+
+    expect(await abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).toBeNull();
+
+    expect(consultas).toHaveLength(1);
+    expect(chamadas).toEqual([]);
+    expect(retornos(consultar)).toEqual([]);
+  });
+
+  test.each([0, -5])('retorno_dias %i: desligado como NULL, sem chamar o Chatwoot', async (dias) => {
+    // com 0, qualquer mensagem em card fechado seria volta
+    const { env, consultas, consultar } = cenario({ retornoDias: dias });
 
     expect(await abrirRetorno(env, 1, mensagem(), { tentativa: 1 })).toBeNull();
 

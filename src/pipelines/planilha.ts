@@ -69,7 +69,8 @@ function falhaPassageira(e: unknown): boolean {
  * "ja enviada" e nunca volta aqui. Foi assim que Locadora e Martinelli perderam 4
  * linhas em 03-04/11/2026 (`D1 DB is overloaded`). Sem linha o script da planilha nao
  * tem o que numerar, e o aviso do grupo sai sem sequencia. Repetir e' seguro: cliques
- * e conversoes casam por protocolo, e a planilha de leads, por telefone.
+ * e conversoes casam por protocolo, e a planilha de leads, por telefone e volta
+ * (`leads.volta`: a linha da volta n e' a do telefone com " #n" no NOME).
  */
 export async function espelharNaPlanilha(
   env: Env,
