@@ -399,3 +399,69 @@ describe('recuperarRespostasAnteriores no card de uma volta', () => {
     expect(await recuperarRespostasAnteriores(env, 1, 2, 1500, 76)).toMatch(/Agendamento Realizado/);
   });
 });
+
+describe('recuperarRespostasAnteriores e a mensagem automatica', () => {
+  /**
+   * Locadora, 23/11/2026: a saudacao do WhatsApp Business sai 1 s depois do
+   * lead, com o card ainda no Organico. Quando o card entrava no funil, a
+   * releitura do historico contava a saudacao como primeira resposta do
+   * comercial e mandava o card para Qualificando sem ninguem ter atendido
+   * (18 de 40 cards em quatro semanas). A regra da mensagem automatica so'
+   * valia para a mensagem que chegava com o card ja' no funil.
+   */
+  const seg = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+  const m = (id: number, iso: string, tipo: number, content: string) =>
+    ({ id, message_type: tipo, private: false, content, created_at: seg(iso) });
+  const LEAD = m(1, '2026-11-23T21:51:03Z', 0, 'Olá! Vim pela página e gostaria de um orçamento.');
+  const SAUDACAO = m(2, '2026-11-23T21:51:04Z', 1, 'Olá! Seja muito bem-vindo(a) à Locadora 🤝\nConta pra gente como podemos ajudar!');
+
+  function funil(mensagens: ReturnType<typeof m>[], o: { trecho?: boolean; botao?: boolean } = {}) {
+    const c = cenario();
+    if (o.trecho) c.exec(`INSERT INTO respostas_automaticas (tenant_id, frase) VALUES (1, 'Seja muito bem-vindo(a) à Locadora')`);
+    if (o.botao) c.exec(`UPDATE tenant_config SET tem_mensagem_automatica = 1 WHERE tenant_id = 1`);
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const metodo = init.method ?? 'GET';
+      chamadas.push({ metodo, url: String(url), corpo: init.body ? JSON.parse(String(init.body)) : null });
+      if (/\/kanban\/tasks\/1421$/.test(String(url))) return Response.json({ id: 1421, board_step_id: 27 });
+      if (/\/conversations\/76\/messages/.test(String(url))) {
+        return Response.json({ payload: String(url).includes('before=') ? [] : mensagens });
+      }
+      return Response.json({ ok: true });
+    });
+    return c;
+  }
+
+  test('saudacao cadastrada como automatica nao qualifica o card que entra no funil', async () => {
+    const { env } = funil([LEAD, SAUDACAO], { trecho: true });
+    expect(await recuperarRespostasAnteriores(env, 1, 2, 1421, 76)).toBeNull();
+    expect(moveu()).toBeUndefined();
+  });
+
+  test('depois da saudacao, a resposta da atendente e que qualifica', async () => {
+    const atendente = m(3, '2026-11-23T21:58:00Z', 1, 'Boa tarde, aqui é a Ana, tudo bem?');
+    const { env, consultar } = funil([LEAD, SAUDACAO, atendente], { trecho: true });
+
+    expect(await recuperarRespostasAnteriores(env, 1, 2, 1421, 76)).toMatch(/Qualificando/);
+
+    expect(moveu()!.corpo).toEqual({ board_step_id: 28 });
+    const reg = consultar(`SELECT trecho FROM card_moves WHERE task_id = 1421`)[0] as { trecho: string };
+    expect(reg.trecho).toBe('Boa tarde, aqui é a Ana, tudo bem?');
+  });
+
+  test('botao ligado: mensagem que sai colada no lead e da maquina, mesmo sem trecho cadastrado', async () => {
+    const { env } = funil([LEAD, SAUDACAO], { botao: true });
+    expect(await recuperarRespostasAnteriores(env, 1, 2, 1421, 76)).toBeNull();
+    expect(moveu()).toBeUndefined();
+  });
+
+  test('botao ligado: a frase-gatilho move mesmo colada no lead', async () => {
+    const gatilho = m(2, '2026-11-23T21:51:05Z', 1, 'Sua consulta ficou confirmada para terça às 14h.');
+    const { env } = funil([LEAD, gatilho], { botao: true });
+    expect(await recuperarRespostasAnteriores(env, 1, 2, 1421, 76)).toMatch(/Agendamento Realizado/);
+  });
+
+  test('sem botao e sem trecho, a resposta rapida continua qualificando', async () => {
+    const { env } = funil([LEAD, SAUDACAO]);
+    expect(await recuperarRespostasAnteriores(env, 1, 2, 1421, 76)).toMatch(/Qualificando/);
+  });
+});

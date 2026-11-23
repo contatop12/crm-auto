@@ -643,7 +643,28 @@ export class ChatwootClient {
    * antigo, para de paginar quando a pagina inteira e' mais velha que `desde`.
    */
   async textosDoVendedor(acc: number, conversaId: number, tetoPaginas = 10, desde?: number): Promise<string[]> {
-    type Msg = { id: number; message_type: number; private?: boolean; content?: string | null; created_at: number };
+    return (await this.historicoDaConversa(acc, conversaId, tetoPaginas, desde))
+      .filter((m) => desde === undefined || m.created_at * 1000 >= desde)
+      .filter((m) => m.message_type === 1 && !m.private && typeof m.content === 'string' && m.content.trim())
+      .map((m) => (m.content as string).trim());
+  }
+
+  /**
+   * As mensagens da conversa (do lead, enviadas, atividade), da mais antiga
+   * para a mais nova, com a hora de cada uma.
+   *
+   * Mesma paginacao de `textosDoVendedor`, sem recortar: quem decide se uma
+   * mensagem enviada e' da maquina precisa da mensagem do lead que veio antes.
+   * Com `desde`, a lista pode trazer mensagens mais velhas que ele (as da
+   * pagina em que a busca parou); quem chama filtra.
+   */
+  async historicoDaConversa(
+    acc: number,
+    conversaId: number,
+    tetoPaginas = 10,
+    desde?: number,
+  ): Promise<Array<MensagemCw & { content?: string | null }>> {
+    type Msg = MensagemCw & { content?: string | null };
     const todas: Msg[] = [];
     let antes: number | null = null;
     for (let i = 0; i < tetoPaginas; i++) {
@@ -657,11 +678,7 @@ export class ChatwootClient {
       if (desde !== undefined && lote.every((m) => m.created_at * 1000 < desde)) break;
       antes = Math.min(...lote.map((m) => m.id));
     }
-    return todas
-      .filter((m) => desde === undefined || m.created_at * 1000 >= desde)
-      .filter((m) => m.message_type === 1 && !m.private && typeof m.content === 'string' && m.content.trim())
-      .sort((a, b) => a.created_at - b.created_at || a.id - b.id)
-      .map((m) => (m.content as string).trim());
+    return todas.sort((a, b) => a.created_at - b.created_at || a.id - b.id);
   }
 
 }

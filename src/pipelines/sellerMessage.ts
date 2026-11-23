@@ -385,13 +385,42 @@ export async function recuperarRespostasAnteriores(
   // created_at do D1 e' UTC sem T nem Z; sem isso o Date le' como hora local
   const desde = volta ? Date.parse(`${volta.created_at.replace(' ', 'T')}Z`) : undefined;
 
+  const corte = Number.isFinite(desde) ? desde : undefined;
   // o card de agora, nao o do webhook: outra regra pode te-lo movido no meio
-  const [card, stages, triggers, textos] = await Promise.all([
+  const [card, stages, triggers, historico, automaticas, cfg] = await Promise.all([
     cw.tarefa(acc, taskId),
     etapas(env, tenantId),
     frases(env, tenantId),
-    cw.textosDoVendedor(acc, conversaId, undefined, Number.isFinite(desde) ? desde : undefined),
+    cw.historicoDaConversa(acc, conversaId, undefined, corte),
+    respostasAutomaticas(env, tenantId),
+    env.DB.prepare('SELECT tem_mensagem_automatica FROM tenant_config WHERE tenant_id = ?')
+      .bind(tenantId)
+      .first<{ tem_mensagem_automatica: number | null }>(),
   ]);
+
+  /**
+   * A mensagem da maquina nao e' resposta do atendente aqui tambem.
+   *
+   * A saudacao sai 1 s depois do lead, com o card ainda no Organico: a regra da
+   * mensagem ao vivo (`moverPelaResposta`) nem chega a ve-la. Sem os mesmos dois
+   * filtros nesta releitura, todo card entrava no funil e ia direto para
+   * "Qualificando" pela saudacao (Locadora, 18 de 40 cards em quatro semanas).
+   *
+   * Trecho cadastrado sai sempre. Com o botao ligado, sai tambem a que foi
+   * enviada colada no lead — menos a frase-gatilho, que e' escolha da equipe e
+   * move sempre, como ao vivo.
+   */
+  const textos = historico
+    .filter((m) => corte === undefined || m.created_at * 1000 >= corte)
+    .filter((m) => m.message_type === 1 && !m.private && typeof m.content === 'string' && m.content.trim())
+    .filter((m) => {
+      const texto = (m.content as string).trim();
+      if (casarRespostaAutomatica(texto, automaticas)) return false;
+      if (!cfg?.tem_mensagem_automatica) return true;
+      if (segundosDaAutomatica(m, historico) === null) return true;
+      return !!matchStage(texto, stages, triggers)?.byKeyword;
+    })
+    .map((m) => (m.content as string).trim());
   if (!card || !stages.length || !textos.length) return null;
 
   const atual = stages.find((s) => s.cwStepId === num(card.board_step_id));
