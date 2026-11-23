@@ -65,6 +65,13 @@ Não liga, e registra o motivo no evento `clique_pelo_horario` (tela de Eventos)
   há o que ligar.
 - Retentativa da fila retoma com o mesmo clique (`conversations` com protocolo e
   sem origem), porque a atribuição grava o telefone no lead antes de terminar.
+- A saudação sai em rajada e pode agendar duas conferências da mesma conversa.
+  Quem impede a atribuição em dobro é uma reserva atômica em `conversations`
+  (a linha com o protocolo, antes de atribuir); se a atribuição recusa, a
+  reserva é desfeita. Linha pendente vista na primeira entrega é de outra
+  execução e não é retomada. Achados da revisão de 23/11/2026.
+- Risco aceito pelo usuário: o clique único do horário pode ser de outra pessoa
+  (quem clicou e não escreveu). A conversão vai para o Google com esse clique.
 - Fora do escopo: conversa antiga reaberta, e o motivo de a Evolution perder a
   mensagem.
 

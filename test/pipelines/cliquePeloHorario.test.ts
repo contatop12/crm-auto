@@ -139,6 +139,22 @@ describe('agendarCliquePeloHorario', () => {
     expect(fila).toHaveLength(0);
   });
 
+  test('falha ao agendar nao queima a vez: a proxima resposta automatica agenda', async () => {
+    const c = cenario();
+    const fila = c.env.QUEUE;
+    let falhas = 1;
+    (c.env as unknown as { QUEUE: unknown }).QUEUE = {
+      send: async (corpo: QueueMessage, opcoes?: { delaySeconds?: number }) => {
+        if (falhas-- > 0) throw new Error('fila fora do ar');
+        return fila.send(corpo, opcoes);
+      },
+    };
+
+    expect(await agendarCliquePeloHorario(c.env, 1, enviada())).toBe(false);
+    expect(await agendarCliquePeloHorario(c.env, 1, enviada())).toBe(true);
+    expect(c.fila).toHaveLength(1);
+  });
+
   test('cliente sem resposta automatica cadastrada: a rede fica desligada', async () => {
     const { env, exec, fila } = cenario();
     exec(`DELETE FROM respostas_automaticas`);
@@ -290,11 +306,53 @@ describe('ligarCliquePeloHorario', () => {
     exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, phone_key) VALUES (1, ${CONVERSA}, '${PROTOCOLO}', '1188887777')`);
     const cw = chatwoot({ criada, mensagens: [msg(10, 1, SAUDACAO)], atributos: { protocolo: PROTOCOLO } });
 
-    const r = await ligarCliquePeloHorario(env, 1, job);
+    const r = await ligarCliquePeloHorario(env, 1, job, { tentativa: 2 });
 
     expect(r.status).toBe('ok');
     expect((cw.escritas(/custom_attributes/)[0]!.corpo!.custom_attributes as Record<string, string>).protocolo).toBe(PROTOCOLO);
     expect((consultar(`SELECT origem FROM conversations WHERE cw_conversation_id = ${CONVERSA}`)[0] as { origem: string }).origem).toBe('anuncio');
+  });
+
+  test('duas conferencias da mesma conversa ao mesmo tempo: so uma atribui', async () => {
+    // A saudacao sai em duas mensagens seguidas e as duas podem agendar (a
+    // trava do agendamento nao e' atomica). Sem uma trava no banco, as duas
+    // conferencias atribuiam o mesmo clique e deixavam duas notas.
+    const { env, exec } = cenario();
+    const criada = criadaHa(80);
+    clique(exec, PROTOCOLO, d1(criada, -12));
+    const cw = chatwoot({ criada, mensagens: [msg(10, 1, SAUDACAO)] });
+
+    const [a, b] = await Promise.all([ligarCliquePeloHorario(env, 1, job), ligarCliquePeloHorario(env, 1, job)]);
+
+    expect([a.status, b.status].sort()).toEqual(['ignorado', 'ok']);
+    expect(cw.escritas(/\/conversations\/1724\/messages$/)).toHaveLength(1);
+  });
+
+  test('atribuicao em andamento vista na primeira entrega e de outra execucao: nao mexe', async () => {
+    const { env, exec } = cenario();
+    const criada = criadaHa(80);
+    clique(exec, PROTOCOLO, d1(criada, -12), { phone_key: '1188887777' });
+    exec(`INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, phone_key) VALUES (1, ${CONVERSA}, '${PROTOCOLO}', '1188887777')`);
+    const cw = chatwoot({ criada, mensagens: [msg(10, 1, SAUDACAO)] });
+
+    const r = await ligarCliquePeloHorario(env, 1, job);
+
+    expect(r.status).toBe('ignorado');
+    expect(cw.escritas(/./)).toHaveLength(0);
+  });
+
+  test('numero da propria empresa: nao liga e nao deixa a conversa presa ao clique', async () => {
+    const { env, exec, consultar } = cenario();
+    exec(`UPDATE tenant_config SET numeros_proprios = '["5511988887777"]' WHERE tenant_id = 1`);
+    const criada = criadaHa(80);
+    clique(exec, PROTOCOLO, d1(criada, -12));
+    const cw = chatwoot({ criada, mensagens: [msg(10, 1, SAUDACAO)] });
+
+    const r = await ligarCliquePeloHorario(env, 1, job);
+
+    expect(r.status).toBe('ignorado');
+    expect(consultar(`SELECT 1 FROM conversations WHERE cw_conversation_id = ${CONVERSA}`)).toHaveLength(0);
+    expect(cw.escritas(/./)).toHaveLength(0);
   });
 
   test('atribuicao normal que ficou pela metade nao e retomada como se fosse pelo horario', async () => {

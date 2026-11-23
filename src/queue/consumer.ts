@@ -84,7 +84,7 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
         case EVENTO_CLIQUE_PELO_HORARIO:
           // agendado acima: liga a conversa que abriu so' com a resposta
           // automatica ao unico clique sem telefone do horario
-          return ligarCliquePeloHorario(env, msg.tenantId, payload);
+          return ligarCliquePeloHorario(env, msg.tenantId, payload, { tentativa });
         case EVENTO_CONVERSA_DO_FORMULARIO:
           // agendado pelo clique de formulario/quiz: acha a conversa do lead e
           // entrega o link a Pulseboard

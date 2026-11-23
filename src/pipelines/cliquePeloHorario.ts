@@ -62,7 +62,6 @@ export async function agendarCliquePeloHorario(env: Env, tenantId: number, paylo
 
     const chave = `${EVENTO_CLIQUE_PELO_HORARIO}:${tenantId}:${conversa}`;
     if (await env.CACHE.get(chave).catch(() => null)) return false;
-    await env.CACHE.put(chave, '1', { expirationTtl: TTL_AGENDADO_S }).catch(() => undefined);
 
     // Evento proprio: a tela de Eventos mostra o que a conferencia decidiu, e o
     // reprocessamento do painel serve para ela tambem.
@@ -77,6 +76,10 @@ export async function agendarCliquePeloHorario(env: Env, tenantId: number, paylo
       { eventId, tenantId, source: 'chatwoot', eventType: EVENTO_CLIQUE_PELO_HORARIO },
       { delaySeconds: ESPERA_S },
     );
+    // So' agora: marcar antes queimaria a vez se o banco ou a fila falhassem, e
+    // a proxima resposta automatica da rajada nao agendaria. A trava e' so'
+    // economia; quem impede a atribuicao em dobro e' a reserva em `conversations`.
+    await env.CACHE.put(chave, '1', { expirationTtl: TTL_AGENDADO_S }).catch(() => undefined);
     return true;
   } catch (e) {
     console.log(JSON.stringify({ acao: 'agendar_clique_pelo_horario_falhou', erro: (e as Error).message }));
@@ -85,7 +88,12 @@ export async function agendarCliquePeloHorario(env: Env, tenantId: number, paylo
 }
 
 /** A conferencia agendada. */
-export async function ligarCliquePeloHorario(env: Env, tenantId: number, payload: string): Promise<Resultado> {
+export async function ligarCliquePeloHorario(
+  env: Env,
+  tenantId: number,
+  payload: string,
+  opcoes: { tentativa?: number } = {},
+): Promise<Resultado> {
   let conversa: number | null = null;
   try {
     conversa = num(obj(JSON.parse(payload))?.conversa);
@@ -104,18 +112,25 @@ export async function ligarCliquePeloHorario(env: Env, tenantId: number, payload
   if (!conv) return { status: 'ignorado', motivo: `conversa ${conversa} nao existe mais` };
   const attrs = obj(conv.custom_attributes) ?? {};
 
-  // Atribuicao que comecou e nao terminou (a fila devolveu depois de uma
-  // falha): `conversations` ja' tem o protocolo, mas sem a origem, que e' a
-  // ultima coisa gravada. O lead ja' ganhou o telefone, entao a procura de
-  // baixo nao o acharia mais: retoma com o mesmo clique.
-  const emAndamento = await env.DB.prepare(
-    'SELECT protocol FROM conversations WHERE tenant_id = ? AND cw_conversation_id = ? AND origem IS NULL',
+  // Atribuicao que comecou e nao terminou: `conversations` ja' tem o
+  // protocolo, mas sem a origem, que e' a ultima coisa gravada.
+  // - Na volta da fila e' a desta conferencia, que falhou no meio. O lead ja'
+  //   ganhou o telefone, entao a procura de baixo nao o acharia mais: retoma
+  //   com o mesmo clique.
+  // - Na primeira entrega e' de outra execucao (a atribuicao comum, ou a
+  //   conferencia gemea da mesma rajada): nao e' desta.
+  const linha = await env.DB.prepare(
+    'SELECT protocol, origem FROM conversations WHERE tenant_id = ? AND cw_conversation_id = ?',
   )
     .bind(tenantId, conversa)
-    .first<{ protocol: string | null }>();
+    .first<{ protocol: string | null; origem: string | null }>();
+  const pendente = linha && !linha.origem ? str(linha.protocol) : null;
+  if (pendente && (opcoes.tentativa ?? 1) < 2) {
+    return { status: 'ignorado', motivo: `conversa ${conversa}: atribuicao a ${pendente} ja em andamento` };
+  }
 
-  let protocolo = str(emAndamento?.protocol);
-  if (!protocolo && str(attrs.protocolo)) {
+  let protocolo = pendente;
+  if (!protocolo && (str(attrs.protocolo) || str(linha?.protocol))) {
     return { status: 'ignorado', motivo: `conversa ${conversa} ja tem protocolo` };
   }
 
@@ -162,6 +177,22 @@ export async function ligarCliquePeloHorario(env: Env, tenantId: number, payload
       return { status: 'ignorado', motivo: `conversa ${conversa} abriu so com a resposta automatica, mas ${escolha.motivo}` };
     }
     protocolo = escolha.protocolo;
+
+    // Reserva: a saudacao sai em rajada e duas conferencias da mesma conversa
+    // podem chegar aqui juntas. O banco decide qual segue; a outra para sem
+    // atribuir em dobro nem deixar duas notas.
+    const reserva = await env.DB.prepare(
+      `INSERT INTO conversations (tenant_id, cw_conversation_id, protocol, phone_key, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT (tenant_id, cw_conversation_id) DO UPDATE SET
+         protocol = excluded.protocol, phone_key = excluded.phone_key, updated_at = datetime('now')
+       WHERE conversations.protocol IS NULL`,
+    )
+      .bind(tenantId, conversa, protocolo, chave || null)
+      .run();
+    if (!reserva.meta.changes) {
+      return { status: 'ignorado', motivo: `conversa ${conversa}: outra atribuicao ja em andamento` };
+    }
   }
 
   // O retrato de agora, nao o do webhook da saudacao: o card nasce depois da
@@ -180,7 +211,17 @@ export async function ligarCliquePeloHorario(env: Env, tenantId: number, payload
     }),
     { protocolo },
   );
-  if (r.status !== 'ok') return r;
+  if (r.status !== 'ok') {
+    // Recusada (numero da propria empresa, por exemplo): a reserva nao pode
+    // ficar, senao a conversa aparece ligada a um clique que ninguem atribuiu.
+    await env.DB.prepare(
+      'DELETE FROM conversations WHERE tenant_id = ? AND cw_conversation_id = ? AND protocol = ? AND origem IS NULL',
+    )
+      .bind(tenantId, conversa, protocolo)
+      .run()
+      .catch(() => undefined);
+    return r;
+  }
 
   // Quem abrir a conversa precisa saber que a ligacao e' inferida e que a
   // mensagem do lead so' existe no celular. Falhar aqui nao desfaz a atribuicao.
