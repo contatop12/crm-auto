@@ -14,6 +14,11 @@ import { atribuirEmRodizio } from '../pipelines/rodizio';
 import { alertarContatoDuplicado } from '../pipelines/contatoDuplicado';
 import { abrirRetorno } from '../pipelines/retorno';
 import {
+  agendarCliquePeloHorario,
+  ligarCliquePeloHorario,
+  EVENTO_CLIQUE_PELO_HORARIO,
+} from '../pipelines/cliquePeloHorario';
+import {
   agendarLinkDaConversa,
   entregarLinkDaConversa,
   EVENTO_CONVERSA_DO_FORMULARIO,
@@ -69,7 +74,17 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
       if (tentativa === 1 && msg.eventType === 'message_incoming') {
         await atribuirEmRodizio(env, msg.tenantId, payload);
       }
+      // Resposta automatica do cliente abrindo uma conversa nova: a primeira
+      // mensagem do lead pode ter se perdido, e com ela o protocolo. Agenda a
+      // conferencia pelo horario do clique. Engole o proprio erro.
+      if (tentativa === 1 && msg.eventType === 'message_outgoing') {
+        await agendarCliquePeloHorario(env, msg.tenantId, payload);
+      }
       switch (msg.eventType) {
+        case EVENTO_CLIQUE_PELO_HORARIO:
+          // agendado acima: liga a conversa que abriu so' com a resposta
+          // automatica ao unico clique sem telefone do horario
+          return ligarCliquePeloHorario(env, msg.tenantId, payload);
         case EVENTO_CONVERSA_DO_FORMULARIO:
           // agendado pelo clique de formulario/quiz: acha a conversa do lead e
           // entrega o link a Pulseboard

@@ -594,6 +594,44 @@ export class ChatwootClient {
   }
 
   /**
+   * A conversa desde a primeira mensagem, em ordem de id.
+   *
+   * A rota devolve as 20 mais novas; `before` anda para tras. Para quando a
+   * pagina vem incompleta (chegou no comeco) ou no teto: conversa maior que
+   * isso volta sem o comeco, e quem chama precisa da primeira mensagem — por
+   * isso `completo` diz se ela esta' na lista.
+   */
+  async mensagensDesdeOInicio(
+    acc: number,
+    conversaId: number,
+    tetoPaginas = 5,
+  ): Promise<{ mensagens: Array<MensagemCw & { content?: string | null }>; completo: boolean }> {
+    type Msg = MensagemCw & { content?: string | null };
+    const todas: Msg[] = [];
+    let antes: number | null = null;
+    for (let i = 0; i < tetoPaginas; i++) {
+      const r: { payload?: Msg[] } = await this.req(
+        'GET',
+        `/api/v1/accounts/${acc}/conversations/${conversaId}/messages` + (antes ? `?before=${antes}` : ''),
+      );
+      const lote = r.payload ?? [];
+      todas.push(...lote);
+      if (lote.length < 20) return { mensagens: todas.sort((a, b) => a.id - b.id), completo: true };
+      antes = Math.min(...lote.map((m) => m.id));
+    }
+    return { mensagens: todas.sort((a, b) => a.id - b.id), completo: false };
+  }
+
+  /** Nota interna na conversa: so' a equipe ve, nao vai para o WhatsApp. */
+  async notaInterna(acc: number, conversaId: number, texto: string): Promise<void> {
+    await this.req('POST', `/api/v1/accounts/${acc}/conversations/${conversaId}/messages`, {
+      content: texto,
+      message_type: 'outgoing',
+      private: true,
+    });
+  }
+
+  /**
    * Textos que o vendedor mandou na conversa, do mais antigo ao mais novo.
    *
    * A rota devolve as 20 ultimas; `before` pagina para tras. Nota interna
