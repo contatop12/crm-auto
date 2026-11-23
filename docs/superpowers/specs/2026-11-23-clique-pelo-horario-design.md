@@ -11,7 +11,7 @@ viu o protocolo e um lead do Google Ads ficou dois dias no Orgânico, sem aviso
 no grupo, sem linha na planilha e sem conversão. O clique estava gravado 12 s
 antes de a conversa nascer, sem telefone.
 
-Medido na Locadora, de 07 a 23/11/2026: 4 de 275 conversas novas nasceram assim.
+Medido na Locadora, de 07 a 23/11/2026: 1 de 275 conversas novas nasceu assim.
 
 ## O que a rede faz
 
@@ -57,9 +57,16 @@ Não liga, e registra o motivo no evento `clique_pelo_horario` (tela de Eventos)
 ## Decisões
 
 - Vale para o cliente que tem resposta automática cadastrada (aba Funil >
-  Mensagens automáticas). Hoje só a Locadora. A saudação do 8844 ("A Locadora
-  Exatidão agradece…") não está cadastrada: enquanto não estiver, a rede não
-  cobre esse número.
+  Mensagens automáticas). Hoje só a Locadora, nos números que têm
+  saudação automática do WhatsApp Business: 2244 e 8844 (o mesmo texto, já
+  cadastrado). O 8910 não tem resposta automática, então a rede não o cobre.
+- Só entra como trecho o que o WhatsApp manda SOZINHO em resposta ao lead
+  (boas-vindas, fora do horário). Mensagem que a equipe dispara por conta
+  própria não prova que o lead escreveu. Corrigido em 23/11/2026: o texto "A
+  Locadora Exatidão agradece por ter escolhido nossos serviços…" do 8844 é
+  pedido de avaliação no Google, mandado pela atendente depois do serviço; as
+  três conversas que abriram com ele (16/11) não perderam mensagem nenhuma, e
+  ele NÃO deve ser cadastrado.
 - Candidato é só `evento = 'whatsapp_click'` sem telefone. Lead da extensão de
   mensagem do Google não tem clique: se a primeira mensagem dele se perde, não
   há o que ligar.

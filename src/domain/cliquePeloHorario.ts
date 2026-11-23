@@ -6,7 +6,7 @@ import { casarRespostaAutomatica } from './respostasAutomaticas';
  * O protocolo vem na primeira mensagem do lead. Quando a integracao do
  * WhatsApp nao a entrega, a conversa nasce so' com a resposta automatica do
  * cliente, o CRM nunca ve o protocolo e o lead pago fica no Organico (conversa
- * 1724 da Locadora, 21/11/2026; 4 em 275 conversas novas em 17 dias).
+ * 1724 da Locadora, 21/11/2026; 1 em 275 conversas novas em 17 dias).
  *
  * A resposta automatica do WhatsApp Business so' sai porque o lead escreveu:
  * ela abrir a conversa prova que houve uma mensagem que se perdeu. Medido na
