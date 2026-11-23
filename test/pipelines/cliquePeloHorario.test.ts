@@ -128,7 +128,7 @@ describe('agendarCliquePeloHorario', () => {
   });
 
   test.each([
-    ['mensagem de atendente', enviada({ content: 'Bom dia, tudo bem? Aqui é a Vania da Locadora' })],
+    ['mensagem de atendente', enviada({ content: 'Bom dia, tudo bem? Aqui é a Ana da Locadora' })],
     ['conversa que ja tem protocolo', enviada({}, { custom_attributes: { protocolo: 'EXATID-JAATRIBUIDA01' } })],
     ['conversa antiga', enviada({}, { created_at: criadaHa(3600) })],
     ['nota interna', enviada({ private: true })],

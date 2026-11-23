@@ -30,7 +30,7 @@ describe('abriuSoComAutomatica', () => {
   });
 
   test('atendente abriu a conversa: a primeira mensagem nao e automatica', () => {
-    expect(abriuSoComAutomatica([msg(1, 1, 'Bom dia, tudo bem? Aqui é a Vania da Locadora')], FRASES)).toBe(false);
+    expect(abriuSoComAutomatica([msg(1, 1, 'Bom dia, tudo bem? Aqui é a Ana da Locadora')], FRASES)).toBe(false);
   });
 
   test('mensagem do lead que chega DEPOIS da saudacao nao desfaz: a primeira dele continua perdida', () => {
@@ -38,7 +38,7 @@ describe('abriuSoComAutomatica', () => {
   });
 
   test('atividade do sistema e nota interna nao contam como primeira mensagem', () => {
-    const lista = [msg(1, 2, 'Atribuído a Vania'), msg(2, 1, 'bilhete', { private: true }), msg(3, 1, SAUDACAO)];
+    const lista = [msg(1, 2, 'Atribuído a Ana'), msg(2, 1, 'bilhete', { private: true }), msg(3, 1, SAUDACAO)];
     expect(abriuSoComAutomatica(lista, FRASES)).toBe(true);
   });
 
