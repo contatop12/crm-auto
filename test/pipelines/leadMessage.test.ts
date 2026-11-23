@@ -97,6 +97,32 @@ function corpoDe<T = Record<string, unknown>>(re: RegExp): T {
 }
 
 describe('atribuirLead', () => {
+  test('protocolo informado por fora vale mesmo sem protocolo no texto', async () => {
+    // rede de seguranca: a mensagem do lead nao chegou, e quem acha o clique e'
+    // a conferencia pelo horario (`cliquePeloHorario`). So' ha' a resposta
+    // automatica do cliente na conversa, e o clique nao tem telefone: sem o
+    // protocolo informado, nada liga esta conversa a ele.
+    const { env, exec, consultar } = cenario();
+    exec(`INSERT INTO leads (tenant_id, protocol, gclid, utm_source, utm_medium, origem, evento)
+          VALUES (1, 'VITA-SEMTELEFONE01', 'Cj0xyz', 'google', 'cpc', 'clique', 'whatsapp_click')`);
+    const saudacao = webhook(
+      { message_type: 'outgoing', content: 'Olá! Seja muito bem-vindo(a)' },
+      { meta: { sender: { name: '5511988887777', phone_number: '+5511988887777' } } },
+    );
+
+    const r = await atribuirLead(env, 1, saudacao, { protocolo: 'VITA-SEMTELEFONE01' });
+
+    expect(r.status).toBe('ok');
+    const attrs = corpoDe<{ custom_attributes: Record<string, string> }>(/custom_attributes/).custom_attributes;
+    expect(attrs.protocolo).toBe('VITA-SEMTELEFONE01');
+    expect(attrs.funil).toBe('PROMOVER');
+    const conv = consultar(`SELECT protocol, origem FROM conversations WHERE cw_conversation_id = 76`)[0] as { protocol: string; origem: string };
+    expect(conv).toEqual({ protocol: 'VITA-SEMTELEFONE01', origem: 'anuncio' });
+    // o telefone da conversa passa a ser o do lead
+    const lead = consultar(`SELECT phone_key FROM leads WHERE protocol = 'VITA-SEMTELEFONE01'`)[0] as { phone_key: string };
+    expect(lead.phone_key).toBe('1188887777');
+  });
+
   test('le o protocolo da mensagem e grava a atribuicao na conversa', async () => {
     const { env } = cenario();
     const r = await atribuirLead(env, 1, webhook());

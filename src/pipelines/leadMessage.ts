@@ -115,7 +115,16 @@ export async function atribuirLead(
   env: Env,
   tenantId: number,
   payload: string,
-  opts: { tentativa?: number; retorno?: ModoRetorno } = {},
+  opts: {
+    tentativa?: number;
+    retorno?: ModoRetorno;
+    /**
+     * Protocolo achado fora da mensagem. A mensagem do lead nao chegou e a
+     * conferencia pelo horario (`cliquePeloHorario`) apontou o clique: vale como
+     * se o lead o tivesse dito.
+     */
+    protocolo?: string;
+  } = {},
 ): Promise<Resultado> {
   const retorno = opts.retorno;
   let p: Record<string, unknown>;
@@ -167,7 +176,7 @@ export async function atribuirLead(
   // o cartao no texto (quando o Chatwoot recebe) ou o clique (`ctwa_clid`) que
   // a Evolution entregou para este telefone, quando o webhook da instancia
   // aponta para o CRM.
-  const protocoloDito = findProtocol(texto);
+  const protocoloDito = opts.protocolo || findProtocol(texto);
   const clid = protocoloDito ? null : await clidRecente(env.DB, tenantId, chave || null);
   const anuncio = !protocoloDito && cfg.rastrear_meta_mensagem === 1 ? anuncioDoMeta(texto) : null;
   const primeiraTentativa = (opts.tentativa ?? 1) < 2;
