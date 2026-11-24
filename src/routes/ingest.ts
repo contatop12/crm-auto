@@ -4,6 +4,7 @@ import { verifySignature } from '../domain/signature';
 import { registrarEvento, tenantPorSlug } from '../db/queries';
 import { lerCartaoDaEvolution } from '../domain/referralEvolution';
 import { phoneKey, normFone } from '../domain/phone';
+import { EVENTO_GOOGLE_LEAD_FORM } from '../pipelines/googleLead';
 
 /**
  * Rotas de ingestao.
@@ -157,6 +158,45 @@ ingest.post('/:slug/meta-lead', async (c) => {
 
   const body = await c.req.text();
   await aceitar(c.env, tenant.id, 'meta', 'meta_lead_form', body, null);
+  return c.json({ ok: true });
+});
+
+/**
+ * Formulario nativo do Google Ads (formulario de lead do anuncio).
+ *
+ * A automacao que recebe o webhook do Google (Make, n8n) repassa o corpo para
+ * ca', cru ou achatado. Usa a mesma chave do formulario do Meta (canal `meta`):
+ * as duas sao a chave que fica na automacao de formularios nativos, e o banco
+ * so' aceita os canais que ja' existem.
+ *
+ * O evento entra como origem `meta` pelo mesmo motivo (a coluna `source` tem
+ * lista fechada, e mudar exige reconstruir `events`, a maior tabela); o que o
+ * separa e' o tipo, `google_lead_form`.
+ *
+ * A chave que o Google manda no corpo (`google_key`) e' segredo do formulario
+ * e nao e' guardada.
+ */
+ingest.post('/:slug/google-lead', async (c) => {
+  const tenant = await tenantPorSlug(c.env.DB, c.req.param('slug'));
+  if (!tenant) return c.json({ ok: false, error: 'tenant desconhecido' }, 404);
+
+  const chave = c.req.query('k') ?? c.req.header('X-Ingest-Key') ?? null;
+  if (!(await chaveDoCanal(c.env.DB, tenant.id, 'meta', tenant.ingestKey, chave))) {
+    return c.json({ ok: false, error: 'chave invalida' }, 401);
+  }
+
+  let body = await c.req.text();
+  try {
+    const corpo = JSON.parse(body) as Record<string, unknown>;
+    if (corpo && typeof corpo === 'object' && 'google_key' in corpo) {
+      delete corpo.google_key;
+      body = JSON.stringify(corpo);
+    }
+  } catch {
+    /* corpo ilegivel vai para o log como veio; o pipeline registra o motivo */
+  }
+
+  await aceitar(c.env, tenant.id, 'meta', EVENTO_GOOGLE_LEAD_FORM, body, null);
   return c.json({ ok: true });
 });
 

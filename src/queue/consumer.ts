@@ -2,6 +2,7 @@ import type { Env, QueueMessage } from '../env';
 import { eventoPorId, marcarEvento } from '../db/queries';
 import { avisarLeadNoGrupo } from '../pipelines/kanbanTask';
 import { atribuirLead } from '../pipelines/leadMessage';
+import { registrarLeadGoogle, EVENTO_GOOGLE_LEAD_FORM } from '../pipelines/googleLead';
 import { registrarClique } from '../pipelines/click';
 import { moverPelaResposta } from '../pipelines/sellerMessage';
 import { enviarConversao } from '../pipelines/stageChanged';
@@ -123,6 +124,8 @@ async function processar(msg: QueueMessage, env: Env, payload: string, tentativa
     case 'meta':
       // So' grava. O lead do formulario nao teve conversa nem card ainda; o
       // cruzamento acontece quando ele aparecer no WhatsApp.
+      // o formulario do Google entra pela mesma origem; o tipo separa
+      if (msg.eventType === EVENTO_GOOGLE_LEAD_FORM) return registrarLeadGoogle(env, msg.tenantId, payload);
       return registrarLeadMeta(env, msg.tenantId, payload);
 
     case 'kanban':
